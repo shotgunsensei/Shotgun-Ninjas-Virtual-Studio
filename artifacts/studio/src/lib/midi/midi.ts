@@ -1,0 +1,173 @@
+import { useEffect, useRef, useState } from "react";
+
+export type MidiStatus =
+  | "unsupported"
+  | "denied"
+  | "no-access-yet"
+  | "ready"
+  | "error";
+
+export interface MidiEvent {
+  type: "noteon" | "noteoff" | "cc";
+  channel: number;
+  data1: number; // note or controller number
+  data2: number; // velocity or value
+  // raw signature used for mapping
+  signature: string;
+  device: string;
+  ts: number;
+}
+
+type Listener = (e: MidiEvent) => void;
+
+class MidiBus {
+  status: MidiStatus = "no-access-yet";
+  error?: string;
+  inputs: { id: string; name: string }[] = [];
+  selectedId: string | null = null;
+  private access: MIDIAccess | null = null;
+  private listeners = new Set<Listener>();
+  private statusListeners = new Set<() => void>();
+
+  onStatus(fn: () => void) {
+    this.statusListeners.add(fn);
+    return () => {
+      this.statusListeners.delete(fn);
+    };
+  }
+  onEvent(fn: Listener) {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+
+  private notify() {
+    this.statusListeners.forEach((f) => f());
+  }
+
+  async requestAccess() {
+    if (typeof navigator === "undefined" || !("requestMIDIAccess" in navigator)) {
+      this.status = "unsupported";
+      this.notify();
+      return;
+    }
+    try {
+      const access = await navigator.requestMIDIAccess({ sysex: false });
+      this.access = access;
+      this.status = "ready";
+      this.refreshInputs();
+      access.onstatechange = () => this.refreshInputs();
+      this.notify();
+    } catch (err) {
+      this.status = "denied";
+      this.error = (err as Error).message;
+      this.notify();
+    }
+  }
+
+  private refreshInputs() {
+    if (!this.access) return;
+    const list: { id: string; name: string }[] = [];
+    this.access.inputs.forEach((inp) => {
+      list.push({ id: inp.id, name: inp.name ?? "Unknown MIDI Input" });
+    });
+    this.inputs = list;
+    // re-bind selected
+    if (this.selectedId && !list.find((i) => i.id === this.selectedId)) {
+      this.selectedId = null;
+    }
+    this.bind(this.selectedId);
+    this.notify();
+  }
+
+  selectInput(id: string | null) {
+    this.selectedId = id;
+    this.bind(id);
+    this.notify();
+  }
+
+  private bind(id: string | null) {
+    if (!this.access) return;
+    this.access.inputs.forEach((inp) => {
+      inp.onmidimessage = null;
+    });
+    if (!id) return;
+    const inp = this.access.inputs.get(id);
+    if (!inp) return;
+    inp.onmidimessage = (msg) => this.handleMessage(inp.name ?? "midi", msg);
+  }
+
+  private handleMessage(deviceName: string, msg: MIDIMessageEvent) {
+    if (!msg.data || msg.data.length < 2) return;
+    const status = msg.data[0];
+    const data1 = msg.data[1];
+    const data2 = msg.data[2] ?? 0;
+    const messageType = status & 0xf0;
+    const channel = status & 0x0f;
+    let type: MidiEvent["type"] | null = null;
+    let signature = "";
+    if (messageType === 0x90 && data2 > 0) {
+      type = "noteon";
+      signature = `note:${data1}`;
+    } else if (messageType === 0x80 || (messageType === 0x90 && data2 === 0)) {
+      type = "noteoff";
+      signature = `note:${data1}`;
+    } else if (messageType === 0xb0) {
+      type = "cc";
+      signature = `cc:${data1}`;
+    }
+    if (!type) return;
+    const ev: MidiEvent = {
+      type,
+      channel,
+      data1,
+      data2,
+      signature,
+      device: deviceName,
+      ts: performance.now(),
+    };
+    this.listeners.forEach((l) => l(ev));
+  }
+}
+
+export const midiBus = new MidiBus();
+
+/**
+ * Hook returning a snapshot of midi state and a way to subscribe to events.
+ */
+export function useMidi() {
+  const [, force] = useState(0);
+  useEffect(() => {
+    return midiBus.onStatus(() => force((n) => n + 1));
+  }, []);
+  return {
+    status: midiBus.status,
+    inputs: midiBus.inputs,
+    selectedId: midiBus.selectedId,
+    error: midiBus.error,
+    requestAccess: () => midiBus.requestAccess(),
+    selectInput: (id: string | null) => midiBus.selectInput(id),
+  };
+}
+
+/** Subscribe to midi events for a component's lifetime. */
+export function useMidiEvents(handler: (e: MidiEvent) => void, deps: unknown[] = []) {
+  const ref = useRef(handler);
+  ref.current = handler;
+  useEffect(() => {
+    const unsub = midiBus.onEvent((e) => ref.current(e));
+    return () => {
+      unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+/** Convert a MIDI note number (0-127) to a Tone.js note string. */
+export function midiNoteToName(num: number): string {
+  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const octave = Math.floor(num / 12) - 1;
+  const name = names[num % 12];
+  return `${name}${octave}`;
+}
