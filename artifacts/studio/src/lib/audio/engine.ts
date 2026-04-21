@@ -35,6 +35,7 @@ export type DrumPiece = (typeof DRUM_PIECES)[number];
 
 interface TrackVoice {
   channel: Tone.Channel;
+  meter: Tone.Meter;
   reverb: Tone.Reverb;
   delay: Tone.FeedbackDelay;
   filter: Tone.Filter;
@@ -269,6 +270,11 @@ class AudioEngine {
     return this.voices.get(trackId)?.mic;
   }
 
+  /** Returns the post-fader Tone.Meter for a track, if it exists. */
+  getTrackMeter(trackId: string): Tone.Meter | undefined {
+    return this.voices.get(trackId)?.meter;
+  }
+
   // ---- clip scheduling ----
   /** Schedule notes from a clip on Tone.Transport. Returns event ids for cleanup. */
   scheduleClip(track: Track, clip: NoteClip): number[] {
@@ -364,13 +370,17 @@ class AudioEngine {
     const reverb = new Tone.Reverb({ decay: 2.5, wet: 0 });
     const delay = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.35, wet: 0 });
     const filter = new Tone.Filter({ frequency: 18000, type: "lowpass", rolloff: -12 });
+    const meter = new Tone.Meter({ smoothing: 0.7 });
     // chain: instrument -> filter -> delay -> reverb -> channel -> master
     filter.connect(delay);
     delay.connect(reverb);
     reverb.connect(channel);
     channel.connect(this.master);
+    // post-fader meter tap
+    channel.connect(meter);
     const voice: TrackVoice = {
       channel,
+      meter,
       reverb,
       delay,
       filter,
@@ -387,6 +397,7 @@ class AudioEngine {
         filter.dispose();
         delay.dispose();
         reverb.dispose();
+        meter.dispose();
         channel.dispose();
       },
     };
