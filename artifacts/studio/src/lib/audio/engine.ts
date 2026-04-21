@@ -16,6 +16,11 @@ import type {
  * voice per track. Every UI-visible knob in the app maps to a real method here.
  */
 
+export type DrumKit = Record<
+  "kick" | "snare" | "hat" | "ohat" | "clap" | "tomLow" | "tomHigh" | "crash",
+  Tone.Synth | Tone.NoiseSynth | Tone.MembraneSynth | Tone.MetalSynth
+>;
+
 export const DRUM_PIECES = [
   "kick",
   "snare",
@@ -428,7 +433,45 @@ class AudioEngine {
 
 // ---------- preset factories ----------
 
-function buildPiano(preset: PianoPreset): Tone.PolySynth {
+export function triggerDrumPiece(
+  drums: DrumKit,
+  piece: DrumPiece,
+  velocity: number,
+  time: number,
+) {
+  const inst = drums[piece];
+  if (!inst) return;
+  try {
+    switch (piece) {
+      case "kick":
+        (inst as Tone.MembraneSynth).triggerAttackRelease("C2", "8n", time, velocity);
+        break;
+      case "snare":
+      case "clap":
+        (inst as Tone.NoiseSynth).triggerAttackRelease("16n", time, velocity);
+        break;
+      case "hat":
+        (inst as Tone.MetalSynth).triggerAttackRelease("32n", time, velocity);
+        break;
+      case "ohat":
+        (inst as Tone.MetalSynth).triggerAttackRelease("8n", time, velocity);
+        break;
+      case "tomLow":
+        (inst as Tone.MembraneSynth).triggerAttackRelease("A2", "8n", time, velocity);
+        break;
+      case "tomHigh":
+        (inst as Tone.MembraneSynth).triggerAttackRelease("D3", "8n", time, velocity);
+        break;
+      case "crash":
+        (inst as Tone.MetalSynth).triggerAttackRelease("4n", time, velocity);
+        break;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function buildPiano(preset: PianoPreset): Tone.PolySynth {
   switch (preset) {
     case "grand":
       return new Tone.PolySynth(Tone.Synth, {
@@ -455,7 +498,7 @@ function buildPiano(preset: PianoPreset): Tone.PolySynth {
   }
 }
 
-function buildGuitar(preset: GuitarPreset): Tone.PolySynth {
+export function buildGuitar(preset: GuitarPreset): Tone.PolySynth {
   switch (preset) {
     case "clean":
       return new Tone.PolySynth(Tone.Synth, {
@@ -483,7 +526,7 @@ function buildGuitar(preset: GuitarPreset): Tone.PolySynth {
   }
 }
 
-function buildBass(preset: BassPreset): Tone.PolySynth {
+export function buildBass(preset: BassPreset): Tone.PolySynth {
   switch (preset) {
     case "finger":
       return new Tone.PolySynth(Tone.Synth, {
@@ -508,9 +551,7 @@ function buildBass(preset: BassPreset): Tone.PolySynth {
   }
 }
 
-function buildDrumKit(
-  preset: DrumsPreset,
-): NonNullable<TrackVoice["drums"]> {
+export function buildDrumKit(preset: DrumsPreset): DrumKit {
   // Acoustic-ish, electronic, trap -- different envelope/noise/pitch
   const isAcoustic = preset === "acoustic";
   const isElectronic = preset === "electronic";
@@ -569,7 +610,7 @@ function buildDrumKit(
     volume: -28,
   });
 
-  return { kick, snare, clap, hat, ohat, tomLow, tomHigh, crash } as NonNullable<TrackVoice["drums"]>;
+  return { kick, snare, clap, hat, ohat, tomLow, tomHigh, crash } as DrumKit;
 }
 
 function applyVocalPreset(v: TrackVoice, preset: VocalsPreset) {

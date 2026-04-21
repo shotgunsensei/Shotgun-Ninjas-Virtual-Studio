@@ -1,10 +1,17 @@
 import { useState } from "react";
-import { Save, FolderOpen, FilePlus2, HelpCircle } from "lucide-react";
+import { Save, FolderOpen, FilePlus2, HelpCircle, Download } from "lucide-react";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { useStore, getStore, resetStore, defaultProject } from "../store";
 import { audio } from "../lib/audio/engine";
+import {
+  renderProjectToWav,
+  downloadBlob,
+  safeFilename,
+  type RenderProgress,
+} from "../lib/audio/export";
 import {
   saveProject,
   listProjects,
@@ -26,6 +33,32 @@ export function Header() {
   const [projects, setProjects] = useState<
     Array<{ id: string; name: string; updatedAt: number }>
   >([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<RenderProgress>({
+    phase: "rendering",
+    progress: 0,
+  });
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const onExport = async () => {
+    if (exporting) return;
+    audio.stop();
+    setExportError(null);
+    setExportProgress({ phase: "decoding", progress: 0 });
+    setExporting(true);
+    try {
+      const proj = getStore().state.project;
+      const blob = await renderProjectToWav(proj, (p) => setExportProgress(p));
+      downloadBlob(blob, `${safeFilename(proj.name)}.wav`);
+      getStore().setStatus("Exported WAV", "info");
+    } catch (err) {
+      const msg = (err as Error).message || "Export failed";
+      setExportError(msg);
+      getStore().setStatus(`Export failed: ${msg}`, "error");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const onNew = async () => {
     audio.stop();
@@ -106,12 +139,65 @@ export function Header() {
         <Button
           variant="outline"
           size="sm"
+          onClick={onExport}
+          disabled={exporting}
+          className="font-mono text-xs"
+        >
+          <Download className="w-3.5 h-3.5 mr-1" /> Export
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => getStore().set({ showHelp: true })}
           className="font-mono text-xs"
         >
           <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
         </Button>
       </div>
+
+      <Dialog
+        open={exporting || exportError !== null}
+        onOpenChange={(open) => {
+          if (!open && !exporting) {
+            setExportError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Export song</DialogTitle>
+            <DialogDescription>
+              {exportError
+                ? "Something went wrong while rendering."
+                : "Rendering your arrangement to a WAV file."}
+            </DialogDescription>
+          </DialogHeader>
+          {exportError ? (
+            <div className="space-y-3">
+              <p className="text-sm text-destructive font-mono break-words">
+                {exportError}
+              </p>
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setExportError(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                {exportProgress.phase === "decoding" && "Loading audio clips…"}
+                {exportProgress.phase === "rendering" && "Mixing down…"}
+                {exportProgress.phase === "encoding" && "Encoding WAV…"}
+              </div>
+              <Progress value={Math.round(exportProgress.progress * 100)} />
+              <div className="text-right text-xs font-mono text-muted-foreground">
+                {Math.round(exportProgress.progress * 100)}%
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={openLoad} onOpenChange={setOpenLoad}>
         <DialogContent className="max-w-md">
