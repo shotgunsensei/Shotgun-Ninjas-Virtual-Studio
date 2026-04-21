@@ -101,6 +101,32 @@ function TimelineRow({
           clip={c}
         />
       ))}
+      {track.kind === "vocals" &&
+        track.audioClips.length === 0 &&
+        track.noteClips.length === 0 && (
+          <VocalPlaceholder armed={track.armed} totalBeats={totalBeats} />
+        )}
+    </div>
+  );
+}
+
+function VocalPlaceholder({
+  armed,
+  totalBeats,
+}: {
+  armed: boolean;
+  totalBeats: number;
+}) {
+  return (
+    <div
+      className="absolute top-1.5 bottom-1.5 left-1 rounded-sm border border-dashed border-neon/50 bg-neon/5 flex items-center justify-center pointer-events-none"
+      style={{ width: Math.max(120, totalBeats * PX_PER_BEAT - 8) }}
+    >
+      <span className="font-mono text-[10px] text-neon/80 tracking-wide px-2">
+        {armed
+          ? "Press ● record to capture vocals here"
+          : "Arm this track (R on the channel) and record your vocals here"}
+      </span>
     </div>
   );
 }

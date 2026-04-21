@@ -7,18 +7,13 @@ import { MidiPanel } from "./components/MidiPanel";
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
 import { Keyboard } from "./components/instruments/Keyboard";
+import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
 import { VocalsPanel } from "./components/instruments/VocalsPanel";
 import { useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
-import {
-  defaultProject,
-  getStore,
-  resetStore,
-  useStore,
-  makeId,
-} from "./store";
+import { defaultProject, getStore, resetStore, useStore } from "./store";
 import { getLastProjectId, loadProject, saveProject } from "./lib/storage/db";
 import { useMidiEvents } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
@@ -178,10 +173,6 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // unique key per project so makeId import is referenced and React deps quiet
-  const _id = makeId; // keep tree-shaker happy
-  void _id;
-
   return (
     <div className="h-full flex flex-col bg-background text-foreground overflow-hidden">
       <Header />
@@ -214,9 +205,10 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
   if (!track) return null;
   switch (track.kind) {
     case "piano":
-    case "guitar":
     case "bass":
       return <Keyboard track={track} />;
+    case "guitar":
+      return <GuitarPanel track={track} />;
     case "drums":
       return <DrumPads track={track} />;
     case "vocals":
