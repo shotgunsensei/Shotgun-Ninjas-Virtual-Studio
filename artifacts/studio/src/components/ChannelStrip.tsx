@@ -60,13 +60,15 @@ export function ChannelStripsBar() {
 
 function ChannelStrip({ track, selected }: { track: Track; selected: boolean }) {
   const armOther = (armed: boolean) => {
-    // at most one armed track
+    // at most one armed track; arming also auto-selects so MIDI/keyboard
+    // performance input routes to the armed instrument
     if (armed) {
       const tracks = getStore().state.project.tracks.map((x) => ({
         ...x,
         armed: x.id === track.id,
       }));
       getStore().patchProject({ tracks });
+      getStore().set({ selectedTrackId: track.id });
     } else {
       getStore().patchTrack(track.id, { armed: false });
     }

@@ -116,7 +116,17 @@ export async function listProjects(): Promise<
 
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDb();
-  await db.delete(PROJECTS_STORE, id);
+  // also drop any vocal blobs we stored under this project's namespace so
+  // IndexedDB doesn't bloat up over time
+  const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE], "readwrite");
+  const blobKeys = (await tx.objectStore(BLOBS_STORE).getAllKeys()) as string[];
+  await Promise.all(
+    blobKeys
+      .filter((k) => typeof k === "string" && k.startsWith(`${id}:`))
+      .map((k) => tx.objectStore(BLOBS_STORE).delete(k)),
+  );
+  await tx.objectStore(PROJECTS_STORE).delete(id);
+  await tx.done;
 }
 
 export async function getLastProjectId(): Promise<string | null> {
