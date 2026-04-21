@@ -20,6 +20,7 @@ class Store {
   state: {
     project: Project;
     selectedTrackId: string;
+    selectedClipId: string | null;
     audioUnlocked: boolean;
     isRecording: boolean;
     isPlaying: boolean;
@@ -46,6 +47,7 @@ class Store {
     this.state = {
       project,
       selectedTrackId: project.tracks[0]?.id ?? "",
+      selectedClipId: null,
       audioUnlocked: false,
       isRecording: false,
       isPlaying: false,
@@ -105,10 +107,26 @@ class Store {
 
   // ---- track ops ----
   addNoteClip(trackId: string, clip: NoteClip) {
+    // Append the take alongside any existing clips so songwriters can
+    // layer multiple passes on the same track.
     const tracks = this.state.project.tracks.map((t) => {
       if (t.id !== trackId) return t;
-      // v1: replace existing clip on the same track to keep things simple
-      return { ...t, noteClips: [clip] };
+      return { ...t, noteClips: [...t.noteClips, clip] };
+    });
+    this.patchProject({ tracks });
+  }
+
+  updateNoteClip(trackId: string, clip: NoteClip) {
+    // In-place replacement of an existing clip identified by id (used for
+    // editing a clip's notes such as the drum step sequencer). Falls back
+    // to append if no clip with that id exists.
+    const tracks = this.state.project.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      const idx = t.noteClips.findIndex((c) => c.id === clip.id);
+      if (idx === -1) return { ...t, noteClips: [...t.noteClips, clip] };
+      const next = t.noteClips.slice();
+      next[idx] = clip;
+      return { ...t, noteClips: next };
     });
     this.patchProject({ tracks });
   }
@@ -116,40 +134,84 @@ class Store {
   addAudioClip(trackId: string, clip: { id: string; start: number; durationSec: number; blob: Blob }) {
     const tracks = this.state.project.tracks.map((t) => {
       if (t.id !== trackId) return t;
-      return { ...t, audioClips: [clip] };
+      return { ...t, audioClips: [...t.audioClips, clip] };
     });
     this.patchProject({ tracks });
   }
 
+  removeClip(trackId: string, clipId: string) {
+    const tracks = this.state.project.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      return {
+        ...t,
+        noteClips: t.noteClips.filter((c) => c.id !== clipId),
+        audioClips: t.audioClips.filter((c) => c.id !== clipId),
+      };
+    });
+    this.patchProject({ tracks });
+    if (this.state.selectedClipId === clipId) {
+      this.set({ selectedClipId: null });
+    }
+  }
+
+  moveClip(trackId: string, clipId: string, newStart: number) {
+    const start = Math.max(0, newStart);
+    const tracks = this.state.project.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      return {
+        ...t,
+        noteClips: t.noteClips.map((c) =>
+          c.id === clipId ? { ...c, start } : c,
+        ),
+        audioClips: t.audioClips.map((c) =>
+          c.id === clipId ? { ...c, start } : c,
+        ),
+      };
+    });
+    this.patchProject({ tracks });
+  }
+
+  selectClip(clipId: string | null) {
+    this.set({ selectedClipId: clipId });
+  }
+
   clearTrackClips(trackId: string) {
     this.patchTrack(trackId, { noteClips: [], audioClips: [] });
+    this.set({ selectedClipId: null });
   }
 
   duplicateClip(trackId: string) {
     const t = this.state.project.tracks.find((x) => x.id === trackId);
     if (!t) return;
-    if (t.noteClips.length > 0) {
-      const c = t.noteClips[0];
+    const selectedId = this.state.selectedClipId;
+    const selectedNote = selectedId
+      ? t.noteClips.find((c) => c.id === selectedId)
+      : undefined;
+    const selectedAudio = selectedId
+      ? t.audioClips.find((c) => c.id === selectedId)
+      : undefined;
+    const noteSrc = selectedNote ?? t.noteClips[0];
+    const audioSrc = selectedAudio ?? t.audioClips[0];
+    if (selectedNote || (!selectedAudio && noteSrc)) {
+      if (!noteSrc) return;
       const dup: NoteClip = {
         id: newId(),
-        start: c.start + c.length,
-        length: c.length,
-        notes: c.notes.map((n) => ({ ...n })),
+        start: noteSrc.start + noteSrc.length,
+        length: noteSrc.length,
+        notes: noteSrc.notes.map((n) => ({ ...n })),
       };
-      this.patchTrack(trackId, { noteClips: [c, dup] });
-    } else if (t.audioClips.length > 0) {
-      // audio duplicate: reuse blob, offset by clip duration in beats
-      const c = t.audioClips[0];
+      this.patchTrack(trackId, { noteClips: [...t.noteClips, dup] });
+    } else if (audioSrc) {
       const beatsPerSecond = this.state.project.bpm / 60;
-      const lengthBeats = c.durationSec * beatsPerSecond;
+      const lengthBeats = audioSrc.durationSec * beatsPerSecond;
       const dup = {
         id: newId(),
-        start: c.start + lengthBeats,
-        durationSec: c.durationSec,
-        blob: c.blob,
-        blobKey: c.blobKey,
+        start: audioSrc.start + lengthBeats,
+        durationSec: audioSrc.durationSec,
+        blob: audioSrc.blob,
+        blobKey: audioSrc.blobKey,
       };
-      this.patchTrack(trackId, { audioClips: [c, dup] });
+      this.patchTrack(trackId, { audioClips: [...t.audioClips, dup] });
     }
   }
 

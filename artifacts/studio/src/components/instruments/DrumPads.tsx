@@ -89,15 +89,19 @@ export function DrumPads({ track }: { track: Track }) {
   };
 
   const onToggle = (piece: DrumPiece, beat: number) => {
-    const baseClip: NoteClip =
-      clip ?? {
+    if (!clip) {
+      const baseClip: NoteClip = {
         id: makeId(),
         start: 0,
         length: patternBeats,
         notes: [],
       };
-    const next = toggleStep(baseClip, piece, beat);
-    getStore().addNoteClip(track.id, next);
+      const next = toggleStep(baseClip, piece, beat);
+      getStore().addNoteClip(track.id, next);
+      return;
+    }
+    const next = toggleStep(clip, piece, beat);
+    getStore().updateNoteClip(track.id, next);
   };
 
   useEffect(() => {
@@ -165,7 +169,7 @@ export function DrumPads({ track }: { track: Track }) {
           <button
             onClick={() => {
               if (!clip) return;
-              getStore().addNoteClip(track.id, { ...clip, notes: [] });
+              getStore().updateNoteClip(track.id, { ...clip, notes: [] });
             }}
             className="text-[10px] font-mono px-2 py-0.5 border border-border rounded hover:border-primary/60"
           >
