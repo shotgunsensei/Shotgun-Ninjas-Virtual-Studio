@@ -1,0 +1,321 @@
+Build a fully functional browser-based virtual music studio web app for Shotgun Ninjas Productions.
+
+This is not a mockup, not a landing page, and not a fake UI. Build a working MVP with real interactive audio, recording, multitrack playback, microphone support, MIDI device support, basic MIDI mapping, and project saving/loading.
+
+Primary product name:
+Shotgun Ninjas Virtual Studio
+
+Brand direction:
+Use Shotgun Ninjas Productions branding. The visual identity should feel like a polished cyber-ninja music production tool:
+- dark interface
+- black / graphite / deep charcoal base
+- red primary accents
+- subtle neon blue secondary highlights if needed
+- sleek, futuristic, studio-grade feel
+- clean typography
+- premium but usable
+- not cartoonish
+- include a sharp Shotgun Ninjas style logo area/header treatment
+- make it feel like part of the Shotgun Ninjas arsenal of apps
+
+Core objective:
+Create a virtual studio where a user can compose, play, record, and arrange music using:
+1. Piano
+2. Guitar
+3. Drumset
+4. Bassline
+5. Vocals
+
+Tech requirements:
+- Use React + TypeScript + Vite
+- Use Tailwind CSS for styling
+- Use Tone.js and/or Web Audio API for audio generation/playback/transport timing
+- Use Web MIDI API for MIDI device input
+- Use MediaDevices + MediaRecorder API for microphone recording
+- Use IndexedDB for local project persistence
+- Use a clean component-based architecture
+- Make the app responsive and usable on desktop first, but still functional on tablet/mobile where possible
+- If a preferred library fails, choose a practical substitute and keep moving
+- Avoid backend dependency unless absolutely necessary
+- This should run directly in Replit and in the browser
+
+Non-negotiable functionality:
+The app must have separate usable sections/tracks for:
+- Piano
+- Guitar
+- Drumset
+- Bass
+- Vocals
+
+Each instrument track must support at least 3 different sound options/presets:
+Piano:
+- Grand Piano style
+- Electric Piano style
+- Synth Keys style
+
+Guitar:
+- Clean Guitar style
+- Crunch / Overdrive Guitar style
+- Acoustic / Plucked style
+
+Drums:
+- Acoustic Kit
+- Electronic Kit
+- Trap / Punchy Kit
+
+Bass:
+- Finger Bass style
+- Synth Bass style
+- Sub Bass style
+
+Vocals track:
+- Clean vocal input monitor
+- Warm / Reverb vocal preset
+- Lo-fi / Radio / FX preset
+
+Important:
+If exact sample realism is difficult in-browser, use practical synthesized or sample-based approximations. The sounds still need to be clearly different and musically useful. Do not fake the options.
+
+Core studio features:
+1. Multi-track studio timeline
+- Each instrument gets its own track lane
+- Vocals get their own audio track lane
+- Tracks should show clip regions or note regions where possible
+- Playback should be synchronized across all tracks
+- User should be able to record one track while listening to others
+- Tracks should support play, stop, record-arm, mute, solo, volume, and pan
+- Include a master volume control
+
+2. Instrument performance
+- Piano should have an on-screen playable keyboard
+- Guitar should have a playable pad/fret/chord style interface
+- Drumset should have clickable drum pads
+- Bass should have a playable pad/keyboard style interface
+- All virtual instruments must also respond to connected MIDI devices where appropriate
+
+3. Recording
+- Record note performance for piano, guitar, drums, and bass as sequenced events or MIDI-like events
+- Record vocals from microphone as actual audio clips
+- User must be able to arm a track and record into it
+- Support overdub or at least repeated takes in a simple way
+- Include a count-in before recording
+- Include a metronome toggle
+
+4. Playback / arrangement
+- All recorded tracks must play back in sync
+- User should be able to start from beginning or from playhead
+- Support loop region for a selected section
+- User should be able to delete or clear clips
+- User should be able to duplicate simple regions or patterns
+- Include BPM/tempo control
+
+5. MIDI support
+- Detect connected MIDI devices
+- Let user choose MIDI input device
+- Route MIDI notes to selected instrument track
+- Support basic MIDI learn / MIDI mapping mode
+- User should be able to click “Map Control”, then move a MIDI knob/pad/key, then assign it to something like:
+  - track volume
+  - transport play
+  - transport record
+  - metronome toggle
+  - drum pad trigger
+  - instrument trigger/preset selection where practical
+- Include a simple MIDI monitor/debug panel so the user can see incoming MIDI note/CC data if synchronization is off
+
+6. Basic music creation tools
+Include practical standard tools that are actually useful:
+- metronome
+- count-in
+- tempo/BPM control
+- simple quantize option for recorded note events
+- snap-to-grid for arrangement if timeline editing is included
+- loop region
+- mute / solo
+- volume and pan
+- track rename
+- basic project save/load
+- basic undo/redo if feasible
+- export mixed song to downloadable audio file if feasible
+- export stems if feasible
+- simple reverb/delay/filter options per track if feasible
+- a basic drum pattern helper or piano roll editor if feasible
+- a tuner-style input meter or vocal input level meter for the mic track if feasible
+
+7. Project persistence
+- Save project locally in IndexedDB
+- Load previously saved projects
+- Store:
+  - tempo
+  - track settings
+  - chosen presets
+  - recorded note events
+  - audio clips for vocals if practical
+  - MIDI mappings
+- Include autosave if practical
+
+UI/UX requirements:
+Build the interface like a simplified DAW.
+Suggested layout:
+- Top header bar:
+  - Shotgun Ninjas Virtual Studio branding/logo
+  - project name
+  - save/load/new project
+  - settings
+- Transport/control bar:
+  - play
+  - stop
+  - record
+  - BPM
+  - metronome
+  - count-in
+  - loop
+  - master volume
+- Left or center main area:
+  - multitrack timeline / arrangement view
+- Bottom or side instrument panel:
+  - selected track instrument controls and playable interface
+- Right side utility panel:
+  - MIDI devices
+  - MIDI map mode
+  - mixer
+  - effects
+  - input settings
+  - help/tutorial panel
+
+Tracks should visually feel like real channel strips.
+Color-code tracks subtly while keeping the Shotgun Ninjas theme consistent.
+
+Instrument behavior details:
+Piano:
+- clickable piano keys
+- keyboard typing support if feasible
+- MIDI input support
+- preset selector
+- sustain support if feasible
+- octave shift
+
+Guitar:
+- playable chord pads and/or note pads
+- allow strum simulation or short pluck envelopes
+- preset selector
+- basic chord set for easy songwriting
+- MIDI note input support
+
+Drums:
+- grid of drum pads for kick, snare, hats, toms, crash, clap/percussion
+- support live pad triggering and pattern playback
+- preset selector between 3 kits
+- step sequencer if feasible
+
+Bass:
+- playable notes/pads
+- preset selector
+- octave range control
+- MIDI support
+
+Vocals:
+- microphone input selector
+- input gain/monitor meter if possible
+- record vocal clip to timeline
+- basic vocal FX preset selection
+- mute/solo/volume/pan
+- waveform display for recorded vocal clips if feasible
+
+MIDI mapping requirements:
+Implement a straightforward “MIDI Learn” system:
+- user clicks a UI control’s map button
+- app enters waiting state
+- next incoming MIDI CC/note is captured
+- binding is saved to that control
+- user can remove or replace mapping
+- mappings persist with project save
+- provide a visible list of current mappings
+
+Audio engine expectations:
+- Keep timing stable and synchronized
+- Use Tone.Transport or equivalent for sequencing and shared playback timing
+- Instrument recordings can be stored as note event sequences with timestamps and durations
+- Vocal recordings can be stored as audio blobs/clips aligned to the timeline
+- Make practical architecture choices to keep the app reliable in-browser
+
+Code quality requirements:
+- clean folder structure
+- readable code
+- modular components
+- reusable hooks/services for:
+  - audio engine
+  - MIDI input
+  - recording
+  - project storage
+  - transport state
+- include comments where the logic is complex
+- do not leave placeholder buttons that do nothing
+- do not ship fake features
+- if a feature must be reduced in scope, implement the smaller real version instead of a dead UI
+
+Suggested architecture:
+- /components
+- /features/studio
+- /features/instruments
+- /features/midi
+- /features/recording
+- /features/projects
+- /features/mixer
+- /hooks
+- /lib/audio
+- /lib/midi
+- /lib/storage
+- /types
+- /assets
+
+Deliverables inside the Replit project:
+1. fully working app
+2. polished UI
+3. seed demo project already included
+4. README with:
+   - what the app does
+   - how MIDI works
+   - how microphone permissions work
+   - how recording works
+   - limitations of browser audio
+   - future upgrade ideas
+5. simple onboarding/help modal for first-time users
+
+Build priorities:
+Priority 1:
+- functioning multitrack transport
+- piano/guitar/drums/bass/vocals tracks
+- 3 presets each
+- record/playback
+- mic recording
+- MIDI input detection
+- basic MIDI mapping
+- save/load project
+
+Priority 2:
+- timeline editing polish
+- quantize
+- loop region
+- simple effects
+- waveform/clip visualization
+- export
+
+Priority 3:
+- extra polish, animations, onboarding, demo song
+
+Acceptance criteria:
+The project is only complete if all of the following are true:
+- user can open the app and interact with all 5 track types
+- each instrument has at least 3 audibly distinct presets
+- user can record performance on each instrument track
+- user can record microphone audio on vocals track
+- user can connect a MIDI keyboard/controller and trigger instruments
+- user can perform at least basic MIDI mapping
+- user can play back multiple tracks together in sync
+- user can save and reload a project
+- UI looks branded and polished for Shotgun Ninjas Productions
+- there are no dead controls pretending to work
+
+Final instruction:
+Do not produce a partial prototype and stop. Build the best complete working version possible in one pass. If some advanced DAW functionality is too heavy, reduce complexity intelligently while preserving true usability. Real functionality matters more than flashy filler.

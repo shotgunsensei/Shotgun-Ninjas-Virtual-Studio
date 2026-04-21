@@ -1,0 +1,39 @@
+Revision Addendum for v1:
+
+Implementation rule:
+Do not fake any functionality. Every visible transport, recording, track, MIDI, and preset control must connect to a real working code path. If a feature cannot be completed fully, remove or hide the UI for that feature in v1 instead of leaving a non-functional control.
+
+Timeline v1 scope:
+The first version only needs visible clip regions aligned to a time grid, playhead-based playback, loop region, clear clip, and duplicate clip. Drag-to-resize, drag-to-move, and deep piano-roll editing are out of scope for v1 unless the must-have features are already complete.
+
+Preset requirement:
+For v1, instrument sounds may be synthesized or use lightweight bundled samples. The goal is audibly distinct and musically usable presets, not studio-grade realism. Prioritize low-latency interaction and stable playback over realism.
+
+Vocal recording scope:
+For v1, support single-take vocal clip recording per armed vocal track lane, waveform display, playback alignment to timeline, and track-level FX preset selection. Advanced comping, punch-in, and clip slicing are out of scope.
+
+MIDI Learn v1 scope:
+Support mapping for transport play, stop, record, metronome toggle, one selected track volume control, and drum pad triggers. Do not attempt full arbitrary UI-wide MIDI mapping in v1.
+
+Browser target:
+Optimize and test for latest Chrome/Chromium desktop first. Edge is secondary. Mobile support is best-effort only.
+
+Permissions and error handling:
+The app must clearly handle blocked microphone permission, unavailable MIDI access, no input devices found, browser autoplay restrictions, and missing audio context unlock. Show user-friendly messages and recovery steps.
+
+Performance constraints:
+Keep the MVP lightweight enough to run smoothly on a typical desktop browser session. Avoid very large sample packs, unnecessary animation overhead, or complex waveform rendering that degrades transport timing.
+
+Completion gate:
+Do not move on to polish or stretch goals until these pass:
+- all 5 track types are usable
+- all instrument tracks have 3 distinct presets
+- vocals can record from microphone into a playable clip
+- MIDI device detection works
+- basic MIDI Learn works
+- multitrack playback stays synchronized
+- project save/load works
+- no visible dead controls remain
+
+Demo project:
+Seed a first-run demo project using piano, guitar, drums, and bass event clips. Include a placeholder vocal track lane with instructions rather than requiring a pre-bundled recorded vocal clip.
