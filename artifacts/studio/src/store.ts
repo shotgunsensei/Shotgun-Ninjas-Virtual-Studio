@@ -35,6 +35,7 @@ class Store {
       device: string;
       ts: number;
     }>;
+    dropTargetTrackId: string | null;
     showOnboarding: boolean;
     showHelp: boolean;
     statusMessage: string | null;
@@ -55,6 +56,7 @@ class Store {
       countInBeat: 0,
       midiLearnTargetId: null,
       midiMonitor: [],
+      dropTargetTrackId: null,
       showOnboarding: false,
       showHelp: false,
       statusMessage: null,
@@ -245,21 +247,81 @@ class Store {
     this.patchProject({ tracks });
   }
 
-  moveClip(trackId: string, clipId: string, newStart: number) {
+  moveClip(
+    trackId: string,
+    clipId: string,
+    newStart: number,
+    destTrackId?: string,
+  ) {
     const start = Math.max(0, newStart);
-    const tracks = this.state.project.tracks.map((t) => {
-      if (t.id !== trackId) return t;
-      return {
-        ...t,
-        noteClips: t.noteClips.map((c) =>
-          c.id === clipId ? { ...c, start } : c,
-        ),
-        audioClips: t.audioClips.map((c) =>
-          c.id === clipId ? { ...c, start } : c,
-        ),
-      };
-    });
-    this.patchProject({ tracks });
+    const src = this.state.project.tracks.find((t) => t.id === trackId);
+    if (!src) return;
+    const dest =
+      destTrackId && destTrackId !== trackId
+        ? this.state.project.tracks.find((t) => t.id === destTrackId)
+        : null;
+
+    if (!dest) {
+      // same-track move (existing behavior)
+      const tracks = this.state.project.tracks.map((t) => {
+        if (t.id !== trackId) return t;
+        return {
+          ...t,
+          noteClips: t.noteClips.map((c) =>
+            c.id === clipId ? { ...c, start } : c,
+          ),
+          audioClips: t.audioClips.map((c) =>
+            c.id === clipId ? { ...c, start } : c,
+          ),
+        };
+      });
+      this.patchProject({ tracks });
+      return;
+    }
+
+    // Cross-track move. Honor the same compatibility rules surfaced by
+    // canDropClipOnTrack so callers don't have to repeat the check.
+    const noteClip = src.noteClips.find((c) => c.id === clipId);
+    const audioClip = src.audioClips.find((c) => c.id === clipId);
+    if (noteClip) {
+      if (dest.kind === "vocals") return;
+      const tracks = this.state.project.tracks.map((t) => {
+        if (t.id === trackId) {
+          return {
+            ...t,
+            noteClips: t.noteClips.filter((c) => c.id !== clipId),
+          };
+        }
+        if (t.id === destTrackId) {
+          return {
+            ...t,
+            noteClips: [...t.noteClips, { ...noteClip, start }],
+          };
+        }
+        return t;
+      });
+      this.patchProject({ tracks });
+      this.set({ selectedTrackId: destTrackId! });
+    } else if (audioClip) {
+      if (dest.kind !== "vocals") return;
+      const tracks = this.state.project.tracks.map((t) => {
+        if (t.id === trackId) {
+          return {
+            ...t,
+            audioClips: t.audioClips.filter((c) => c.id !== clipId),
+          };
+        }
+        if (t.id === destTrackId) {
+          return {
+            ...t,
+            audioClips: [...t.audioClips, { ...audioClip, start }],
+          };
+        }
+        return t;
+      });
+      this.patchProject({ tracks });
+      this.set({ selectedTrackId: destTrackId! });
+    }
   }
 
   selectClip(clipId: string | null) {
@@ -357,6 +419,14 @@ class Store {
     ].slice(0, 20);
     this.set({ midiMonitor: next });
   }
+}
+
+export function canDropClipOnTrack(
+  clipKind: "note" | "audio",
+  destKind: Track["kind"],
+): boolean {
+  if (clipKind === "note") return destKind !== "vocals";
+  return destKind === "vocals";
 }
 
 export function midiTargetLabel(target: MidiTarget, project: Project): string {

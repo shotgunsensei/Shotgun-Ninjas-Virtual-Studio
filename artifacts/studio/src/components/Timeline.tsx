@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { useStore, getStore } from "../store";
+import { useStore, getStore, canDropClipOnTrack } from "../store";
 import { audio } from "../lib/audio/engine";
 import type { Track } from "../types";
 
@@ -121,8 +121,13 @@ function TimelineRow({
   selectedClipId: string | null;
   totalBeats: number;
 }) {
+  const dropTargetTrackId = useStore((s) => s.dropTargetTrackId);
+  const isDropTarget = dropTargetTrackId === track.id;
   return (
     <div
+      data-track-row="true"
+      data-track-id={track.id}
+      data-track-kind={track.kind}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {
           getStore().set({ selectedTrackId: track.id });
@@ -131,6 +136,8 @@ function TimelineRow({
       }}
       className={`relative h-16 border-b border-border/60 cursor-pointer ${
         selected ? "bg-primary/5" : ""
+      } ${
+        isDropTarget ? "bg-neon/15 ring-1 ring-inset ring-neon/70" : ""
       } grid-bg`}
       style={{ width: totalBeats * PX_PER_BEAT }}
     >
@@ -189,10 +196,12 @@ function useClipDrag({
   trackId,
   clipId,
   startBeat,
+  clipKind,
 }: {
   trackId: string;
   clipId: string;
   startBeat: number;
+  clipKind: "note" | "audio";
 }) {
   const [dragDelta, setDragDelta] = useState(0);
   const onMouseDown = (e: React.MouseEvent) => {
@@ -205,6 +214,7 @@ function useClipDrag({
     getStore().selectClip(clipId);
     const startX = e.clientX;
     let lastDelta = 0;
+    let lastDestTrackId: string | null = null;
     const onMove = (ev: MouseEvent) => {
       const dxPx = ev.clientX - startX;
       const dxBeats = dxPx / PX_PER_BEAT;
@@ -214,12 +224,36 @@ function useClipDrag({
       const clamped = Math.max(-startBeat, snapped);
       lastDelta = clamped;
       setDragDelta(clamped);
+
+      // figure out which track row the cursor is over for vertical drops
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const row = el?.closest("[data-track-row]") as HTMLElement | null;
+      const destId = row?.getAttribute("data-track-id") ?? null;
+      const destKind = row?.getAttribute("data-track-kind") as
+        | Track["kind"]
+        | null;
+      let nextDest: string | null = null;
+      if (destId && destId !== trackId && destKind) {
+        if (canDropClipOnTrack(clipKind, destKind)) {
+          nextDest = destId;
+        }
+      }
+      if (nextDest !== lastDestTrackId) {
+        lastDestTrackId = nextDest;
+        getStore().set({ dropTargetTrackId: nextDest });
+      }
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      if (lastDelta !== 0) {
+      const dest = lastDestTrackId;
+      if (dest) {
+        getStore().moveClip(trackId, clipId, startBeat + lastDelta, dest);
+      } else if (lastDelta !== 0) {
         getStore().moveClip(trackId, clipId, startBeat + lastDelta);
+      }
+      if (getStore().state.dropTargetTrackId !== null) {
+        getStore().set({ dropTargetTrackId: null });
       }
       setDragDelta(0);
     };
@@ -347,6 +381,7 @@ function NoteClipView({
     trackId: track.id,
     clipId: clip.id,
     startBeat: clip.start,
+    clipKind: "note",
   });
   const leftResize = useClipResize({
     trackId: track.id,
@@ -431,6 +466,7 @@ function AudioClipView({
     trackId: track.id,
     clipId: clip.id,
     startBeat: clip.start,
+    clipKind: "audio",
   });
   const leftResize = useClipResize({
     trackId: track.id,
