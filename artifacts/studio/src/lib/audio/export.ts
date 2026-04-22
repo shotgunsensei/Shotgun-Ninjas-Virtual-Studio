@@ -1,4 +1,5 @@
 import * as Tone from "tone";
+import lamejs from "@breezystack/lamejs";
 import type {
   BassPreset,
   DrumsPreset,
@@ -28,6 +29,14 @@ export interface RenderProgress {
   progress: number;
 }
 
+export type ExportFormat = "wav" | "mp3";
+
+export interface ExportResult {
+  blob: Blob;
+  extension: string;
+  mimeType: string;
+}
+
 interface RenderVoice {
   channel: Tone.Channel;
   reverb: Tone.Reverb;
@@ -41,6 +50,15 @@ export async function renderProjectToWav(
   project: Project,
   onProgress?: (p: RenderProgress) => void,
 ): Promise<Blob> {
+  const result = await renderProject(project, "wav", onProgress);
+  return result.blob;
+}
+
+export async function renderProject(
+  project: Project,
+  format: ExportFormat,
+  onProgress?: (p: RenderProgress) => void,
+): Promise<ExportResult> {
   const beatsPerSec = project.bpm / 60;
   const totalBeats = project.bars * 4;
   const projectSec = totalBeats / beatsPerSec;
@@ -55,9 +73,24 @@ export async function renderProjectToWav(
   );
 
   onProgress?.({ phase: "encoding", progress: 0 });
+  if (format === "mp3") {
+    const mp3 = encodeMp3(buffer, (p) =>
+      onProgress?.({ phase: "encoding", progress: p }),
+    );
+    onProgress?.({ phase: "encoding", progress: 1 });
+    return {
+      blob: new Blob([mp3.buffer as ArrayBuffer], { type: "audio/mpeg" }),
+      extension: "mp3",
+      mimeType: "audio/mpeg",
+    };
+  }
   const wav = encodeWav(buffer);
   onProgress?.({ phase: "encoding", progress: 1 });
-  return new Blob([wav], { type: "audio/wav" });
+  return {
+    blob: new Blob([wav], { type: "audio/wav" }),
+    extension: "wav",
+    mimeType: "audio/wav",
+  };
 }
 
 async function decodeAudioClips(project: Project): Promise<Map<string, AudioBuffer>> {
@@ -311,6 +344,64 @@ function encodeWav(buffer: AudioBuffer): ArrayBuffer {
 
 function writeString(view: DataView, offset: number, str: string) {
   for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+}
+
+// ---------- MP3 encoding ----------
+
+function encodeMp3(
+  buffer: AudioBuffer,
+  onProgress?: (p: number) => void,
+): Uint8Array {
+  const numChannels = Math.min(2, buffer.numberOfChannels);
+  const sampleRate = buffer.sampleRate;
+  const kbps = 192;
+  const encoder = new lamejs.Mp3Encoder(numChannels, sampleRate, kbps);
+
+  const left = floatTo16(buffer.getChannelData(0));
+  const right =
+    numChannels > 1 ? floatTo16(buffer.getChannelData(1)) : left;
+
+  const blockSize = 1152;
+  const numFrames = left.length;
+  const chunks: Uint8Array[] = [];
+
+  for (let i = 0; i < numFrames; i += blockSize) {
+    const end = Math.min(i + blockSize, numFrames);
+    const lChunk = left.subarray(i, end);
+    const rChunk = right.subarray(i, end);
+    const mp3buf =
+      numChannels > 1
+        ? encoder.encodeBuffer(lChunk, rChunk)
+        : encoder.encodeBuffer(lChunk);
+    if (mp3buf.length > 0) chunks.push(mp3buf);
+    if (onProgress && i % (blockSize * 64) === 0) {
+      onProgress(Math.min(0.99, i / numFrames));
+    }
+  }
+  const flush = encoder.flush();
+  if (flush.length > 0) chunks.push(flush);
+  onProgress?.(1);
+
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
+}
+
+function floatTo16(input: Float32Array): Int16Array {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    let s = input[i];
+    if (s > 1) s = 1;
+    else if (s < -1) s = -1;
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

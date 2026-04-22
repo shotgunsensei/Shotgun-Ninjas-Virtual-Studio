@@ -401,6 +401,9 @@ importers:
 
   artifacts/studio:
     dependencies:
+      '@breezystack/lamejs':
+        specifier: ^1.2.7
+        version: 1.2.7
       idb:
         specifier: ^8.0.3
         version: 8.0.3
@@ -742,6 +745,9 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
+
+  '@breezystack/lamejs@1.2.7':
+    resolution: {integrity: sha512-6wc7ck65ctA75Hq7FYHTtTvGnYs6msgdxiSUICQ+A01nVOWg6rqouZB8IdyteRlfpYYiFovkf67dIeOgWIUzTA==}
 
   '@commander-js/extra-typings@14.0.0':
     resolution: {integrity: sha512-hIn0ncNaJRLkZrxBIp5AsW/eXEHNKYQBh0aPdoUqNgD+Io3NIykQqpKFyKcuasZhicGaEZJX/JBSIkZ4e5x8Dg==}
@@ -3308,6 +3314,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@breezystack/lamejs@1.2.7': {}
 
   '@commander-js/extra-typings@14.0.0(commander@14.0.3)':
     dependencies:

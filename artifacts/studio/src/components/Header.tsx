@@ -7,9 +7,10 @@ import { Progress } from "@/components/ui/progress";
 import { useStore, getStore, resetStore, defaultProject } from "../store";
 import { audio } from "../lib/audio/engine";
 import {
-  renderProjectToWav,
+  renderProject,
   downloadBlob,
   safeFilename,
+  type ExportFormat,
   type RenderProgress,
 } from "../lib/audio/export";
 import {
@@ -34,23 +35,32 @@ export function Header() {
     Array<{ id: string; name: string; updatedAt: number }>
   >([]);
   const [exporting, setExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("wav");
   const [exportProgress, setExportProgress] = useState<RenderProgress>({
     phase: "rendering",
     progress: 0,
   });
   const [exportError, setExportError] = useState<string | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
 
-  const onExport = async () => {
+  const startExport = async (format: ExportFormat) => {
     if (exporting) return;
+    setChooserOpen(false);
     audio.stop();
+    setExportFormat(format);
     setExportError(null);
     setExportProgress({ phase: "decoding", progress: 0 });
     setExporting(true);
     try {
       const proj = getStore().state.project;
-      const blob = await renderProjectToWav(proj, (p) => setExportProgress(p));
-      downloadBlob(blob, `${safeFilename(proj.name)}.wav`);
-      getStore().setStatus("Exported WAV", "info");
+      const result = await renderProject(proj, format, (p) =>
+        setExportProgress(p),
+      );
+      downloadBlob(result.blob, `${safeFilename(proj.name)}.${result.extension}`);
+      getStore().setStatus(
+        `Exported ${format.toUpperCase()}`,
+        "info",
+      );
     } catch (err) {
       const msg = (err as Error).message || "Export failed";
       setExportError(msg);
@@ -139,7 +149,7 @@ export function Header() {
         <Button
           variant="outline"
           size="sm"
-          onClick={onExport}
+          onClick={() => setChooserOpen(true)}
           disabled={exporting}
           className="font-mono text-xs"
         >
@@ -155,6 +165,39 @@ export function Header() {
         </Button>
       </div>
 
+      <Dialog open={chooserOpen} onOpenChange={setChooserOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Export song</DialogTitle>
+            <DialogDescription>
+              Pick a format for your downloaded file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => startExport("wav")}
+              className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+            >
+              <div className="font-mono text-sm">WAV</div>
+              <div className="text-xs text-muted-foreground">
+                Uncompressed, highest quality. Larger file.
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => startExport("mp3")}
+              className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+            >
+              <div className="font-mono text-sm">MP3</div>
+              <div className="text-xs text-muted-foreground">
+                Compressed at 192 kbps. Smaller, easy to share.
+              </div>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={exporting || exportError !== null}
         onOpenChange={(open) => {
@@ -169,7 +212,7 @@ export function Header() {
             <DialogDescription>
               {exportError
                 ? "Something went wrong while rendering."
-                : "Rendering your arrangement to a WAV file."}
+                : `Rendering your arrangement to a ${exportFormat.toUpperCase()} file.`}
             </DialogDescription>
           </DialogHeader>
           {exportError ? (
@@ -188,7 +231,8 @@ export function Header() {
               <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
                 {exportProgress.phase === "decoding" && "Loading audio clips…"}
                 {exportProgress.phase === "rendering" && "Mixing down…"}
-                {exportProgress.phase === "encoding" && "Encoding WAV…"}
+                {exportProgress.phase === "encoding" &&
+                  `Encoding ${exportFormat.toUpperCase()}…`}
               </div>
               <Progress value={Math.round(exportProgress.progress * 100)} />
               <div className="text-right text-xs font-mono text-muted-foreground">
