@@ -20,6 +20,8 @@ interface SerializedProject extends Omit<Project, "tracks"> {
         id: string;
         start: number;
         durationSec: number;
+        offsetSec?: number;
+        sourceDurationSec?: number;
         blobKey?: string;
       }>;
     }
@@ -70,6 +72,8 @@ export async function saveProject(project: Project): Promise<void> {
               id: c.id,
               start: c.start,
               durationSec: c.durationSec,
+              offsetSec: c.offsetSec,
+              sourceDurationSec: c.sourceDurationSec,
               blobKey,
             };
           }),

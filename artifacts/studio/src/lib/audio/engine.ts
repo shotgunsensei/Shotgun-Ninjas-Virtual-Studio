@@ -283,6 +283,10 @@ class AudioEngine {
     if (!v) return ids;
     const startBeats = clip.start;
     for (const ev of clip.notes) {
+      // Skip notes that fall outside the trimmed clip window. Resizing keeps
+      // the underlying note data intact (so growing the clip back restores
+      // them) — the play pass is what enforces the trim.
+      if (ev.time < 0 || ev.time >= clip.length) continue;
       const t = startBeats + ev.time;
       const id = Tone.getTransport().schedule((time) => {
         if (track.kind === "drums") {
@@ -347,16 +351,27 @@ class AudioEngine {
   /** Schedule a vocal audio clip via Tone.Player aligned to its start beat. */
   scheduleAudioClip(
     track: Track,
-    clip: { id: string; start: number; durationSec: number; blob?: Blob },
+    clip: {
+      id: string;
+      start: number;
+      durationSec: number;
+      offsetSec?: number;
+      blob?: Blob;
+    },
   ): { id: number; player: Tone.Player } | null {
     const v = this.voices.get(track.id);
     if (!v || !clip.blob) return null;
     const url = URL.createObjectURL(clip.blob);
     const player = new Tone.Player(url).connect(v.channel);
     player.autostart = false;
+    const offset = Math.max(0, clip.offsetSec ?? 0);
+    const duration = Math.max(0, clip.durationSec);
     const evId = Tone.getTransport().schedule((time) => {
       try {
-        player.start(time);
+        // Honor the trimmed window: skip `offset` seconds into the buffer
+        // and only play `duration` seconds so the audible region matches
+        // what the user sees on the timeline.
+        player.start(time, offset, duration);
       } catch {
         // ignore
       }

@@ -229,6 +229,87 @@ function useClipDrag({
   return { onMouseDown, dragDelta };
 }
 
+/**
+ * Drag-to-resize behavior for a clip's left or right edge. The component
+ * applies the live `delta` (in beats) to its rendered width/left so the
+ * preview snaps with the mouse, and commits to the store on mouseup.
+ */
+function useClipResize({
+  trackId,
+  clipId,
+  edge,
+  startBeat,
+  lengthBeats,
+}: {
+  trackId: string;
+  clipId: string;
+  edge: "left" | "right";
+  startBeat: number;
+  lengthBeats: number;
+}) {
+  const [delta, setDelta] = useState(0);
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    getStore().set({ selectedTrackId: trackId });
+    getStore().selectClip(clipId);
+    const startX = e.clientX;
+    let lastDelta = 0;
+    const onMove = (ev: MouseEvent) => {
+      const dxPx = ev.clientX - startX;
+      const dxBeats = dxPx / PX_PER_BEAT;
+      let snapped =
+        Math.round(dxBeats / DRAG_SNAP_BEATS) * DRAG_SNAP_BEATS;
+      if (edge === "left") {
+        // shift can't push start below 0 and can't shrink length to <= 0
+        snapped = Math.max(
+          -startBeat,
+          Math.min(lengthBeats - DRAG_SNAP_BEATS, snapped),
+        );
+      } else {
+        // right edge: length stays >= one snap unit
+        snapped = Math.max(DRAG_SNAP_BEATS - lengthBeats, snapped);
+      }
+      lastDelta = snapped;
+      setDelta(snapped);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (lastDelta !== 0) {
+        getStore().resizeClip(trackId, clipId, edge, lastDelta);
+      }
+      setDelta(0);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+  return { onMouseDown, delta };
+}
+
+function ClipResizeHandle({
+  edge,
+  onMouseDown,
+}: {
+  edge: "left" | "right";
+  onMouseDown: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      data-clip-action
+      data-resize-edge={edge}
+      onMouseDown={onMouseDown}
+      role="separator"
+      aria-label={edge === "left" ? "Resize clip start" : "Resize clip end"}
+      title={edge === "left" ? "Drag to trim start" : "Drag to trim end"}
+      className={`absolute top-0 bottom-0 w-1.5 z-20 cursor-ew-resize bg-foreground/0 hover:bg-foreground/30 ${
+        edge === "left" ? "left-0" : "right-0"
+      }`}
+    />
+  );
+}
+
 function ClipDeleteButton({
   trackId,
   clipId,
@@ -267,8 +348,24 @@ function NoteClipView({
     clipId: clip.id,
     startBeat: clip.start,
   });
-  const left = (clip.start + dragDelta) * PX_PER_BEAT;
-  const width = Math.max(20, clip.length * PX_PER_BEAT);
+  const leftResize = useClipResize({
+    trackId: track.id,
+    clipId: clip.id,
+    edge: "left",
+    startBeat: clip.start,
+    lengthBeats: clip.length,
+  });
+  const rightResize = useClipResize({
+    trackId: track.id,
+    clipId: clip.id,
+    edge: "right",
+    startBeat: clip.start,
+    lengthBeats: clip.length,
+  });
+  const previewStart = clip.start + dragDelta + leftResize.delta;
+  const previewLength = clip.length - leftResize.delta + rightResize.delta;
+  const left = previewStart * PX_PER_BEAT;
+  const width = Math.max(20, previewLength * PX_PER_BEAT);
   const isDrums = track.kind === "drums";
   return (
     <div
@@ -284,6 +381,8 @@ function NoteClipView({
         {track.name} clip
       </div>
       <ClipDeleteButton trackId={track.id} clipId={clip.id} />
+      <ClipResizeHandle edge="left" onMouseDown={leftResize.onMouseDown} />
+      <ClipResizeHandle edge="right" onMouseDown={rightResize.onMouseDown} />
       <div className="absolute inset-x-0 top-4 bottom-0 pointer-events-none">
         {clip.notes.map((n, i) => {
           const x = (n.time / clip.length) * 100;
@@ -322,19 +421,41 @@ function AudioClipView({
   isSelected,
 }: {
   track: Track;
-  clip: { id: string; start: number; durationSec: number; blob?: Blob };
+  clip: { id: string; start: number; durationSec: number; offsetSec?: number; blob?: Blob };
   isSelected: boolean;
 }) {
   const project = useStore((s) => s.project);
   const beatsPerSecond = project.bpm / 60;
+  const lengthBeats = clip.durationSec * beatsPerSecond;
   const { onMouseDown, dragDelta } = useClipDrag({
     trackId: track.id,
     clipId: clip.id,
     startBeat: clip.start,
   });
-  const left = (clip.start + dragDelta) * PX_PER_BEAT;
-  const width = Math.max(20, clip.durationSec * beatsPerSecond * PX_PER_BEAT);
+  const leftResize = useClipResize({
+    trackId: track.id,
+    clipId: clip.id,
+    edge: "left",
+    startBeat: clip.start,
+    lengthBeats,
+  });
+  const rightResize = useClipResize({
+    trackId: track.id,
+    clipId: clip.id,
+    edge: "right",
+    startBeat: clip.start,
+    lengthBeats,
+  });
+  const previewStart = clip.start + dragDelta + leftResize.delta;
+  const previewLengthBeats =
+    lengthBeats - leftResize.delta + rightResize.delta;
+  const left = previewStart * PX_PER_BEAT;
+  const width = Math.max(20, previewLengthBeats * PX_PER_BEAT);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const offsetSec = clip.offsetSec ?? 0;
+  const durationSec = clip.durationSec;
+  const canvasWidth = Math.max(50, Math.floor(width));
 
   useEffect(() => {
     if (!clip.blob || !canvasRef.current) return;
@@ -349,16 +470,28 @@ function AudioClipView({
         const buf = await ac.decodeAudioData(arr);
         if (cancelled) return;
         const data = buf.getChannelData(0);
+        const sr = buf.sampleRate;
+        // Restrict the waveform to the trimmed window so what the user sees
+        // matches what plays back.
+        const startIdx = Math.max(
+          0,
+          Math.min(data.length, Math.floor(offsetSec * sr)),
+        );
+        const endIdx = Math.max(
+          startIdx,
+          Math.min(data.length, Math.floor((offsetSec + durationSec) * sr)),
+        );
+        const sliceLen = Math.max(1, endIdx - startIdx);
         const w = cv.width;
         const h = cv.height;
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = "rgba(0, 200, 255, 0.6)";
-        const step = Math.max(1, Math.floor(data.length / w));
+        const step = Math.max(1, Math.floor(sliceLen / w));
         for (let x = 0; x < w; x++) {
           let min = 1.0;
           let max = -1.0;
           for (let j = 0; j < step; j++) {
-            const v = data[x * step + j] ?? 0;
+            const v = data[startIdx + x * step + j] ?? 0;
             if (v < min) min = v;
             if (v > max) max = v;
           }
@@ -374,7 +507,7 @@ function AudioClipView({
     return () => {
       cancelled = true;
     };
-  }, [clip.blob]);
+  }, [clip.blob, offsetSec, durationSec, canvasWidth]);
 
   return (
     <div
@@ -390,9 +523,11 @@ function AudioClipView({
         {track.name} take · {clip.durationSec.toFixed(1)}s
       </div>
       <ClipDeleteButton trackId={track.id} clipId={clip.id} />
+      <ClipResizeHandle edge="left" onMouseDown={leftResize.onMouseDown} />
+      <ClipResizeHandle edge="right" onMouseDown={rightResize.onMouseDown} />
       <canvas
         ref={canvasRef}
-        width={Math.max(50, Math.floor(width))}
+        width={canvasWidth}
         height={42}
         className="block w-full h-[42px] pointer-events-none"
       />

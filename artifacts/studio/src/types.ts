@@ -36,8 +36,17 @@ export interface AudioClip {
   id: string;
   // beats
   start: number;
-  // seconds
+  // seconds — visible/audible length of the clip
   durationSec: number;
+  // seconds — playback offset into the underlying blob; advances when the
+  // user trims the left edge so the audio that remains visible keeps
+  // playing from the correct sample.
+  offsetSec?: number;
+  // seconds — full length of the underlying recording, captured when the
+  // clip is added. Used to clamp resize so the user can't grow a trimmed
+  // clip past the available audio. Falls back to durationSec when unset
+  // (e.g. for clips created before this field existed).
+  sourceDurationSec?: number;
   blob?: Blob; // not serialized to JSON; persisted separately
   blobKey?: string; // IndexedDB key
 }

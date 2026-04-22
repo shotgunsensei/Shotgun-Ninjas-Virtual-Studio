@@ -132,9 +132,12 @@ class Store {
   }
 
   addAudioClip(trackId: string, clip: { id: string; start: number; durationSec: number; blob: Blob }) {
+    // Capture the original recording length so resize can later clamp
+    // right-edge growth to the actual available audio.
+    const stored = { ...clip, sourceDurationSec: clip.durationSec };
     const tracks = this.state.project.tracks.map((t) => {
       if (t.id !== trackId) return t;
-      return { ...t, audioClips: [...t.audioClips, clip] };
+      return { ...t, audioClips: [...t.audioClips, stored] };
     });
     this.patchProject({ tracks });
   }
@@ -152,6 +155,94 @@ class Store {
     if (this.state.selectedClipId === clipId) {
       this.set({ selectedClipId: null });
     }
+  }
+
+  /**
+   * Resize a clip by dragging one of its edges. `deltaBeats` is signed:
+   *   - right edge: positive grows the clip, negative shrinks it.
+   *   - left edge: positive trims from the front (start moves right, length
+   *     shrinks); negative grows the front. The visible musical content
+   *     stays anchored to the same absolute beat positions, matching the
+   *     drag preview.
+   * Snapped to the same 0.25-beat grid as moveClip and clamped so the clip
+   * never has a non-positive length and never starts before beat 0.
+   */
+  resizeClip(
+    trackId: string,
+    clipId: string,
+    edge: "left" | "right",
+    deltaBeats: number,
+  ) {
+    const SNAP = 0.25;
+    const MIN_LEN = SNAP;
+    const bpm = this.state.project.bpm;
+    const beatsPerSecond = bpm / 60;
+    const tracks = this.state.project.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      const noteClips = t.noteClips.map((c) => {
+        if (c.id !== clipId) return c;
+        if (edge === "right") {
+          const newLength = Math.max(MIN_LEN, c.length + deltaBeats);
+          return { ...c, length: newLength };
+        }
+        // left edge: clamp shift so start stays >= 0 and length stays > 0
+        const shift = Math.max(
+          -c.start,
+          Math.min(c.length - MIN_LEN, deltaBeats),
+        );
+        return {
+          ...c,
+          start: c.start + shift,
+          length: c.length - shift,
+          // shift note times so the visible musical content stays in place;
+          // notes that fall outside [0, length) are kept in the data so the
+          // user can grow the clip back, but the engine filters them at
+          // schedule time.
+          notes: c.notes.map((n) => ({ ...n, time: n.time - shift })),
+        };
+      });
+      const audioClips = t.audioClips.map((c) => {
+        if (c.id !== clipId) return c;
+        const minLenSec = MIN_LEN / beatsPerSecond;
+        const offset = c.offsetSec ?? 0;
+        // The full underlying recording length. For clips that predate
+        // the field, fall back to the current visible window so we never
+        // grow past where audio is known to exist.
+        const sourceDuration = c.sourceDurationSec ?? offset + c.durationSec;
+        if (edge === "right") {
+          const deltaSec = deltaBeats / beatsPerSecond;
+          // Cap growth to the audio remaining after the current offset.
+          const maxLenSec = Math.max(minLenSec, sourceDuration - offset);
+          const newDuration = Math.max(
+            minLenSec,
+            Math.min(maxLenSec, c.durationSec + deltaSec),
+          );
+          return { ...c, durationSec: newDuration };
+        }
+        // left edge: shrinking moves start right and reduces durationSec by
+        // the same musical amount; offsetSec advances so playback skips the
+        // trimmed sample range.
+        // beat-shift clamps:
+        //   shift <= durationSec - minLenSec (in beats)  -> length stays > 0
+        //   shift >= -start                              -> start stays >= 0
+        //   shift >= -offsetSec_in_beats                 -> can't expand past sample 0
+        const offsetBeats = offset * beatsPerSecond;
+        const maxShrinkBeats = c.durationSec * beatsPerSecond - MIN_LEN;
+        const shift = Math.max(
+          Math.max(-c.start, -offsetBeats),
+          Math.min(maxShrinkBeats, deltaBeats),
+        );
+        const shiftSec = shift / beatsPerSecond;
+        return {
+          ...c,
+          start: c.start + shift,
+          durationSec: c.durationSec - shiftSec,
+          offsetSec: offset + shiftSec,
+        };
+      });
+      return { ...t, noteClips, audioClips };
+    });
+    this.patchProject({ tracks });
   }
 
   moveClip(trackId: string, clipId: string, newStart: number) {
@@ -208,6 +299,8 @@ class Store {
         id: newId(),
         start: audioSrc.start + lengthBeats,
         durationSec: audioSrc.durationSec,
+        offsetSec: audioSrc.offsetSec,
+        sourceDurationSec: audioSrc.sourceDurationSec,
         blob: audioSrc.blob,
         blobKey: audioSrc.blobKey,
       };
