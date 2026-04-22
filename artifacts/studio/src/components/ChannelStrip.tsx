@@ -248,6 +248,7 @@ function TrackMeter({ trackId }: { trackId: string }) {
   // Color zones: green up to -12 dB, yellow -12..-3 dB, red above -3 dB.
   const [levels, setLevels] = useState<[number, number]>([0, 0]);
   const [peaksDb, setPeaksDb] = useState<[number, number]>([-Infinity, -Infinity]);
+  const [clipped, setClipped] = useState<[boolean, boolean]>([false, false]);
   const peakHoldRef = useRef<{ db: [number, number]; until: [number, number] }>({
     db: [-Infinity, -Infinity],
     until: [0, 0],
@@ -277,6 +278,16 @@ function TrackMeter({ trackId }: { trackId: string }) {
           hold.until[1] = now + 800;
         }
         setPeaksDb([hold.db[0], hold.db[1]]);
+
+        // latching clip detection at 0 dBFS
+        if (dbL >= 0 || dbR >= 0) {
+          setClipped((prev) => {
+            const nextL = prev[0] || dbL >= 0;
+            const nextR = prev[1] || dbR >= 0;
+            if (nextL === prev[0] && nextR === prev[1]) return prev;
+            return [nextL, nextR];
+          });
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -286,6 +297,12 @@ function TrackMeter({ trackId }: { trackId: string }) {
 
   const peakDb = Math.max(peaksDb[0], peaksDb[1]);
   const clipping = peakDb >= -0.5;
+  const anyClipped = clipped[0] || clipped[1];
+
+  const resetClip = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setClipped([false, false]);
+  };
 
   return (
     <div className="flex items-center gap-1">
@@ -294,9 +311,32 @@ function TrackMeter({ trackId }: { trackId: string }) {
         <MeterBar value={levels[0]} />
         <MeterBar value={levels[1]} />
       </div>
+      <button
+        type="button"
+        onClick={resetClip}
+        title={anyClipped ? "Clipping detected — click to reset" : "Clip indicator"}
+        aria-label={anyClipped ? "Clip indicator active, click to reset" : "Clip indicator"}
+        aria-pressed={anyClipped}
+        className="flex flex-col gap-[2px] justify-center"
+      >
+        <span
+          className={`block w-2 h-[5px] rounded-[1px] border ${
+            clipped[0]
+              ? "bg-red-500 border-red-300 shadow-[0_0_6px_2px_rgba(239,68,68,0.85)]"
+              : "bg-red-500/10 border-red-500/30"
+          }`}
+        />
+        <span
+          className={`block w-2 h-[5px] rounded-[1px] border ${
+            clipped[1]
+              ? "bg-red-500 border-red-300 shadow-[0_0_6px_2px_rgba(239,68,68,0.85)]"
+              : "bg-red-500/10 border-red-500/30"
+          }`}
+        />
+      </button>
       <span
         className={`text-[9px] font-mono w-7 text-right tabular-nums ${
-          clipping ? "text-red-400" : "text-muted-foreground"
+          anyClipped ? "text-red-400" : clipping ? "text-red-400" : "text-muted-foreground"
         }`}
       >
         {Number.isFinite(peakDb) ? peakDb.toFixed(0) : "-∞"}
