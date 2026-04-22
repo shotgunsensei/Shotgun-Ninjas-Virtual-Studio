@@ -52,6 +52,7 @@ interface TrackVoice {
 
 class AudioEngine {
   private master = new Tone.Channel({ volume: 0 }).toDestination();
+  private masterMeter = new Tone.Meter({ smoothing: 0.7 });
   private metronomeSynth = new Tone.MembraneSynth({
     pitchDecay: 0.008,
     octaves: 2,
@@ -72,6 +73,13 @@ class AudioEngine {
   constructor() {
     Tone.getTransport().bpm.value = 100;
     Tone.getTransport().timeSignature = [4, 4];
+    // post-master meter tap
+    this.master.connect(this.masterMeter);
+  }
+
+  /** Returns the post-master Tone.Meter for the main output bus. */
+  getMasterMeter(): Tone.Meter {
+    return this.masterMeter;
   }
 
   async unlock() {

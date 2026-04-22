@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { Play, Pause, Square, Circle, Volume2 } from "lucide-react";
+import { StereoMeter } from "./Meter";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -141,6 +142,8 @@ export function TransportBar() {
         </button>
       )}
 
+      <MasterMeter />
+
       <div className="flex items-center gap-2 min-w-[180px]">
         <Volume2 className="w-4 h-4 text-muted-foreground" />
         <Slider
@@ -155,6 +158,15 @@ export function TransportBar() {
           {Math.round(project.masterVolume * 100)}
         </span>
       </div>
+    </div>
+  );
+}
+
+function MasterMeter() {
+  const getMeter = useCallback(() => audio.getMasterMeter(), []);
+  return (
+    <div className="flex items-center min-w-[110px]">
+      <StereoMeter getMeter={getMeter} label="MAS" showClip />
     </div>
   );
 }
