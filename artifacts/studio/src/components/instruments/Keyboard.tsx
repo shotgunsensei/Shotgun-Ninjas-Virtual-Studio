@@ -246,7 +246,7 @@ export function Keyboard({ track }: { track: Track }) {
           Notes: <kbd className="text-foreground">A S D F G H J K L ; '</kbd>
         </span>
         <span>
-          Sharps: <kbd className="text-foreground">W E T Y U O P [ ]</kbd>
+          Sharps: <kbd className="text-foreground">W E T Y U O P [ ] \</kbd>
         </span>
       </div>
     </div>
