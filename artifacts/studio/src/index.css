@@ -125,11 +125,36 @@
       hsl(0 0% 6%) 100%
     );
     @apply border border-border rounded-md;
+    box-shadow:
+      inset 0 1px 0 hsl(var(--neon) / 0.06),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.45);
   }
 
   .panel-inset {
     background: hsl(0 0% 4%);
     @apply border border-border rounded-md;
+    box-shadow:
+      inset 0 1px 0 rgba(0, 0, 0, 0.5),
+      inset 0 -1px 0 hsl(var(--neon) / 0.04);
+  }
+
+  /*
+   * Subtle inner highlight overlay for panels — adds a faint neon-blue
+   * top edge and a soft inner vignette so panels feel etched. Stacks
+   * cleanly over .panel/.panel-inset.
+   */
+  .panel-glow {
+    position: relative;
+  }
+  .panel-glow::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow:
+      inset 0 1px 0 hsl(var(--neon) / 0.1),
+      inset 0 0 28px hsl(0 0% 100% / 0.025);
   }
 
   .led {
@@ -176,6 +201,72 @@
   .active-elevate,
   .active-elevate-2 {
     position: relative;
+  }
+}
+
+/*
+ * Atmospheric backdrop animations — drifting shurikens, twinkling neon
+ * points, and a tempo-synced master meter pulse. All gated on
+ * `prefers-reduced-motion: no-preference` so users with motion sensitivity
+ * see a calm, static backdrop.
+ */
+@keyframes studio-shuriken-spin {
+  from {
+    transform: rotate(0deg) translate3d(0, 0, 0);
+  }
+  to {
+    transform: rotate(360deg) translate3d(20px, -10px, 0);
+  }
+}
+
+@keyframes studio-twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes studio-master-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(0, 0, 0, 0.5),
+      inset 0 -1px 0 hsl(var(--neon) / 0.04),
+      0 0 0 0 hsl(var(--blood) / 0);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(0, 0, 0, 0.5),
+      inset 0 -1px 0 hsl(var(--neon) / 0.04),
+      0 0 14px 0 hsl(var(--blood) / 0.35);
+  }
+}
+
+.studio-shuriken {
+  /* Static rotation-free fallback when reduced motion is requested */
+  transform: rotate(15deg);
+  filter: blur(0.5px);
+}
+
+.studio-twinkle {
+  opacity: 0.25;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .studio-shuriken {
+    animation: studio-shuriken-spin linear infinite;
+  }
+  .studio-twinkle {
+    animation: studio-twinkle ease-in-out infinite;
+  }
+  .master-pulse-active {
+    animation: studio-master-pulse var(--master-pulse-duration, 0.6s)
+      ease-in-out infinite;
   }
 }
 

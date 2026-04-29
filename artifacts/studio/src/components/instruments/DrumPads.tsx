@@ -83,6 +83,11 @@ export function DrumPads({ track }: { track: Track }) {
   // Live "current step" indicator while playing
   const playheadStep = usePlayheadStep(isPlaying, patternBeats);
 
+  // Single CSS grid template shared by the beat header and every pad row,
+  // so the beat columns are pixel-perfect aligned. The first column is the
+  // fixed-width row label, the rest fill remaining width equally.
+  const gridTemplate = `3rem repeat(${totalSteps}, minmax(0, 1fr))`;
+
   const hit = (piece: DrumPiece) => {
     audio.triggerDrum(track.id, piece, 0.95);
     if (isRecording) noteRecorder.hit(track.id, piece, 0.95);
@@ -161,7 +166,7 @@ export function DrumPads({ track }: { track: Track }) {
       </div>
 
       {/* Step sequencer */}
-      <div className="panel-inset rounded-md p-2">
+      <div className="panel-inset panel-glow rounded-md p-2">
         <div className="flex items-center justify-between mb-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Step Sequencer · {totalSteps} steps · 16ths
@@ -176,33 +181,69 @@ export function DrumPads({ track }: { track: Track }) {
             Clear
           </button>
         </div>
+
+        {/* Beat-number header — shares the same grid template as the rows */}
+        <div
+          className="grid gap-x-0.5 mb-1"
+          style={{ gridTemplateColumns: gridTemplate }}
+        >
+          <div />
+          {stepBeats.map((_, i) => {
+            const isBeat = i % STEPS_PER_BEAT === 0;
+            const beatNumber = Math.floor(i / STEPS_PER_BEAT) + 1;
+            return (
+              <div
+                key={i}
+                className={`text-center font-mono leading-none ${
+                  isBeat
+                    ? "text-[9px] text-foreground/80"
+                    : "text-[8px] text-muted-foreground/40"
+                }`}
+              >
+                {isBeat ? beatNumber : "·"}
+              </div>
+            );
+          })}
+        </div>
+
         <div className="space-y-1">
           {DRUM_PIECES.map((piece) => (
-            <div key={piece} className="flex items-center gap-1">
-              <div className="w-12 font-mono text-[9px] text-muted-foreground">
+            <div
+              key={piece}
+              className="grid items-center gap-x-0.5"
+              style={{ gridTemplateColumns: gridTemplate }}
+            >
+              <div className="font-mono text-[9px] text-muted-foreground pr-1 truncate">
                 {LABELS[piece]}
               </div>
-              <div className="flex gap-0.5 flex-1">
-                {stepBeats.map((beat, i) => {
-                  const on = clip ? isOn(clip.notes, piece, beat) : false;
-                  const isBeat = i % STEPS_PER_BEAT === 0;
-                  const isAtPlayhead = isPlaying && i === playheadStep;
-                  return (
+              {stepBeats.map((beat, i) => {
+                const on = clip ? isOn(clip.notes, piece, beat) : false;
+                const isBeat = i % STEPS_PER_BEAT === 0;
+                const isAtPlayhead = isPlaying && i === playheadStep;
+                // Faint vertical divider between beat groups (4-step quartets).
+                const startsBeat = i > 0 && i % STEPS_PER_BEAT === 0;
+                return (
+                  <div key={i} className="relative">
+                    {startsBeat && (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute -left-[2px] top-0 bottom-0 w-px bg-border/60"
+                      />
+                    )}
                     <button
-                      key={i}
                       onClick={() => onToggle(piece, beat)}
-                      className={`flex-1 h-4 rounded-[2px] border transition-colors ${
+                      className={`block w-full h-4 rounded-[2px] border transition-colors ${
                         on
                           ? "bg-primary border-primary glow-red"
                           : isBeat
                             ? "bg-graphite/80 border-border"
-                            : "bg-graphite/40 border-border/60"
+                            : "bg-graphite/40 border-border/60 hover:bg-graphite/60"
                       } ${isAtPlayhead ? "ring-1 ring-neon" : ""}`}
                       aria-label={`${LABELS[piece]} step ${i + 1}`}
                     />
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>

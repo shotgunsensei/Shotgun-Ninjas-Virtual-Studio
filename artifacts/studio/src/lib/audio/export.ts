@@ -42,7 +42,7 @@ interface RenderVoice {
   reverb: Tone.Reverb;
   delay: Tone.FeedbackDelay;
   filter: Tone.Filter;
-  poly?: Tone.PolySynth;
+  poly?: import("./engine").MelodicVoice;
   drums?: DrumKit;
 }
 
@@ -169,6 +169,10 @@ async function renderOffline(
     }
 
     await Promise.all(reverbReady);
+    // Wait for any Tone.Sampler URL fetches (e.g. Salamander grand piano)
+    // to finish loading before starting offline render — otherwise sampled
+    // notes would silently drop out of the rendered mix.
+    await Tone.loaded();
     transport.start(0);
 
     // Tone's OfflineContext.render does not expose progress, so we estimate

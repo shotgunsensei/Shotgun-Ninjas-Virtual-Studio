@@ -6,6 +6,7 @@ import { ChannelStripsBar } from "./components/ChannelStrip";
 import { MidiPanel } from "./components/MidiPanel";
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
+import { BackgroundFx } from "./components/BackgroundFx";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
@@ -82,6 +83,33 @@ function Studio() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isPlaying, play, pause, record, stop]);
+
+  // First-note + sample-loading toasts: surface a one-time confirmation
+  // when audio actually starts producing sound (helps users self-diagnose
+  // whether keys/black notes triggered correctly), and a transient hint
+  // while sampled instruments are downloading their buffers.
+  useEffect(() => {
+    const onFirstNote = () => {
+      getStore().setStatus(
+        "Sound on — letters play white keys, W E T Y U O P [ ] play sharps",
+        "info",
+      );
+    };
+    const onLoading = () => {
+      getStore().setStatus("Loading instrument samples…", "info");
+    };
+    const onLoaded = () => {
+      getStore().setStatus("Instruments ready", "info");
+    };
+    window.addEventListener("studio:first-note", onFirstNote);
+    window.addEventListener("studio:samples-loading", onLoading);
+    window.addEventListener("studio:samples-loaded", onLoaded);
+    return () => {
+      window.removeEventListener("studio:first-note", onFirstNote);
+      window.removeEventListener("studio:samples-loading", onLoading);
+      window.removeEventListener("studio:samples-loaded", onLoaded);
+    };
+  }, []);
 
   // central MIDI router: bind midi events to mappings + monitor
   useMidiEvents(
@@ -174,7 +202,8 @@ function Studio() {
   }, []);
 
   return (
-    <div className="h-full flex flex-col bg-background text-foreground overflow-hidden">
+    <div className="h-full flex flex-col text-foreground overflow-hidden relative">
+      <BackgroundFx />
       <Header />
       <TransportBar />
       <div className="flex flex-1 overflow-hidden">
@@ -182,7 +211,7 @@ function Studio() {
           <Timeline />
           <ChannelStripsBar />
         </div>
-        <div className="w-80 border-l border-border bg-graphite flex flex-col overflow-hidden">
+        <div className="w-80 border-l border-border bg-graphite/80 backdrop-blur flex flex-col overflow-hidden">
           <div className="p-3 border-b border-border">
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
               Selected · {selectedTrack?.name ?? "—"}

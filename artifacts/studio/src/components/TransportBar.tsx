@@ -142,7 +142,7 @@ export function TransportBar() {
         </button>
       )}
 
-      <MasterMeter />
+      <MasterMeter bpm={project.bpm} pulsing={isPlaying} />
 
       <div className="flex items-center gap-2 min-w-[180px]">
         <Volume2 className="w-4 h-4 text-muted-foreground" />
@@ -162,10 +162,21 @@ export function TransportBar() {
   );
 }
 
-function MasterMeter() {
+/**
+ * Master meter wrapped in a tempo-synced glow ring. The CSS animation runs
+ * for one beat (60/bpm seconds) so the highlight visually breathes with the
+ * project tempo whenever the transport is rolling.
+ */
+function MasterMeter({ bpm, pulsing }: { bpm: number; pulsing: boolean }) {
   const getMeter = useCallback(() => audio.getMasterMeter(), []);
+  const beatSec = 60 / Math.max(40, Math.min(240, bpm));
   return (
-    <div className="flex items-center min-w-[110px]">
+    <div
+      className={`flex items-center min-w-[110px] px-2 py-1 rounded-md panel-inset ${
+        pulsing ? "master-pulse-active" : ""
+      }`}
+      style={{ ["--master-pulse-duration" as string]: `${beatSec}s` }}
+    >
       <StereoMeter getMeter={getMeter} label="MAS" showClip />
     </div>
   );
