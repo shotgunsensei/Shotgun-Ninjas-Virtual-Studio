@@ -166,13 +166,29 @@ class AudioEngine {
     return Tone.loaded();
   }
 
-  /** Fires a window event the first time any audible note is triggered. */
-  private notifyFirstNote() {
-    if (this.noteEverPlayed) return;
+  private firstQwertyShown = false;
+  private firstMidiShown = false;
+
+  /**
+   * Fires a window event the first time the user produces audio from a
+   * given source — currently "qwerty" (computer keyboard) or "midi"
+   * (external MIDI controller). Each source latches independently so the
+   * UI can confirm both input paths are working. Mouse clicks and step
+   * sequencer triggers do NOT fire this event — those have other
+   * affordances and a generic toast on every click would be noisy.
+   */
+  private notifyFirstNote(source: "qwerty" | "midi") {
     if (!this.unlocked) return;
+    if (source === "qwerty") {
+      if (this.firstQwertyShown) return;
+      this.firstQwertyShown = true;
+    } else {
+      if (this.firstMidiShown) return;
+      this.firstMidiShown = true;
+    }
     this.noteEverPlayed = true;
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("studio:first-note"));
+      window.dispatchEvent(new CustomEvent(`studio:first-${source}-note`));
     }
   }
 
@@ -304,24 +320,42 @@ class AudioEngine {
   }
 
   // ---- live triggering ----
-  triggerNote(trackId: string, note: string, durationSec = 0.4, velocity = 0.9) {
+  /**
+   * Trigger a one-shot melodic note. `source` lets the engine emit a
+   * source-specific "first note" toast for QWERTY or MIDI input — mouse
+   * clicks and other UI sources omit it (no toast).
+   */
+  triggerNote(
+    trackId: string,
+    note: string,
+    durationSec = 0.4,
+    velocity = 0.9,
+    source?: "qwerty" | "midi",
+  ) {
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
     try {
       v.poly.triggerAttackRelease(note, durationSec, undefined, velocity);
-      this.notifyFirstNote();
+      if (source) this.notifyFirstNote(source);
+      else this.noteEverPlayed = true;
     } catch {
       // ignore invalid notes
     }
   }
 
-  startNote(trackId: string, note: string, velocity = 0.9) {
+  startNote(
+    trackId: string,
+    note: string,
+    velocity = 0.9,
+    source?: "qwerty" | "midi",
+  ) {
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
     try {
       // PolySynth and Sampler both expose triggerAttack(note, time, velocity)
       (v.poly as Tone.PolySynth).triggerAttack(note, undefined, velocity);
-      this.notifyFirstNote();
+      if (source) this.notifyFirstNote(source);
+      else this.noteEverPlayed = true;
     } catch {
       // ignore
     }
@@ -413,7 +447,9 @@ class AudioEngine {
     const t = time ?? Tone.now();
     try {
       inst.trigger(t, velocity);
-      this.notifyFirstNote();
+      // Drums don't fire the source-specific "first note" toast — the
+      // toast text is about keyboard letters, which doesn't apply here.
+      this.noteEverPlayed = true;
     } catch {
       // ignore
     }

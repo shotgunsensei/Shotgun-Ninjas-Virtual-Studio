@@ -31,11 +31,13 @@ const QWERTY_MAP: Record<string, number> = {
   t: 66,
   y: 68,
   u: 70,
-  // Upper-octave sharps: o p [ ] -> C#5 D#5 F#5 G#5
+  // Upper-octave sharps: o p [ ] \ -> C#5 D#5 F#5 G#5 A#5
+  // (every visible black key in the rendered 2-octave range has a binding)
   o: 73,
   p: 75,
   "[": 78,
   "]": 80,
+  "\\": 82,
 };
 
 /**
@@ -75,7 +77,7 @@ export function Keyboard({ track }: { track: Track }) {
       const midi = map + (octave - 4) * 12;
       if (heldRef.current.has(midi)) return;
       const note = midiNoteToName(midi);
-      audio.startNote(track.id, note, 0.85);
+      audio.startNote(track.id, note, 0.85, "qwerty");
       if (isRecording) noteRecorder.noteOn(track.id, note, 0.85);
       setHeld((h) => new Set(h).add(midi));
     };
@@ -107,7 +109,7 @@ export function Keyboard({ track }: { track: Track }) {
       if (owned) return;
       if (e.type === "noteon") {
         const note = midiNoteToName(e.data1);
-        audio.startNote(track.id, note, e.data2 / 127);
+        audio.startNote(track.id, note, e.data2 / 127, "midi");
         if (isRecording) noteRecorder.noteOn(track.id, note, e.data2 / 127);
         setHeld((h) => new Set(h).add(e.data1));
       } else if (e.type === "noteoff") {

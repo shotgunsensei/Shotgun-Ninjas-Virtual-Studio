@@ -74,6 +74,7 @@ export function DrumPads({ track }: { track: Track }) {
   const clip = track.noteClips[0];
   const patternBeats = clipPatternBeats(clip, 4);
   const totalSteps = Math.round(patternBeats * STEPS_PER_BEAT);
+  const totalBeats = Math.max(1, Math.round(patternBeats));
 
   const stepBeats = useMemo(
     () => Array.from({ length: totalSteps }, (_, i) => i * STEP_DURATION_BEATS),
@@ -83,10 +84,17 @@ export function DrumPads({ track }: { track: Track }) {
   // Live "current step" indicator while playing
   const playheadStep = usePlayheadStep(isPlaying, patternBeats);
 
-  // Single CSS grid template shared by the beat header and every pad row,
-  // so the beat columns are pixel-perfect aligned. The first column is the
-  // fixed-width row label, the rest fill remaining width equally.
-  const gridTemplate = `3rem repeat(${totalSteps}, minmax(0, 1fr))`;
+  // Two grid templates that share a single label-gutter CSS variable so
+  // the row labels and beat columns line up pixel-perfectly:
+  //   • `padRowTemplate` is used for every drum row — one column per
+  //     16th-step (totalSteps cells).
+  //   • `beatHeaderTemplate` is used for the beat-number header row —
+  //     one column per beat (totalBeats cells), each spanning the same
+  //     width as 4 step cells, so the beat number is centered over its
+  //     4-step quartet rather than left-aligned on the beat-start step.
+  const PAD_LABEL_GUTTER = "3rem";
+  const padRowTemplate = `var(--pad-label-gutter) repeat(${totalSteps}, minmax(0, 1fr))`;
+  const beatHeaderTemplate = `var(--pad-label-gutter) repeat(${totalBeats}, minmax(0, 1fr))`;
 
   const hit = (piece: DrumPiece) => {
     audio.triggerDrum(track.id, piece, 0.95);
@@ -166,7 +174,10 @@ export function DrumPads({ track }: { track: Track }) {
       </div>
 
       {/* Step sequencer */}
-      <div className="panel-inset panel-glow rounded-md p-2">
+      <div
+        className="panel-inset panel-glow rounded-md p-2"
+        style={{ ["--pad-label-gutter" as string]: PAD_LABEL_GUTTER }}
+      >
         <div className="flex items-center justify-between mb-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Step Sequencer · {totalSteps} steps · 16ths
@@ -182,28 +193,26 @@ export function DrumPads({ track }: { track: Track }) {
           </button>
         </div>
 
-        {/* Beat-number header — shares the same grid template as the rows */}
+        {/*
+          Beat-number header. Each cell after the gutter spans one beat's
+          worth of step columns (4 × 1fr), so the number ends up centered
+          over its 4-step quartet rather than sitting on the beat-start
+          step. The gutter column reuses the same CSS variable as the pad
+          rows below so the rest of the columns align perfectly.
+        */}
         <div
           className="grid gap-x-0.5 mb-1"
-          style={{ gridTemplateColumns: gridTemplate }}
+          style={{ gridTemplateColumns: beatHeaderTemplate }}
         >
           <div />
-          {stepBeats.map((_, i) => {
-            const isBeat = i % STEPS_PER_BEAT === 0;
-            const beatNumber = Math.floor(i / STEPS_PER_BEAT) + 1;
-            return (
-              <div
-                key={i}
-                className={`text-center font-mono leading-none ${
-                  isBeat
-                    ? "text-[9px] text-foreground/80"
-                    : "text-[8px] text-muted-foreground/40"
-                }`}
-              >
-                {isBeat ? beatNumber : "·"}
-              </div>
-            );
-          })}
+          {Array.from({ length: totalBeats }, (_, beat) => (
+            <div
+              key={beat}
+              className="text-center font-mono leading-none text-[9px] text-foreground/80"
+            >
+              {beat + 1}
+            </div>
+          ))}
         </div>
 
         <div className="space-y-1">
@@ -211,7 +220,7 @@ export function DrumPads({ track }: { track: Track }) {
             <div
               key={piece}
               className="grid items-center gap-x-0.5"
-              style={{ gridTemplateColumns: gridTemplate }}
+              style={{ gridTemplateColumns: padRowTemplate }}
             >
               <div className="font-mono text-[9px] text-muted-foreground pr-1 truncate">
                 {LABELS[piece]}

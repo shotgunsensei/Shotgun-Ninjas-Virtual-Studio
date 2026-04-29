@@ -89,9 +89,15 @@ function Studio() {
   // whether keys/black notes triggered correctly), and a transient hint
   // while sampled instruments are downloading their buffers.
   useEffect(() => {
-    const onFirstNote = () => {
+    const onFirstQwerty = () => {
       getStore().setStatus(
-        "Sound on — letters play white keys, W E T Y U O P [ ] play sharps",
+        "Sound on — A S D F play white keys, W E T Y U O P [ ] \\ play sharps",
+        "info",
+      );
+    };
+    const onFirstMidi = () => {
+      getStore().setStatus(
+        "MIDI input live — your controller is playing the studio",
         "info",
       );
     };
@@ -101,11 +107,13 @@ function Studio() {
     const onLoaded = () => {
       getStore().setStatus("Instruments ready", "info");
     };
-    window.addEventListener("studio:first-note", onFirstNote);
+    window.addEventListener("studio:first-qwerty-note", onFirstQwerty);
+    window.addEventListener("studio:first-midi-note", onFirstMidi);
     window.addEventListener("studio:samples-loading", onLoading);
     window.addEventListener("studio:samples-loaded", onLoaded);
     return () => {
-      window.removeEventListener("studio:first-note", onFirstNote);
+      window.removeEventListener("studio:first-qwerty-note", onFirstQwerty);
+      window.removeEventListener("studio:first-midi-note", onFirstMidi);
       window.removeEventListener("studio:samples-loading", onLoading);
       window.removeEventListener("studio:samples-loaded", onLoaded);
     };
