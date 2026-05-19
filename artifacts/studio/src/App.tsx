@@ -7,6 +7,8 @@ import { MidiPanel } from "./components/MidiPanel";
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
 import { BackgroundFx } from "./components/BackgroundFx";
+import { DropZone } from "./components/DropZone";
+import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
@@ -236,7 +238,33 @@ function Studio() {
       </div>
       <HelpDialog />
       <StatusToast />
+      <DropZone
+        onFiles={(files) => {
+          const f = files[0];
+          if (!f) return;
+          getStore().set({
+            pendingSample: {
+              blob: f,
+              defaultName: f.name.replace(/\.[^.]+$/, "") || "Imported",
+            },
+          });
+        }}
+      />
+      <PendingSampleHost />
     </div>
+  );
+}
+
+function PendingSampleHost() {
+  const pending = useStore((s) => s.pendingSample);
+  return (
+    <SamplePreviewDialog
+      open={!!pending}
+      blob={pending?.blob ?? null}
+      defaultName={pending?.defaultName ?? "Sample"}
+      recordedTrackId={pending?.recordedTrackId}
+      onClose={() => getStore().set({ pendingSample: null })}
+    />
   );
 }
 

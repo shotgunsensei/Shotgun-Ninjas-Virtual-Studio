@@ -43,6 +43,12 @@ class Store {
     statusVariant: "info" | "warn" | "error" | null;
     vocalDeviceId: string | null;
     countInTimers: { interval: number | null; timeout: number | null };
+    /** Pending sample to surface in the SamplePreviewDialog. */
+    pendingSample: {
+      blob: Blob;
+      defaultName: string;
+      recordedTrackId?: string;
+    } | null;
   };
 
   constructor(project: Project) {
@@ -64,6 +70,7 @@ class Store {
       statusVariant: null,
       vocalDeviceId: null,
       countInTimers: { interval: null, timeout: null },
+      pendingSample: null,
     };
   }
 

@@ -151,10 +151,25 @@ export function TransportBar() {
         <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
           Count-in
         </label>
-        <Switch
-          checked={project.countIn}
-          onCheckedChange={(v) => getStore().patchProject({ countIn: v })}
-        />
+        <select
+          value={project.countIn ? `${project.countInBars ?? 1}` : "0"}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "0") {
+              getStore().patchProject({ countIn: false });
+            } else {
+              getStore().patchProject({
+                countIn: true,
+                countInBars: v === "2" ? 2 : 1,
+              });
+            }
+          }}
+          className="bg-background border border-border rounded-md h-7 px-2 font-mono text-xs"
+        >
+          <option value="0">Off</option>
+          <option value="1">1 bar</option>
+          <option value="2">2 bars</option>
+        </select>
       </div>
 
       <div className="flex items-center gap-2">

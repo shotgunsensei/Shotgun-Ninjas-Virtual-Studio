@@ -154,6 +154,20 @@ export interface MidiMapping {
   label: string;
 }
 
+/**
+ * Sample library entry — an imported or recorded audio sample that can be
+ * reused across the project (placed on a vocal/audio track, or assigned
+ * to a drum pad). Blobs are persisted separately in IndexedDB via blobKey.
+ */
+export interface SampleLibraryItem {
+  id: string;
+  name: string;
+  blobKey: string;
+  durationSec: number;
+  createdAt: number;
+  blob?: Blob;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -165,9 +179,13 @@ export interface Project {
   loopEndBeat: number;
   metronome: boolean;
   countIn: boolean;
+  /** Length of the count-in in bars (1 or 2). Defaults to 1 if absent. */
+  countInBars?: 1 | 2;
   masterVolume: number;
   tracks: Track[];
   midiMappings: MidiMapping[];
+  /** Reusable sample library (imported files, recordings). */
+  samples?: SampleLibraryItem[];
   updatedAt: number;
   /** Project-level groove. Per-track grooves override individual fields. */
   globalGroove?: Partial<GrooveSettings>;

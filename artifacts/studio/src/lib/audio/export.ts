@@ -57,21 +57,32 @@ export async function renderProjectToWav(
   return result.blob;
 }
 
+export interface RenderOptions {
+  /** When true, only the loop region [loopStartBeat..loopEndBeat) is rendered. */
+  loopOnly?: boolean;
+}
+
 export async function renderProject(
   project: Project,
   format: ExportFormat,
   onProgress?: (p: RenderProgress) => void,
+  options: RenderOptions = {},
 ): Promise<ExportResult> {
   const beatsPerSec = project.bpm / 60;
-  const totalBeats = project.bars * 4;
-  const projectSec = totalBeats / beatsPerSec;
+  const useLoop =
+    options.loopOnly &&
+    project.loopEnabled &&
+    project.loopEndBeat > project.loopStartBeat;
+  const startBeat = useLoop ? project.loopStartBeat : 0;
+  const endBeat = useLoop ? project.loopEndBeat : project.bars * 4;
+  const projectSec = Math.max(0, (endBeat - startBeat) / beatsPerSec);
   const renderSec = Math.max(0.5, projectSec + TAIL_SEC);
 
   onProgress?.({ phase: "decoding", progress: 0 });
   const decoded = await decodeAudioClips(project);
   onProgress?.({ phase: "decoding", progress: 1 });
 
-  const buffer = await renderOffline(project, decoded, renderSec, (p) =>
+  const buffer = await renderOffline(project, decoded, renderSec, startBeat, endBeat, (p) =>
     onProgress?.({ phase: "rendering", progress: p }),
   );
 
@@ -124,6 +135,8 @@ async function renderOffline(
   project: Project,
   audioBuffers: Map<string, AudioBuffer>,
   durationSec: number,
+  startBeat: number,
+  endBeat: number,
   onProgress: (p: number) => void,
 ): Promise<AudioBuffer> {
   const originalContext = Tone.getContext();
@@ -136,6 +149,8 @@ async function renderOffline(
     const transport = offline.transport;
     transport.bpm.value = project.bpm;
     transport.timeSignature = [4, 4];
+    // shift so the requested startBeat plays at offline t=0
+    const beatOffset = startBeat;
 
     const anySolo = project.tracks.some((t) => t.solo);
     const reverbReady: Promise<unknown>[] = [];
@@ -155,19 +170,39 @@ async function renderOffline(
       v.channel.pan.value = clampPan(track.pan);
 
       for (const clip of track.noteClips) {
-        scheduleNoteClip(track, clip, v, transport);
+        scheduleNoteClip(track, clip, v, transport, beatOffset, endBeat);
       }
       for (const clip of track.audioClips) {
         const buf = audioBuffers.get(clip.id);
         if (!buf) continue;
+        // skip clips entirely outside the requested render window
+        if (clip.start >= endBeat) continue;
         const player = new Tone.Player(buf).connect(v.channel);
-        transport.schedule((time) => {
-          try {
-            player.start(time);
-          } catch {
-            // ignore
-          }
-        }, `0:${clip.start}:0`);
+        const beatStart = clip.start - beatOffset;
+        const offset = Math.max(0, clip.offsetSec ?? 0);
+        const duration = Math.max(0, clip.durationSec);
+        if (beatStart < 0) {
+          // clip already in progress at render start — skip the leading
+          // portion so playback aligns to t=0
+          const beatsPerSec = project.bpm / 60;
+          const skipSec = (-beatStart) / beatsPerSec;
+          if (skipSec >= duration) continue;
+          transport.schedule((time) => {
+            try {
+              player.start(time, offset + skipSec, duration - skipSec);
+            } catch {
+              // ignore
+            }
+          }, "0:0:0");
+        } else {
+          transport.schedule((time) => {
+            try {
+              player.start(time, offset, duration);
+            } catch {
+              // ignore
+            }
+          }, `0:${beatStart}:0`);
+        }
       }
     }
 
@@ -288,9 +323,14 @@ function scheduleNoteClip(
   clip: { start: number; notes: Array<{ time: number; note: string; duration: number; velocity: number }> },
   v: RenderVoice,
   transport: Tone.OfflineContext["transport"],
+  beatOffset = 0,
+  endBeat = Infinity,
 ) {
   for (const ev of clip.notes) {
-    const t = clip.start + ev.time;
+    const absT = clip.start + ev.time;
+    if (absT >= endBeat) continue;
+    const t = absT - beatOffset;
+    if (t < 0) continue;
     transport.schedule((time) => {
       if (track.kind === "drums") {
         if (v.kit) {
@@ -448,4 +488,39 @@ export function downloadBlob(blob: Blob, filename: string) {
 
 export function safeFilename(name: string): string {
   return name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
+}
+
+/**
+ * Standard filename for studio bounces:
+ *   shotgun-ninjas-studio_<project-name>_<bpm>_<YYYY-MM-DD>.<ext>
+ */
+export function studioExportFilename(
+  projectName: string,
+  bpm: number,
+  extension: string,
+): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const safe = safeFilename(projectName);
+  return `shotgun-ninjas-studio_${safe}_${Math.round(bpm)}_${y}-${m}-${day}.${extension}`;
+}
+
+/**
+ * Scan an AudioBuffer for samples above 0 dBFS. Returns the peak in dBFS
+ * and a clipping flag, used to surface the master clipping warning in the
+ * Export modal.
+ */
+export function detectClipping(buffer: AudioBuffer): { clipped: boolean; peakDb: number } {
+  let peak = 0;
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const data = buffer.getChannelData(c);
+    for (let i = 0; i < data.length; i++) {
+      const a = Math.abs(data[i]);
+      if (a > peak) peak = a;
+    }
+  }
+  const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+  return { clipped: peak >= 0.999, peakDb };
 }

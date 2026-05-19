@@ -1,5 +1,15 @@
-import { useState } from "react";
-import { Save, FolderOpen, FilePlus2, HelpCircle, Download } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  Save,
+  FolderOpen,
+  FilePlus2,
+  HelpCircle,
+  Download,
+  Copy,
+  FileText,
+  Upload,
+  AlertTriangle,
+} from "lucide-react";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +19,8 @@ import { audio } from "../lib/audio/engine";
 import {
   renderProject,
   downloadBlob,
-  safeFilename,
+  studioExportFilename,
+  detectClipping,
   type ExportFormat,
   type RenderProgress,
 } from "../lib/audio/export";
@@ -19,6 +30,9 @@ import {
   loadProject,
   deleteProject,
   setLastProjectId,
+  duplicateProject,
+  projectToJson,
+  parseProjectJson,
 } from "../lib/storage/db";
 import {
   Dialog,
@@ -41,39 +55,102 @@ export function Header() {
     progress: 0,
   });
   const [exportError, setExportError] = useState<string | null>(null);
-  const [chooserOpen, setChooserOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [loopOnly, setLoopOnly] = useState(false);
+  const cancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+  const jsonImportRef = useRef<HTMLInputElement>(null);
 
   const startExport = async (format: ExportFormat) => {
     if (exporting) return;
-    setChooserOpen(false);
     audio.stop();
     setExportFormat(format);
     setExportError(null);
     setExportProgress({ phase: "decoding", progress: 0 });
     setExporting(true);
+    cancelRef.current = { cancelled: false };
     try {
       const proj = getStore().state.project;
-      const result = await renderProject(proj, format, (p) =>
-        setExportProgress(p),
+      const result = await renderProject(
+        proj,
+        format,
+        (p) => {
+          if (cancelRef.current.cancelled) {
+            throw new Error("Export cancelled");
+          }
+          setExportProgress(p);
+        },
+        { loopOnly },
       );
-      downloadBlob(result.blob, `${safeFilename(proj.name)}.${result.extension}`);
-      getStore().setStatus(
-        `Exported ${format.toUpperCase()}`,
-        "info",
+      if (cancelRef.current.cancelled) throw new Error("Export cancelled");
+      // Detect clipping for status surface
+      try {
+        const ac = new AudioContext();
+        const buf = await ac.decodeAudioData(
+          (await result.blob.arrayBuffer()).slice(0),
+        );
+        const { clipped, peakDb } = detectClipping(buf);
+        if (clipped) {
+          getStore().setStatus(
+            `Master clipped (${peakDb.toFixed(1)} dBFS) — consider lowering master.`,
+            "warn",
+          );
+        }
+        await ac.close();
+      } catch {
+        // ignore peak detection failures
+      }
+      downloadBlob(
+        result.blob,
+        studioExportFilename(proj.name, proj.bpm, result.extension),
       );
+      getStore().setStatus(`Exported ${format.toUpperCase()}`, "info");
     } catch (err) {
       const msg = (err as Error).message || "Export failed";
-      setExportError(msg);
-      getStore().setStatus(`Export failed: ${msg}`, "error");
+      if (msg === "Export cancelled") {
+        getStore().setStatus("Export cancelled", "warn");
+      } else {
+        setExportError(msg);
+        getStore().setStatus(`Export failed: ${msg}`, "error");
+      }
     } finally {
       setExporting(false);
+    }
+  };
+
+  const onJsonExport = async () => {
+    try {
+      const proj = getStore().state.project;
+      const text = await projectToJson(proj);
+      const blob = new Blob([text], { type: "application/json" });
+      downloadBlob(blob, studioExportFilename(proj.name, proj.bpm, "json"));
+      getStore().setStatus("Project JSON exported", "info");
+    } catch (err) {
+      getStore().setStatus(
+        `JSON export failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  const onJsonImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const proj = parseProjectJson(text);
+      await saveProject(proj);
+      await setLastProjectId(proj.id);
+      resetStore(proj);
+      window.location.reload();
+    } catch (err) {
+      getStore().setStatus(
+        `JSON import failed: ${(err as Error).message}`,
+        "error",
+      );
     }
   };
 
   const onNew = async () => {
     audio.stop();
     const proj = defaultProject();
-    // persist as a new project + mark as last so reload is consistent
     await saveProject(proj);
     await setLastProjectId(proj.id);
     resetStore(proj);
@@ -87,6 +164,31 @@ export function Header() {
     } catch (err) {
       getStore().setStatus(`Save failed: ${(err as Error).message}`, "error");
     }
+  };
+
+  const onSaveAs = async () => {
+    const cur = getStore().state.project;
+    const name = window.prompt("Save project as", `${cur.name} copy`);
+    if (!name) return;
+    try {
+      const dup = await duplicateProject(cur, name);
+      await setLastProjectId(dup.id);
+      resetStore(dup);
+      window.location.reload();
+    } catch (err) {
+      getStore().setStatus(
+        `Save As failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  const onDuplicate = async (id: string) => {
+    const proj = await loadProject(id);
+    if (!proj) return;
+    const dup = await duplicateProject(proj, `${proj.name} copy`);
+    setProjects(await listProjects());
+    getStore().setStatus(`Duplicated to “${dup.name}”`, "info");
   };
 
   const openLoadDialog = async () => {
@@ -143,13 +245,21 @@ export function Header() {
         <Button variant="outline" size="sm" onClick={onSave} className="font-mono text-xs">
           <Save className="w-3.5 h-3.5 mr-1" /> Save
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onSaveAs}
+          className="font-mono text-xs"
+        >
+          <Copy className="w-3.5 h-3.5 mr-1" /> Save As
+        </Button>
         <Button variant="outline" size="sm" onClick={openLoadDialog} className="font-mono text-xs">
           <FolderOpen className="w-3.5 h-3.5 mr-1" /> Load
         </Button>
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setChooserOpen(true)}
+          onClick={() => setExportModalOpen(true)}
           disabled={exporting}
           className="font-mono text-xs"
         >
@@ -163,70 +273,124 @@ export function Header() {
         >
           <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
         </Button>
+        <input
+          ref={jsonImportRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onJsonImport(f);
+            e.target.value = "";
+          }}
+        />
       </div>
 
-      <Dialog open={chooserOpen} onOpenChange={setChooserOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Export song</DialogTitle>
-            <DialogDescription>
-              Pick a format for your downloaded file.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => startExport("wav")}
-              className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
-            >
-              <div className="font-mono text-sm">WAV</div>
-              <div className="text-xs text-muted-foreground">
-                Uncompressed, highest quality. Larger file.
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => startExport("mp3")}
-              className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
-            >
-              <div className="font-mono text-sm">MP3</div>
-              <div className="text-xs text-muted-foreground">
-                Compressed at 192 kbps. Smaller, easy to share.
-              </div>
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
+      {/* Export modal — opens chooser, kicks off render, shows progress, cancel, errors */}
       <Dialog
-        open={exporting || exportError !== null}
+        open={exportModalOpen || exporting || exportError !== null}
         onOpenChange={(open) => {
-          if (!open && !exporting) {
+          if (!open) {
+            if (exporting) return; // can't dismiss mid-render
+            setExportModalOpen(false);
             setExportError(null);
           }
         }}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Export song</DialogTitle>
             <DialogDescription>
-              {exportError
-                ? "Something went wrong while rendering."
-                : `Rendering your arrangement to a ${exportFormat.toUpperCase()} file.`}
+              <span className="font-mono text-xs">
+                {project.name} · {project.bpm} BPM ·{" "}
+                {project.loopEnabled
+                  ? `loop ${project.loopStartBeat}–${project.loopEndBeat} beats`
+                  : `${project.bars} bars`}
+              </span>
             </DialogDescription>
           </DialogHeader>
-          {exportError ? (
+
+          {!exporting && !exportError && (
             <div className="space-y-3">
-              <p className="text-sm text-destructive font-mono break-words">
-                {exportError}
-              </p>
-              <div className="flex justify-end">
-                <Button size="sm" onClick={() => setExportError(null)}>
-                  Close
-                </Button>
+              <ClippingWarning />
+
+              {project.loopEnabled && (
+                <label className="flex items-center gap-2 text-xs font-mono">
+                  <input
+                    type="checkbox"
+                    checked={loopOnly}
+                    onChange={(e) => setLoopOnly(e.target.checked)}
+                  />
+                  Export loop region only
+                </label>
+              )}
+
+              <button
+                type="button"
+                onClick={() => startExport("wav")}
+                className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+              >
+                <div className="font-mono text-sm">Export WAV</div>
+                <div className="text-xs text-muted-foreground">
+                  Uncompressed PCM, 44.1 kHz, 16-bit stereo.
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => startExport("mp3")}
+                className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+              >
+                <div className="font-mono text-sm">Export MP3</div>
+                <div className="text-xs text-muted-foreground">
+                  192 kbps stereo. Smaller, easy to share.
+                </div>
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onJsonExport();
+                    setExportModalOpen(false);
+                  }}
+                  className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" /> Project JSON
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Re-importable project file.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportModalOpen(false);
+                    jsonImportRef.current?.click();
+                  }}
+                  className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1">
+                    <Upload className="w-3.5 h-3.5" /> Import JSON
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Restore a project from JSON.
+                  </div>
+                </button>
               </div>
+              <button
+                type="button"
+                disabled
+                className="w-full text-left border border-border rounded-md p-3 bg-background/40 opacity-60 cursor-not-allowed"
+              >
+                <div className="font-mono text-sm">Export Stems</div>
+                <div className="text-xs text-muted-foreground">
+                  Coming soon — per-track WAV exports.
+                </div>
+              </button>
             </div>
-          ) : (
+          )}
+
+          {exporting && !exportError && (
             <div className="space-y-3">
               <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
                 {exportProgress.phase === "decoding" && "Loading audio clips…"}
@@ -235,8 +399,38 @@ export function Header() {
                   `Encoding ${exportFormat.toUpperCase()}…`}
               </div>
               <Progress value={Math.round(exportProgress.progress * 100)} />
-              <div className="text-right text-xs font-mono text-muted-foreground">
-                {Math.round(exportProgress.progress * 100)}%
+              <div className="flex justify-between items-center text-xs font-mono">
+                <span className="text-muted-foreground">
+                  {Math.round(exportProgress.progress * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    cancelRef.current.cancelled = true;
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {exportError && (
+            <div className="space-y-3">
+              <p className="text-sm text-destructive font-mono break-words">
+                {exportError}
+              </p>
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setExportError(null);
+                    setExportModalOpen(false);
+                  }}
+                >
+                  Close
+                </Button>
               </div>
             </div>
           )}
@@ -272,6 +466,13 @@ export function Header() {
                   </Button>
                   <Button
                     size="sm"
+                    variant="outline"
+                    onClick={() => onDuplicate(p.id)}
+                  >
+                    Duplicate
+                  </Button>
+                  <Button
+                    size="sm"
                     variant="destructive"
                     onClick={() => onDelete(p.id)}
                   >
@@ -284,5 +485,24 @@ export function Header() {
         </DialogContent>
       </Dialog>
     </header>
+  );
+}
+
+/**
+ * Project-wide clipping warning shown in the export modal. Reads the
+ * post-master peak meter and lights up if any sample has clipped recently.
+ */
+function ClippingWarning() {
+  const peak = audio.getMasterLevels().peakDb;
+  const maxPeak = Math.max(peak[0], peak[1]);
+  if (!Number.isFinite(maxPeak) || maxPeak < -1) return null;
+  return (
+    <div className="flex items-start gap-2 border border-yellow-600/50 bg-yellow-600/10 rounded-md p-2 text-xs font-mono">
+      <AlertTriangle className="w-4 h-4 text-yellow-500 flex-none mt-0.5" />
+      <span>
+        Master is near or above 0 dBFS ({maxPeak.toFixed(1)} dBFS). Consider
+        lowering the master volume before bouncing to avoid audible clipping.
+      </span>
+    </div>
   );
 }

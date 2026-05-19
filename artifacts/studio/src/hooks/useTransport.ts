@@ -57,6 +57,16 @@ export function useTransport() {
               durationSec: result.durationSec,
               blob: result.blob,
             });
+            // Surface the take in the sample preview dialog so the user
+            // can trim silence / normalize / fade and save it to the
+            // sample library or re-assign it.
+            getStore().set({
+              pendingSample: {
+                blob: result.blob,
+                defaultName: `${armed.name} take ${new Date().toLocaleTimeString()}`,
+                recordedTrackId: armed.id,
+              },
+            });
           }
         }
       } else if (noteRecorder.isActiveFor(armed.id)) {
@@ -104,11 +114,12 @@ export function useTransport() {
     };
 
     if (proj.countIn) {
-      // 4 beats of metronome accent at current bpm, then start
+      // 1 or 2 bars of metronome accent at current bpm, then start
       audio.setMetronome(true);
       const wasMet = proj.metronome;
       const bpm = proj.bpm;
       const beatMs = (60 / bpm) * 1000;
+      const countInBeats = (proj.countInBars ?? 1) * 4;
       audio.play();
       let n = 0;
       const intervalId = window.setInterval(() => {
@@ -130,7 +141,7 @@ export function useTransport() {
         audio.stop();
         audio.play();
         await startRecording();
-      }, beatMs * 4);
+      }, beatMs * countInBeats);
       getStore().set({
         isPlaying: true,
         countingIn: true,
