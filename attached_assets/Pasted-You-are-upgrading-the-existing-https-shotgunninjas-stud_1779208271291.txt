@@ -1,0 +1,257 @@
+You are upgrading the existing https://shotgunninjas.studio project into Shotgun Ninjas Virtual Studio v2.
+
+Goal:
+Transform the current fun browser-based DAW/music toy into a more advanced, realistic, polished browser DAW experience while preserving the existing working functionality, routes, branding, and deployment behavior. Do not delete working features unless replacing them with a better compatible version. Audit the current codebase first, then implement incrementally.
+
+Primary outcome:
+The app should feel like a compact browser DAW with a cyber-ninja studio aesthetic: realistic sounds, better sequencing, a real mixer, better transport controls, project save/load, export, visual feedback, and a more immersive UI.
+
+Technical priorities:
+1. Preserve the existing project structure where possible.
+2. Use React/Vite conventions already present in the project.
+3. Use Tone.js as the main music timing/audio framework if already installed; otherwise add it.
+4. Add wavesurfer.js only where waveform display/editing is useful.
+5. Use IndexedDB through a small storage helper for projects, samples, and user-created patterns.
+6. Keep the app browser-only unless a backend already exists.
+7. Do not add paid APIs or external cloud dependencies.
+8. Keep all audio user-gesture requirements handled cleanly with a single “Enable Audio” state.
+9. Make mobile/tablet responsive, but optimize first for desktop/laptop production use.
+
+Audit first:
+Before changing files, inspect the current app and report in comments or a markdown file named UPGRADE_NOTES.md:
+- Current routes/pages/components
+- Current audio engine approach
+- Current transport/playback logic
+- Current sound sources
+- Current state management
+- Current save/load behavior, if any
+- Current build errors or console warnings
+- Highest-risk files to change
+
+Core feature upgrades:
+
+A. Audio Engine Layer
+Create or refactor into a dedicated audio engine module:
+- src/audio/AudioEngine.ts or src/audio/audioEngine.ts
+- Centralize Tone.start(), transport start/stop/pause, BPM, swing, master volume, mute, metronome, and scheduling.
+- Expose safe methods:
+  - initAudio()
+  - play()
+  - stop()
+  - pause()
+  - setBpm()
+  - setSwing()
+  - schedulePattern()
+  - triggerSample()
+  - triggerInstrumentNote()
+  - panicStopAll()
+- Ensure stop releases active notes and stops lingering tails where appropriate.
+- Add master limiter/compressor to prevent clipping.
+- Add master meter values for UI visualization.
+
+B. Better Sounds and Realism
+Upgrade the sound model from simple static sounds to a more realistic instrument/sampler system:
+- Add realistic drum kit presets:
+  - Ninja Trap Kit
+  - Boom Bap Dojo Kit
+  - Cyber Studio Kit
+  - Lo-Fi Smoke Kit
+- Each drum lane should support:
+  - volume
+  - pan
+  - pitch
+  - decay
+  - filter cutoff
+  - reverb send
+  - delay send
+  - mute/solo
+- Add humanization:
+  - optional timing variation
+  - optional velocity variation
+  - round-robin sample variation when multiple samples exist
+- Add velocity support to pads and sequencer steps.
+- Add ADSR envelopes for synth/sampler instruments.
+- Add instrument presets:
+  - 808 bass
+  - sub bass
+  - pluck synth
+  - dark pad
+  - lead synth
+  - bell/mallet
+- If real sample files are not currently available, create a clean placeholder architecture and use generated Tone synth patches until real samples are added.
+
+C. Sequencer and Composition
+Add a proper composition workspace:
+- 16-step and 32-step drum sequencer.
+- Pattern length selectable: 1, 2, 4, 8 bars.
+- Time divisions: 1/4, 1/8, 1/16, 1/16T, 1/32.
+- Per-step controls:
+  - active/inactive
+  - velocity
+  - probability
+  - flam/retrigger
+  - micro-timing nudge
+- Add copy/paste/clear/randomize pattern actions.
+- Add smart randomize modes:
+  - subtle groove
+  - trap hats
+  - boom bap
+  - cinematic
+- Add a simple piano roll for melodic instruments:
+  - click/drag to add notes
+  - resize notes
+  - move notes
+  - velocity lane
+  - snap-to-grid
+  - basic scale highlighting
+
+D. Arrangement View
+Add an arrangement timeline above or beside the sequencer:
+- Tracks contain clips/pattern blocks.
+- Clips can be duplicated, moved, renamed, and color-coded.
+- Basic sections: Intro, Verse, Hook, Bridge, Outro.
+- Add loop region controls.
+- Add playhead animation synced to transport.
+- Keep this lightweight; do not overbuild into full Ableton yet.
+
+E. Mixer
+Add a real mixer panel:
+- One channel strip per track.
+- Volume fader
+- Pan knob
+- Mute/Solo/Arm buttons
+- Peak meter
+- Track name/color
+- FX sends for reverb and delay
+- Master channel with limiter/compressor and stereo meter
+- Add basic EQ per track using Web Audio/Tone filters:
+  - low gain
+  - mid gain
+  - high gain
+- Add preset mix buttons:
+  - Clean
+  - Loud
+  - Lo-Fi
+  - Wide
+  - Dark
+
+F. Effects Rack
+Create modular effects:
+- Reverb
+- Delay
+- Distortion/saturation
+- Filter
+- Compressor
+- Bitcrusher/lo-fi
+- Chorus
+- Stereo widener if practical
+Each track should have a simple effects rack with enable/disable toggles and 2-4 core parameters per effect.
+
+G. Recording and Import
+Add basic audio import:
+- User can drag/drop WAV/MP3/OGG files.
+- Decode using browser audio APIs.
+- Show waveform preview.
+- Allow trimming or selecting a region if wavesurfer.js is installed.
+- Allow imported samples to be assigned to pads/tracks.
+Add mic recording:
+- Record from microphone with browser permission.
+- Save recording as a sample in the project.
+- Show the recorded waveform.
+- Allow quick assign to pad/track.
+
+H. Save, Load, and Export
+Add project persistence:
+- Save project to IndexedDB with:
+  - project name
+  - BPM
+  - swing
+  - tracks
+  - patterns
+  - clips
+  - mixer settings
+  - effect settings
+  - imported sample metadata
+- Add Project Browser:
+  - New Project
+  - Save
+  - Save As
+  - Load
+  - Duplicate
+  - Delete
+- Add JSON export/import of project data.
+- Add WAV export/bounce using OfflineAudioContext where practical.
+- If full WAV bounce is too much for one pass, implement a clean export pipeline stub with a working JSON project export first.
+
+I. UI/UX Upgrade
+Redesign the interface to feel like “Shotgun Ninjas Virtual Studio”:
+- Dark cyber studio theme
+- Black/charcoal panels
+- Red ninja accent color
+- Electric blue meters/playhead/accent glow
+- Subtle grid texture or studio-console background
+- Transport bar fixed at top or bottom
+- Left sidebar for project/instruments/samples
+- Main center workspace for sequencer/arrangement
+- Right inspector for selected track/note/effect
+- Bottom mixer drawer
+- Add keyboard shortcut overlay
+- Add first-run help modal:
+  - Enable Audio
+  - Pick Kit
+  - Add Steps
+  - Press Space to Play
+  - Save Project
+- Make buttons feel tactile: hover, active, pressed states.
+- Add smooth but lightweight animations. Avoid heavy GPU effects that hurt audio timing.
+
+J. Keyboard Shortcuts
+Add:
+- Space = play/pause
+- Enter = stop
+- R = record
+- M = metronome
+- S = save
+- B = bounce/export
+- Delete = delete selected note/clip
+- Ctrl/Cmd+C/V = copy/paste clip or pattern
+- 1-8 = select tool or track focus where useful
+
+K. Quality and Stability
+Add:
+- Error boundary around the studio workspace.
+- Audio permission error handling.
+- “Panic” button to stop all sounds.
+- Loading state for samples.
+- Graceful fallback if Web MIDI or mic recording is unsupported.
+- Do not let one broken sample crash the app.
+- Add comments to complex audio scheduling code.
+- Add basic smoke tests if the project already has a test setup.
+
+Optional advanced additions if time allows:
+- Web MIDI input for keyboard controllers, but hide it behind a feature-detection panel because browser support is not universal.
+- A small “AI Groove Assistant” local-only helper that generates pattern ideas without external API calls.
+- DAWproject-inspired export planning notes for future compatibility, but do not implement full DAWproject unless the core studio features are already stable.
+
+Deliverables:
+1. Working app with no build errors.
+2. UPGRADE_NOTES.md describing what changed.
+3. Clear file organization:
+   - src/audio/
+   - src/components/studio/
+   - src/components/mixer/
+   - src/components/sequencer/
+   - src/components/arrangement/
+   - src/components/sampler/
+   - src/storage/
+   - src/types/
+4. Preserve current domain/deployment readiness.
+5. At the end, provide a concise summary of:
+   - features added
+   - files changed
+   - how to test
+   - known limitations
+   - next recommended phase
+
+Important implementation rule:
+Do not attempt to rebuild the entire app in one massive uncontrolled rewrite. Make the smallest safe refactors needed to add the new v2 architecture. Keep the existing working sound/playback behavior alive until the new audio engine is verified.

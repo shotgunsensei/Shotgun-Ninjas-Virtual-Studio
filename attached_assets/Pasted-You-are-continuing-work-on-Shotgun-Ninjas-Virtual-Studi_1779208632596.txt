@@ -1,0 +1,462 @@
+You are continuing work on Shotgun Ninjas Virtual Studio.
+
+This is Phase 2: Sound Realism, Studio Feel, Export Polish, and Production Workflow.
+
+Important:
+Do not rewrite the whole application. Build on the current working v2 foundation. Preserve the existing AudioEngine, mixer, sequencer, arrangement, project save/load, and UI structure unless a targeted refactor is required. The goal is to make the DAW feel more realistic, more musical, more professional, and more usable.
+
+Before coding:
+1. Run the app.
+2. Inspect the existing Phase 1 implementation.
+3. Confirm whether these exist:
+   - src/audio/AudioEngine.ts or equivalent
+   - mixer components
+   - sequencer components
+   - arrangement/timeline components
+   - project storage layer
+   - sample/instrument architecture
+   - export/bounce logic
+4. Create or update PHASE_2_NOTES.md with:
+   - what currently works
+   - what is incomplete
+   - what was changed in this phase
+   - known limitations
+   - next recommended phase
+
+Main mission:
+Upgrade the studio from “functional browser music app” to “credible beat sketching DAW.”
+
+Prioritize in this order:
+1. Realistic drum and instrument behavior
+2. Better groove/human feel
+3. Better mixer and effects sound
+4. Better waveform/sample workflow
+5. Better export/bounce
+6. Better UI polish and studio immersion
+
+A. Sound Realism System
+
+Create a more advanced sound system under src/audio/sounds/ or src/audio/instruments/.
+
+Add support for:
+- sample packs
+- kit presets
+- velocity layers
+- round-robin sample selection
+- one-shot drum samples
+- pitched sampler instruments
+- fallback generated synth sounds when samples are missing
+
+Create a type model similar to:
+
+type SampleLayer = {
+  id: string;
+  url: string;
+  minVelocity: number;
+  maxVelocity: number;
+  rootNote?: string;
+  roundRobinGroup?: string;
+};
+
+type DrumVoice = {
+  id: string;
+  name: string;
+  category: "kick" | "snare" | "clap" | "hat" | "perc" | "crash" | "fx";
+  layers: SampleLayer[];
+  chokeGroup?: string;
+  defaultVolume: number;
+  defaultPan: number;
+};
+
+type InstrumentPreset = {
+  id: string;
+  name: string;
+  type: "sampler" | "synth" | "bass" | "pad" | "lead" | "keys";
+  samples?: SampleLayer[];
+  synthFallback?: object;
+};
+
+Implement at least these kits:
+- Ninja Trap Kit
+- Boom Bap Dojo Kit
+- Cyberpunk Studio Kit
+- Lo-Fi Smoke Kit
+- Cinematic Impact Kit
+
+Each kit should have at minimum:
+- kick
+- snare
+- clap
+- closed hat
+- open hat
+- perc 1
+- perc 2
+- crash/impact
+- FX hit
+
+If actual sample files do not exist, create the architecture and use Tone synth/noise-based fallback sounds for now. Keep the code structured so real WAV/MP3 samples can be dropped into /public/samples later without changing the app architecture.
+
+B. Humanized Groove Engine
+
+Add a GrooveEngine module.
+
+Features:
+- global swing amount
+- per-track swing amount
+- timing humanization in milliseconds
+- velocity humanization
+- probability per step
+- flam/retrigger per step
+- groove templates
+
+Add groove templates:
+- Straight
+- Slight Push
+- Lazy Pocket
+- Trap Bounce
+- Boom Bap Drag
+- Mechanical Tight
+- Drunken Ninja
+
+Each template should affect:
+- microtiming
+- velocity curve
+- hat behavior
+- ghost note probability where appropriate
+
+Add UI controls:
+- Groove dropdown
+- Humanize amount knob/slider
+- Swing knob/slider
+- Apply to selected track
+- Apply to whole pattern
+- Reset groove
+
+Do not make timing sloppy by default. Default should remain tight and musical.
+
+C. Drum Sequencer Upgrade
+
+Improve the step sequencer so each step can store:
+
+{
+  active: boolean;
+  velocity: number;
+  probability: number;
+  microTiming: number;
+  retrigger: number;
+  flam: boolean;
+  accent: boolean;
+}
+
+UI requirements:
+- Normal click toggles step.
+- Shift-click cycles velocity: soft, normal, hard.
+- Right-click or long-press opens step editor.
+- Step editor allows velocity, probability, nudge, retrigger, flam.
+- Accent steps should be visually brighter.
+- Probability steps should show a subtle dice/chance indicator.
+- Retrigger steps should show a small slash/stack indicator.
+
+Add pattern actions:
+- duplicate pattern
+- clear pattern
+- randomize selected lane
+- randomize entire kit
+- generate trap hats
+- generate boom bap groove
+- generate cinematic hits
+- simplify pattern
+- add ghost notes
+
+D. Instrument Realism
+
+Add or improve melodic instruments:
+- 808 bass with glide/portamento
+- sub bass
+- dark pad
+- bell/pluck
+- gritty lead
+- soft keys
+- cinematic brass/siren fallback
+
+For 808 bass:
+- glide/portamento
+- distortion/saturation
+- pitch envelope option
+- mono mode
+- note length support
+- sidechain ducking simulation if possible
+
+For pads/leads:
+- attack/release controls
+- filter cutoff/resonance
+- chorus/reverb sends
+- delay send
+- stereo width control
+
+Add preset browser:
+- category filter
+- search
+- favorite/star
+- preview note button
+- load preset onto selected track
+
+E. Sample Import and Pad Assignment
+
+Upgrade drag-and-drop sample import.
+
+Requirements:
+- User can drag audio files into the app.
+- Decode and preview waveform.
+- Store imported samples in IndexedDB if the existing storage layer supports blobs.
+- Allow assigning imported sample to:
+  - selected drum pad
+  - new audio track
+  - sampler instrument
+- Allow renaming imported samples.
+- Allow trimming start/end using waveform regions if wavesurfer.js is installed.
+- Add normalize toggle.
+- Add reverse sample button if feasible.
+- Add simple fade-in/fade-out for trimmed samples.
+
+If waveform trimming is too large for this pass, implement the UI shell and make sure import/preview/assignment works.
+
+F. Recording Upgrade
+
+Improve microphone recording:
+- record arm button per audio track
+- clear permission prompt handling
+- countdown option: off / 1 bar / 2 bars
+- metronome while recording
+- waveform preview after recording
+- trim silence option if feasible
+- save recording into project sample library
+- assign recording to audio track or drum pad
+
+Add safety:
+- if mic permission is denied, show a clean message
+- if browser does not support recording, show graceful fallback
+- no crash if audio input device disappears
+
+G. Mixer Sound Upgrade
+
+Improve mixer channel strips.
+
+Each track should have:
+- volume
+- pan
+- mute
+- solo
+- arm
+- peak meter
+- track color
+- track icon
+- input/source type
+- FX rack toggle
+- sends to reverb/delay bus
+
+Add per-track EQ:
+- low gain
+- mid gain
+- high gain
+- filter cutoff
+- high-pass filter option
+
+Add master bus:
+- master volume
+- master meter
+- limiter
+- glue compressor
+- soft clip toggle
+- master width
+- export loudness warning if clipping
+
+Add mix presets:
+- Clean
+- Punchy
+- Loud Demo
+- Lo-Fi Dust
+- Dark Cinematic
+- Wide Neon
+
+The presets should adjust mixer/effect parameters, not just change UI labels.
+
+H. Effects Rack Upgrade
+
+Add an effects rack per track.
+
+Effects:
+- EQ/filter
+- compressor
+- saturation/distortion
+- delay
+- reverb
+- chorus
+- bitcrusher/lo-fi
+- stereo width
+
+Each effect should have:
+- enabled toggle
+- wet/dry or amount
+- 2-4 useful parameters
+- reset button
+- preset dropdown if practical
+
+Add global send buses:
+- Room Reverb
+- Neon Hall
+- Tape Delay
+- Dark Slapback
+
+I. Export and Bounce
+
+Improve export/bounce.
+
+Requirements:
+- Export project JSON.
+- Import project JSON.
+- Bounce audio to WAV if currently feasible.
+- Use OfflineAudioContext if the current audio graph can be rendered offline.
+- If full offline bounce is not feasible due to Tone/sample architecture, implement best available export path and document limitation in PHASE_2_NOTES.md.
+- Add export modal:
+  - Export WAV
+  - Export project JSON
+  - Export stems, disabled if not implemented
+  - Include BPM/project metadata
+- Add progress UI during export.
+- Add error handling for export failure.
+- Add warning if master output is clipping.
+
+Export WAV target:
+- 44.1kHz or browser-supported sample rate
+- stereo
+- 16-bit or 32-bit float, whichever is cleanest with current implementation
+- filename format:
+  shotgun-ninjas-studio_project-name_bpm_date.wav
+
+J. UI and Studio Environment Polish
+
+Make the app feel more like a real virtual studio.
+
+Visual direction:
+- dark control-room interface
+- black/charcoal panels
+- red Shotgun Ninjas accents
+- electric blue playhead/meters
+- subtle glow only where useful
+- clean spacing
+- no clutter
+- tactile buttons and pads
+
+Add:
+- animated VU meters
+- master oscilloscope or spectrum view if lightweight
+- animated playhead
+- pad hit animations
+- active track highlighting
+- better empty states
+- better loading states
+- toast notifications
+- tooltip explanations for advanced controls
+- collapsible panels
+- fullscreen studio mode
+
+Improve layout:
+- Top: transport and project controls
+- Left: browser for kits, instruments, samples, projects
+- Center: sequencer/piano roll/arrangement
+- Right: inspector for selected track, step, note, or effect
+- Bottom: mixer drawer
+
+Add theme polish:
+- “Dojo Dark”
+- “Neon Control Room”
+- “Lo-Fi Smoke”
+- “Classic Console”
+
+Theme changes should affect UI colors only, not audio.
+
+K. Performance and Reliability
+
+Audio apps fail when UI gets too heavy. Keep performance clean.
+
+Requirements:
+- avoid excessive re-renders during playback
+- separate transport timing from React render state where possible
+- throttle meter updates
+- memoize heavy components
+- do not block audio scheduling with expensive UI operations
+- lazy-load waveform views if needed
+- dispose Tone nodes correctly when tracks/effects are deleted
+- add panic stop button
+- prevent stuck notes
+- prevent runaway scheduled events
+- clean up event listeners on unmount
+
+Add dev-facing comments around:
+- audio scheduling
+- sample loading
+- IndexedDB blob storage
+- offline export/bounce
+- Tone node disposal
+
+L. Demo Content
+
+Add built-in demo projects so the app feels impressive immediately.
+
+Create demo templates:
+- Trap Starter
+- Boom Bap Sketch
+- Cyber Ninja Theme
+- Lo-Fi Loop
+- Cinematic Intro
+
+Each demo should include:
+- BPM
+- kit/instrument choices
+- drum pattern
+- at least one melodic or bass pattern
+- mixer settings
+- arrangement clips if arrangement view exists
+
+Add a “Load Demo” button on first-run or project browser.
+
+M. Testing Checklist
+
+After implementation, test:
+
+1. App loads without console errors.
+2. Audio enable button works.
+3. Spacebar play/pause works.
+4. Stop releases audio cleanly.
+5. BPM changes while stopped and while playing.
+6. Drum steps trigger correctly.
+7. Velocity affects sound.
+8. Probability affects playback.
+9. Humanize/groove does not break timing.
+10. Mixer mute/solo works.
+11. FX toggles work.
+12. Imported audio can preview.
+13. Project saves and reloads.
+14. Export JSON works.
+15. WAV export works or limitation is documented.
+16. Mobile layout does not collapse horribly.
+17. Panic button stops all sound.
+18. No major memory leak after switching kits/tracks repeatedly.
+
+Final output from Replit:
+At the end, summarize:
+- features added
+- files changed
+- how to test
+- known limitations
+- recommended Phase 3
+
+Phase 3 should likely focus on:
+- collaborative cloud projects
+- account system
+- premium sample packs
+- beat marketplace/export packs
+- Stripe licensing
+- mobile PWA install polish
+- AI-assisted groove/song builder

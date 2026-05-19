@@ -1,0 +1,523 @@
+You are continuing work on Shotgun Ninjas Virtual Studio.
+
+This is Phase 3: Free Product Polish, PWA Install, Sharing, Creator Workflow, Community Hooks, and Long-Term Stability.
+
+Critical business rule:
+Shotgun Ninjas Virtual Studio must remain a free product. Do not add Stripe, subscriptions, paid tiers, paywalls, locked exports, paid sample packs, credit systems, or artificial limitations. This app is a free creative tool and brand-building gateway for Shotgun Ninjas Productions.
+
+The goal:
+Turn the current browser DAW into a polished free public product that people can actually use, install, share, revisit, and associate with the Shotgun Ninjas brand.
+
+This phase should make the app feel:
+- finished
+- trustworthy
+- fun
+- fast
+- installable
+- shareable
+- stable
+- creator-friendly
+- unmistakably Shotgun Ninjas
+
+Do not rewrite the whole app. Build on Phase 1 and Phase 2. Preserve all working studio, audio, mixer, sequencer, project, import, export, and UI features.
+
+Before coding:
+1. Run the app.
+2. Inspect the current implementation.
+3. Confirm what already exists:
+   - PWA manifest
+   - service worker
+   - offline support
+   - project save/load
+   - JSON export/import
+   - WAV export
+   - sample import
+   - demo projects
+   - mixer
+   - sequencer
+   - arrangement
+   - mobile responsiveness
+   - keyboard shortcuts
+4. Create or update PHASE_3_NOTES.md with:
+   - current status
+   - features added
+   - files changed
+   - testing checklist
+   - known limitations
+   - recommended Phase 4
+
+Main priorities:
+1. Make the app installable as a PWA.
+2. Make it work better offline.
+3. Make project sharing/export cleaner.
+4. Add creator-friendly templates and onboarding.
+5. Add optional MIDI/controller support.
+6. Polish UI/UX to feel like a finished free DAW.
+7. Add safe non-paywall brand/community hooks.
+8. Improve reliability and error handling.
+
+A. Free Product Guardrails
+
+Add a FREE_PRODUCT_POLICY.md file that states:
+
+- Shotgun Ninjas Virtual Studio is free.
+- No paid tiers.
+- No locked exports.
+- No forced accounts.
+- No subscriptions.
+- No Stripe.
+- No usage credits.
+- No cloud dependency required for core features.
+- User-created projects remain exportable.
+- Optional links to Shotgun Ninjas ecosystem are allowed, but they must not block the DAW.
+
+In the codebase, avoid adding:
+- billing routes
+- pricing pages
+- Stripe config
+- locked feature flags
+- premium-only UI
+- disabled buttons asking users to upgrade
+
+Allowed brand/community hooks:
+- “Visit Shotgun Ninjas”
+- “Share this studio”
+- “Submit feedback”
+- “Download project”
+- “Export beat”
+- “Load demo”
+- “Join the village” link, but only as a normal optional link
+- “Made with Shotgun Ninjas Virtual Studio” metadata in exported project JSON
+
+B. PWA Install and Offline Support
+
+Make the app a proper installable PWA.
+
+Add or improve:
+- manifest.webmanifest
+- app name: Shotgun Ninjas Virtual Studio
+- short name: SN Studio
+- description: Free browser beat studio by Shotgun Ninjas Productions
+- theme color: dark red / black
+- background color: black
+- display mode: standalone
+- icons in multiple sizes
+- maskable icon support if practical
+- install prompt handling
+
+Add a service worker strategy:
+- cache core app shell
+- cache icons/assets
+- cache default demo project data
+- cache default generated/sample assets if local
+- do not aggressively cache user-imported files unless already stored in IndexedDB
+- provide update detection so users can refresh when a new version is available
+
+Add UI:
+- Install App button when install prompt is available
+- Offline Ready indicator
+- App Update Available toast
+- Reload to Update button
+
+Make sure the app still works in normal browser mode.
+
+C. Offline Project Reliability
+
+Improve local project handling.
+
+Requirements:
+- Projects saved to IndexedDB continue to work offline.
+- Demo projects load offline.
+- Imported samples attached to saved projects remain available offline if stored locally.
+- If a sample is missing, show a clear warning and keep the project open.
+- Add project health check:
+  - missing samples
+  - broken tracks
+  - unsupported settings
+  - old project version
+- Add project migration support:
+  - project schema version
+  - safe defaults for missing fields
+  - migration helper function
+
+Add:
+- Auto-save toggle
+- Manual Save button
+- Save As Duplicate
+- Restore Last Session
+- Recover Unsaved Project if possible
+
+D. Project Sharing and Export Polish
+
+Improve project export/import so users can share beats and project files cleanly.
+
+Project export:
+- Export JSON project file.
+- Include app version.
+- Include project schema version.
+- Include BPM, swing, tracks, patterns, arrangement, mixer settings, effect settings, and metadata.
+- Include references to local/imported samples.
+- If samples cannot be embedded, show a warning.
+- Add an option:
+  - Export project only
+  - Export project with sample manifest
+  - Export audio WAV
+
+Project import:
+- Validate project JSON.
+- Show import summary before loading.
+- Warn if samples are missing.
+- Migrate older project versions.
+- Do not overwrite current project without confirmation.
+
+File names:
+- shotgun-ninjas-studio_project-name_YYYY-MM-DD.snproj.json
+- shotgun-ninjas-studio_project-name_BPM_YYYY-MM-DD.wav
+
+Add optional Web Share support:
+- Share app link
+- Share exported WAV if supported
+- Share project JSON if supported
+- Fallback to normal download if Web Share is unavailable
+
+Add metadata:
+- Project title
+- Creator name, optional
+- Description
+- Tags
+- Mood
+- Genre
+- BPM
+- Created date
+- Modified date
+
+Do not require login for sharing or exporting.
+
+E. Creator Mode and Demo Library
+
+Add a better first-run experience and demo system.
+
+First-run flow:
+1. Welcome to Shotgun Ninjas Virtual Studio
+2. Choose your starting mode:
+   - Beat Sketch
+   - Drum Machine
+   - Sample Chop
+   - Cinematic Intro
+   - Blank Project
+3. Load recommended kit/template.
+4. Show four simple steps:
+   - Enable audio
+   - Add steps
+   - Press Space
+   - Save/export
+
+Demo project library:
+- Trap Starter
+- Boom Bap Dojo
+- Cyber Ninja Theme
+- Lo-Fi Smoke Loop
+- Cinematic Trailer Hit
+- 808 Bass Test
+- Sample Chop Template
+- Empty Studio
+
+Each demo should include:
+- project metadata
+- BPM
+- kit/instrument choices
+- patterns
+- mixer settings
+- arrangement clips where available
+- short description
+
+Add “Remix This Demo” button that duplicates the demo into a new project.
+
+F. UI/UX Final Product Polish
+
+Make the app feel finished.
+
+Add:
+- polished loading screen
+- better empty states
+- polished first-run modal
+- tooltips for advanced controls
+- toast notification system
+- keyboard shortcut overlay
+- settings modal
+- about modal
+- changelog modal
+- feedback link
+- panic stop button always accessible
+- version number visible somewhere subtle
+
+Improve transport:
+- play/pause/stop
+- record
+- BPM
+- swing
+- metronome
+- loop toggle
+- current bar/beat/step
+- master volume
+- CPU/audio load warning if available
+
+Improve visual feedback:
+- playhead animation
+- active step highlight
+- pad hit animation
+- mixer meters
+- master clipping warning
+- loading status for sample packs
+- waveform loading indicator
+
+Theme polish:
+- Dojo Dark
+- Neon Control Room
+- Lo-Fi Smoke
+- Classic Console
+
+Make sure theme switching is purely cosmetic and does not affect audio.
+
+G. Mobile and Tablet Usability
+
+Make the app usable on mobile/tablet without pretending it is a full desktop DAW.
+
+Responsive behavior:
+- Desktop: full studio layout
+- Tablet: collapsible sidebars, mixer drawer
+- Mobile: simplified performance/sketch mode
+
+Mobile mode should prioritize:
+- pads
+- transport
+- simple sequencer
+- project load/save
+- export
+- demo loading
+
+Avoid cramped full mixer views on mobile. Use drawers, tabs, or bottom sheets.
+
+Add touch support:
+- long press for step editor
+- touch-friendly knobs/sliders
+- large pad hit targets
+- no hover-only controls
+- prevent accidental page scrolling while using pads/sequencer
+
+H. Optional MIDI Controller Support
+
+Add optional Web MIDI support behind feature detection.
+
+Do not make MIDI required.
+
+Features:
+- Detect Web MIDI support.
+- Request MIDI access only when user clicks Enable MIDI.
+- List available MIDI inputs.
+- Listen for note on/off.
+- Map MIDI notes to:
+  - drum pads
+  - selected instrument
+  - transport shortcuts if practical
+- Add MIDI Learn mode:
+  - click control
+  - move MIDI knob/pad/key
+  - assign mapping
+- Save MIDI mappings locally.
+
+Fallback:
+- If unsupported, show:
+  “MIDI control is not supported in this browser. The studio still works normally with mouse, touch, and keyboard.”
+
+Security:
+- Only request MIDI after user action.
+- Do not request sysex unless absolutely necessary.
+- Default sysex to false.
+
+I. File System Access Enhancement
+
+Add optional local file workflow where supported.
+
+Feature detection:
+- If File System Access API is available:
+  - allow Save Project As local file
+  - allow Open Project File
+  - allow Export WAV to chosen location
+- If unavailable:
+  - fallback to download/upload file inputs
+
+Do not rely only on File System Access API because support varies.
+
+J. Brand and Community Hooks Without Paywalls
+
+Add tasteful brand links without harming the free product.
+
+Footer or About modal:
+- Built by Shotgun Ninjas Productions
+- Visit Shotgun Ninjas
+- Report Bug
+- Request Feature
+- Share Studio
+
+Add optional exported project metadata:
+- createdWith: Shotgun Ninjas Virtual Studio
+- appUrl
+- appVersion
+
+Add optional WAV metadata if practical, but do not over-engineer if WAV metadata writing is risky.
+
+Add share text:
+“Made this in Shotgun Ninjas Virtual Studio, a free browser DAW.”
+
+Do not add:
+- forced newsletter signup
+- locked features
+- account wall
+- ads
+- popups
+- paywall language
+
+K. Settings and Preferences
+
+Add settings modal with local persistence:
+
+Audio:
+- default BPM
+- default kit
+- default master volume
+- metronome volume
+- audio latency mode if available
+
+UI:
+- theme
+- compact mode
+- show tooltips
+- reduce animations
+- default workspace view
+
+Project:
+- auto-save on/off
+- auto-save interval
+- restore last project on launch
+- confirm before overwrite
+
+Keyboard:
+- show shortcuts
+- reset shortcuts if customizable
+
+MIDI:
+- enable MIDI
+- selected input
+- mappings
+- reset mappings
+
+L. Stability, Performance, and Cleanup
+
+Improve app reliability.
+
+Requirements:
+- No console errors on initial load.
+- No stuck notes after stop.
+- Panic button kills all audio.
+- Dispose audio nodes when deleting tracks/effects.
+- Throttle meter/visualizer updates.
+- Avoid React state churn during playback.
+- Lazy-load heavy panels.
+- Guard against corrupted project files.
+- Guard against unsupported browser APIs.
+- Add clear user-facing error messages.
+
+Add Error Boundary if not already present:
+- StudioErrorBoundary
+- friendly recovery message
+- reload app button
+- export recovery data if possible
+
+Add diagnostics panel:
+- app version
+- browser
+- audio context state
+- sample rate
+- saved projects count
+- MIDI support yes/no
+- PWA installed yes/no if detectable
+- storage estimate if available
+
+M. Documentation
+
+Add or update:
+
+README.md:
+- what the app is
+- free product statement
+- features
+- how to run locally
+- how to build
+- how to deploy
+- browser compatibility notes
+- known limitations
+
+FREE_PRODUCT_POLICY.md:
+- free forever policy for this app
+
+PHASE_3_NOTES.md:
+- implementation notes
+- testing results
+- limitations
+- recommended Phase 4
+
+USER_GUIDE.md:
+- enable audio
+- create beat
+- save project
+- export WAV
+- import sample
+- use demo projects
+- install as PWA
+- use MIDI if supported
+
+N. Testing Checklist
+
+After implementation, test:
+
+1. App builds without errors.
+2. App loads cleanly in browser.
+3. Enable Audio works.
+4. Spacebar play/pause works.
+5. Stop releases all sound.
+6. Panic button stops all audio.
+7. Demo projects load.
+8. Project can save locally.
+9. Project can reload after refresh.
+10. Project can export JSON.
+11. Project can import JSON.
+12. WAV export works or limitation is documented.
+13. PWA manifest validates.
+14. Install prompt appears where supported.
+15. App shell works offline after first load.
+16. Update available toast works or is documented.
+17. Web Share works where supported or falls back.
+18. MIDI panel only appears/enables where supported.
+19. File System Access features only appear where supported.
+20. Mobile layout remains usable.
+21. Tablet layout remains usable.
+22. No paid tier, Stripe, subscription, or paywall language appears anywhere.
+
+Final response after coding:
+Summarize:
+- what was added
+- what files changed
+- how to test
+- what remains limited
+- recommended Phase 4
+
+Recommended Phase 4 should focus on:
+- public landing page polish
+- SEO
+- embedded tutorials
+- free community beat gallery using manual uploads or static submissions
+- sample pack expansion
+- GitHub release packaging
+- optional Shotgun Ninjas ecosystem links
+- no paywalls
