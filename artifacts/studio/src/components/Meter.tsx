@@ -11,10 +11,17 @@ import * as Tone from "tone";
  */
 export function StereoMeter({
   getMeter,
+  getLevels,
   label,
   showClip = false,
 }: {
-  getMeter: () => Tone.Meter | undefined;
+  getMeter?: () => Tone.Meter | undefined;
+  /**
+   * Alternative cheap-to-poll source returning a reused {peakDb, rmsDb}
+   * object. Used by the master meter so it reads through the engine
+   * facade's `getMasterLevels()` rather than touching the raw meter.
+   */
+  getLevels?: () => { peakDb: [number, number]; rmsDb: [number, number] };
   label?: string;
   showClip?: boolean;
 }) {
@@ -29,11 +36,21 @@ export function StereoMeter({
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      const meter = getMeter();
-      if (meter) {
-        const v = meter.getValue();
-        const dbL = typeof v === "number" ? v : v[0] ?? -Infinity;
-        const dbR = typeof v === "number" ? v : v[1] ?? dbL;
+      let dbL: number | null = null;
+      let dbR: number | null = null;
+      if (getLevels) {
+        const lv = getLevels();
+        dbL = lv.peakDb[0];
+        dbR = lv.peakDb[1];
+      } else {
+        const meter = getMeter?.();
+        if (meter) {
+          const v = meter.getValue();
+          dbL = typeof v === "number" ? v : v[0] ?? -Infinity;
+          dbR = typeof v === "number" ? v : v[1] ?? dbL;
+        }
+      }
+      if (dbL !== null && dbR !== null) {
         const normL = Math.max(0, Math.min(1, (dbL + 60) / 60));
         const normR = Math.max(0, Math.min(1, (dbR + 60) / 60));
         setLevels([normL, normR]);
@@ -64,7 +81,7 @@ export function StereoMeter({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [getMeter]);
+  }, [getMeter, getLevels]);
 
   const peakDb = Math.max(peaksDb[0], peaksDb[1]);
   const clipping = peakDb >= -0.5;

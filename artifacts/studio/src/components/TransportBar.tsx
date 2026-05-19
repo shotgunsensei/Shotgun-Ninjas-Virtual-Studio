@@ -1,11 +1,12 @@
 import { useCallback, useEffect } from "react";
-import { Play, Pause, Square, Circle, Volume2 } from "lucide-react";
+import { Play, Pause, Square, Circle, Volume2, AlertOctagon } from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { useStore, getStore } from "../store";
 import { audio } from "../lib/audio/engine";
+import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { useTransport } from "../hooks/useTransport";
 import { MidiLearnButton } from "./MidiLearnButton";
 
@@ -71,6 +72,50 @@ export function TransportBar() {
         <MidiLearnButton target={{ kind: "transport-play" }} small />
         <MidiLearnButton target={{ kind: "transport-stop" }} small />
         <MidiLearnButton target={{ kind: "transport-record" }} small />
+        <Button
+          size="icon"
+          variant="outline"
+          onClick={async () => {
+            // Tear down any in-flight recording before silencing the
+            // engine so the mic stream / recorder state can't linger.
+            const timers = getStore().state.countInTimers;
+            if (timers.interval !== null) window.clearInterval(timers.interval);
+            if (timers.timeout !== null) window.clearTimeout(timers.timeout);
+            try {
+              if (vocalRecorder.isActive()) await vocalRecorder.stop();
+            } catch {
+              // ignore
+            }
+            try {
+              noteRecorder.stop();
+            } catch {
+              // ignore
+            }
+            audio.panicStopAll();
+            getStore().set({
+              isPlaying: false,
+              isRecording: false,
+              countingIn: false,
+              countInBeat: 0,
+              countInTimers: { interval: null, timeout: null },
+            });
+            // Count-in may have force-enabled the engine metronome even
+            // when the project metronome toggle is off. Re-sync engine
+            // state to the user's saved project setting so the next
+            // playback honors their preference.
+            try {
+              audio.setMetronome(getStore().state.project.metronome);
+            } catch {
+              // ignore
+            }
+            getStore().setStatus("Panic — all notes released", "warn");
+          }}
+          className="h-8 w-8 rounded-md ml-1 border-red-500/50 text-red-400 hover:bg-red-500/15 hover:text-red-300"
+          aria-label="Panic — stop all sound"
+          title="Panic — release all notes and tails"
+        >
+          <AlertOctagon className="w-3.5 h-3.5" />
+        </Button>
       </div>
 
       <div className="h-8 w-px bg-border" />
@@ -168,7 +213,7 @@ export function TransportBar() {
  * project tempo whenever the transport is rolling.
  */
 function MasterMeter({ bpm, pulsing }: { bpm: number; pulsing: boolean }) {
-  const getMeter = useCallback(() => audio.getMasterMeter(), []);
+  const getLevels = useCallback(() => audio.getMasterLevels(), []);
   const beatSec = 60 / Math.max(40, Math.min(240, bpm));
   return (
     <div
@@ -177,7 +222,7 @@ function MasterMeter({ bpm, pulsing }: { bpm: number; pulsing: boolean }) {
       }`}
       style={{ ["--master-pulse-duration" as string]: `${beatSec}s` }}
     >
-      <StereoMeter getMeter={getMeter} label="MAS" showClip />
+      <StereoMeter getLevels={getLevels} label="MAS" showClip />
     </div>
   );
 }
