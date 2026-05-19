@@ -1,26 +1,58 @@
 import * as Tone from "tone";
+import type { MasterBusSettings, SendBusId } from "../../types";
+import { SEND_BUS_IDS } from "../../types";
 
 /**
- * Master safety chain.
+ * Master safety chain (v2).
  *
  * Every track channel feeds into `input`. The chain then runs:
- *   input (Channel) -> compressor -> limiter -> Tone.Destination
+ *   input -> glueComp -> softClip -> width -> safetyComp -> limiter -> Destination
  *
- * The compressor gently tames spikes a few dB below 0 dBFS so summing
- * many loud tracks doesn't crush the limiter. The brick-wall limiter at
- * -0.3 dBFS prevents inter-sample clipping reaching the user's speakers
- * no matter how many channels are pushed hot. A `Tone.Meter` taps the
- * post-limiter signal for the master meter UI and `getLevels()` so the
- * displayed level reflects what is actually leaving the studio.
+ * In addition, the master owns 4 named global send buses
+ * (Room Reverb, Neon Hall, Tape Delay, Dark Slapback). Each track can
+ * tap its post-fader signal into any combination of these buses via
+ * dedicated send gains; the bus output is summed into the master input
+ * before the glue/safety chain.
+ *
+ * `getClipped()` returns a latched flag set whenever the post-limiter
+ * peak ever crosses -0.1 dBFS. The UI calls `resetClip()` to clear it.
  */
+
+export interface SendBusNode {
+  id: SendBusId;
+  /** Public input node for tracks to connect their send gains to. */
+  input: Tone.Gain;
+  /** The effect node that processes the bus (Reverb or FeedbackDelay). */
+  fx: Tone.Reverb | Tone.FeedbackDelay;
+}
+
+export const DEFAULT_MASTER_BUS: MasterBusSettings = {
+  limiterThresholdDb: -0.6,
+  limiterGainDb: 0,
+  glueEnabled: true,
+  glueThresholdDb: -14,
+  glueRatio: 2,
+  glueAttack: 0.025,
+  glueRelease: 0.18,
+  softClip: false,
+  width: 1,
+};
+
 export class MasterChain {
   readonly input: Tone.Channel;
-  private compressor: Tone.Compressor;
+  private glueComp: Tone.Compressor;
+  private safetyComp: Tone.Compressor;
   private limiter: Tone.Limiter;
-  private meter: Tone.Meter; // RMS-ish (smoothed) — drives the displayed bar
-  private peakMeter: Tone.Meter; // Instantaneous peak — drives clip detection
-  // Reused result object so getLevels() can be polled per animation
-  // frame without allocating.
+  private makeup: Tone.Gain;
+  private softClipper: Tone.WaveShaper;
+  private widener: Tone.StereoWidener;
+  private meter: Tone.Meter;
+  private peakMeter: Tone.Meter;
+  private buses: Map<SendBusId, SendBusNode>;
+  private settings: MasterBusSettings = { ...DEFAULT_MASTER_BUS };
+  private clipped = false;
+  private clipCheckId: number | null = null;
+
   private levels: { peakDb: [number, number]; rmsDb: [number, number] } = {
     peakDb: [-Infinity, -Infinity],
     rmsDb: [-Infinity, -Infinity],
@@ -28,33 +60,70 @@ export class MasterChain {
 
   constructor() {
     this.input = new Tone.Channel({ volume: 0 });
-    this.compressor = new Tone.Compressor({
-      threshold: -8,
-      ratio: 3,
-      attack: 0.01,
-      release: 0.18,
-      knee: 6,
+    this.glueComp = new Tone.Compressor({
+      threshold: this.settings.glueThresholdDb,
+      ratio: this.settings.glueRatio,
+      attack: this.settings.glueAttack,
+      release: this.settings.glueRelease,
+      knee: 8,
     });
-    this.limiter = new Tone.Limiter(-0.3);
+    this.safetyComp = new Tone.Compressor({
+      threshold: -6,
+      ratio: 4,
+      attack: 0.005,
+      release: 0.1,
+      knee: 4,
+    });
+    this.limiter = new Tone.Limiter(this.settings.limiterThresholdDb);
+    this.makeup = new Tone.Gain(1);
+    this.softClipper = new Tone.WaveShaper(makeIdentityCurve(), 2048);
+    this.widener = new Tone.StereoWidener({ width: 0.5 });
     this.meter = new Tone.Meter({ smoothing: 0.7 });
     this.peakMeter = new Tone.Meter({ smoothing: 0 });
 
-    this.input.chain(this.compressor, this.limiter, Tone.getDestination());
-    // Tap the post-limiter signal so both meters show true output level.
-    this.limiter.connect(this.meter);
-    this.limiter.connect(this.peakMeter);
+    this.input.chain(
+      this.glueComp,
+      this.softClipper,
+      this.widener,
+      this.safetyComp,
+      this.limiter,
+      this.makeup,
+      Tone.getDestination(),
+    );
+    this.makeup.connect(this.meter);
+    this.makeup.connect(this.peakMeter);
+
+    this.buses = new Map();
+    for (const id of SEND_BUS_IDS) {
+      const fx = makeBusFx(id);
+      const input = new Tone.Gain(1);
+      input.connect(fx);
+      // Sum bus output back into master input (pre-glue, post-track).
+      fx.connect(this.input);
+      this.buses.set(id, { id, input, fx });
+    }
+
+    // Apply soft-clip / width / limiter once the curve is staged.
+    this.applySettings(this.settings);
+    this.startClipWatcher();
   }
 
-  /** Tone.Meter for the post-limiter master bus (used by StereoMeter). */
+  // ---- send buses ----
+
+  getBus(id: SendBusId): SendBusNode | undefined {
+    return this.buses.get(id);
+  }
+
+  getBuses(): SendBusNode[] {
+    return SEND_BUS_IDS.map((id) => this.buses.get(id)!).filter(Boolean);
+  }
+
+  // ---- meter ----
+
   getMeter(): Tone.Meter {
     return this.meter;
   }
 
-  /**
-   * Cheap-to-call peak/RMS snapshot for the master bus. Returns the same
-   * mutable object every call so this is safe to poll on every animation
-   * frame without GC pressure.
-   */
   getLevels(): { peakDb: [number, number]; rmsDb: [number, number] } {
     const rms = this.meter.getValue();
     const peak = this.peakMeter.getValue();
@@ -75,13 +144,30 @@ export class MasterChain {
     return this.levels;
   }
 
-  /** Set master gain in linear 0..1, with a short ramp to avoid zipper noise. */
+  // ---- clipping latch ----
+
+  getClipped(): boolean {
+    return this.clipped;
+  }
+  resetClip() {
+    this.clipped = false;
+  }
+
+  private startClipWatcher() {
+    if (typeof window === "undefined") return;
+    const tick = () => {
+      const peak = this.peakMeter.getValue();
+      const p = typeof peak === "number" ? peak : Math.max(peak[0] ?? -Infinity, peak[1] ?? -Infinity);
+      if (p > -0.1) this.clipped = true;
+    };
+    this.clipCheckId = window.setInterval(tick, 80);
+  }
+
+  // ---- master settings ----
+
   setVolume(volume0to1: number) {
     const db =
       volume0to1 <= 0.005 ? -Infinity : 20 * Math.log10(volume0to1);
-    // If the user adjusts master volume during a panic mute hold, store
-    // the new target so releasePanicHold() restores the latest setting
-    // rather than the value captured at panic time.
     if (this.panicHeldVolume !== null) {
       this.panicHeldVolume = db;
       return;
@@ -89,15 +175,42 @@ export class MasterChain {
     this.input.volume.rampTo(db, 0.05);
   }
 
+  applySettings(s: Partial<MasterBusSettings>) {
+    const next = { ...this.settings, ...s };
+    this.settings = next;
+    // Limiter threshold + makeup.
+    this.limiter.threshold.value = clamp(next.limiterThresholdDb, -24, 0);
+    const makeupLin = Math.pow(10, clamp(next.limiterGainDb, -12, 12) / 20);
+    this.makeup.gain.rampTo(makeupLin, 0.05);
+    // Glue comp.
+    if (next.glueEnabled) {
+      this.glueComp.threshold.value = clamp(next.glueThresholdDb, -36, 0);
+      this.glueComp.ratio.value = clamp(next.glueRatio, 1, 10);
+      this.glueComp.attack.value = clamp(next.glueAttack, 0.001, 0.1);
+      this.glueComp.release.value = clamp(next.glueRelease, 0.05, 1);
+    } else {
+      // Effective bypass: very high threshold so comp never engages.
+      this.glueComp.threshold.value = 0;
+      this.glueComp.ratio.value = 1;
+    }
+    // Soft clip — swap curve.
+    this.softClipper.curve = next.softClip
+      ? makeSoftClipCurve()
+      : makeIdentityCurve();
+    // Stereo width — Tone.StereoWidener takes 0..1 (0=mono, 0.5=stereo, 1=wide).
+    // Map our 0..2 user range to that.
+    const w = clamp(next.width, 0, 2);
+    this.widener.width.rampTo(Math.min(1, w * 0.5), 0.05);
+  }
+
+  getSettings(): MasterBusSettings {
+    return { ...this.settings };
+  }
+
+  // ---- panic ----
+
   private panicHeldVolume: number | null = null;
 
-  /**
-   * Hard-silence the master bus and hold it muted until `releasePanicHold()`
-   * is called (the next Play does this automatically). This guarantees
-   * a true panic semantic — long reverb/delay tails cannot rebound back
-   * up after the dip restores, because the master stays muted until the
-   * user resumes playback.
-   */
   duckForPanic() {
     const ctx = Tone.getContext();
     const now = ctx.currentTime;
@@ -110,10 +223,6 @@ export class MasterChain {
     v.linearRampToValueAtTime(-60, now + 0.02);
   }
 
-  /**
-   * Restore master gain to its pre-panic level. Called by the engine
-   * when transport resumes; safe to call when no panic is active.
-   */
   releasePanicHold() {
     if (this.panicHeldVolume === null) return;
     const ctx = Tone.getContext();
@@ -125,4 +234,54 @@ export class MasterChain {
     v.setValueAtTime(v.value, now);
     v.linearRampToValueAtTime(target, now + 0.05);
   }
+
+  dispose() {
+    if (this.clipCheckId !== null && typeof window !== "undefined") {
+      window.clearInterval(this.clipCheckId);
+    }
+  }
+}
+
+function makeBusFx(id: SendBusId): Tone.Reverb | Tone.FeedbackDelay {
+  switch (id) {
+    case "roomReverb":
+      return new Tone.Reverb({ decay: 1.6, preDelay: 0.01, wet: 1 });
+    case "neonHall":
+      return new Tone.Reverb({ decay: 4.5, preDelay: 0.04, wet: 1 });
+    case "tapeDelay":
+      return new Tone.FeedbackDelay({
+        delayTime: "8n.",
+        feedback: 0.42,
+        wet: 1,
+      });
+    case "darkSlapback":
+      return new Tone.FeedbackDelay({
+        delayTime: 0.11,
+        feedback: 0.18,
+        wet: 1,
+      });
+  }
+}
+
+function makeIdentityCurve(): Float32Array {
+  const n = 2048;
+  const c = new Float32Array(n);
+  for (let i = 0; i < n; i++) c[i] = (i / (n - 1)) * 2 - 1;
+  return c;
+}
+
+function makeSoftClipCurve(): Float32Array {
+  // tanh-based soft clip; mild drive so transparent at low levels.
+  const n = 2048;
+  const c = new Float32Array(n);
+  const k = 1.6;
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    c[i] = Math.tanh(x * k) / Math.tanh(k);
+  }
+  return c;
+}
+
+function clamp(x: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, x));
 }

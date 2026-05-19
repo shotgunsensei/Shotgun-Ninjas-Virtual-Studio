@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "./components/Header";
 import { TransportBar } from "./components/TransportBar";
 import { Timeline } from "./components/Timeline";
@@ -17,10 +17,11 @@ import { VocalsPanel } from "./components/instruments/VocalsPanel";
 import { PresetBrowser } from "./components/PresetBrowser";
 import { GroovePanel } from "./components/GroovePanel";
 import { MelodicParams } from "./components/MelodicParams";
+import { EffectsRack } from "./components/EffectsRack";
 import { useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
-import { defaultProject, getStore, resetStore, useStore } from "./store";
+import { defaultProject, flushMixToEngine, getStore, resetStore, useStore } from "./store";
 import { getLastProjectId, loadProject, saveProject } from "./lib/storage/db";
 import { useMidiEvents } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
@@ -35,28 +36,51 @@ function bootstrap() {
     try {
       const lastId = await getLastProjectId();
       if (lastId) project = await loadProject(lastId);
-    } catch {
+    } catch (err) {
+      console.error("bootstrap load failed", err);
       project = null;
     }
     if (!project) {
       project = defaultProject();
       resetStore(project);
-      // first-run: show onboarding
       getStore().set({ showOnboarding: true });
     } else {
       resetStore(project);
     }
-    // ensure all engine voices exist
-    for (const t of project.tracks) audio.ensureTrack(t);
+    try {
+      for (const t of project.tracks) audio.ensureTrack(t);
+      flushMixToEngine(project);
+    } catch (err) {
+      console.error("bootstrap engine init failed", err);
+    }
     bootstrapped = true;
   })();
   return bootstrapPromise;
 }
 
 export default function App() {
-  // synchronously kick off bootstrap; return loader until ready
-  if (!bootstrapped) {
-    throw bootstrap();
+  const [ready, setReady] = useState<boolean>(bootstrapped);
+  useEffect(() => {
+    if (bootstrapped) {
+      setReady(true);
+      return;
+    }
+    let cancelled = false;
+    bootstrap().then(() => {
+      if (!cancelled) setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!ready) {
+    return (
+      <div className="h-full flex items-center justify-center bg-background text-foreground">
+        <div className="font-mono text-xs uppercase tracking-[0.4em] text-primary animate-pulse">
+          Loading Studio…
+        </div>
+      </div>
+    );
   }
   return <Studio />;
 }
@@ -294,6 +318,7 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
       {isMelodic && <PresetBrowser track={track} />}
       {isMelodic && <MelodicParams track={track} />}
       {track.kind !== "vocals" && <GroovePanel track={track} />}
+      <EffectsRack track={track} />
     </div>
   );
 }

@@ -1,14 +1,22 @@
 import { useSyncExternalStore } from "react";
 import { audio } from "./lib/audio/engine";
+import { DEFAULT_MASTER_BUS } from "./lib/audio/master";
+import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
 import type {
   AnyPreset,
+  FxModuleId,
+  FxModuleSettings,
   InstrumentKind,
+  MasterBusSettings,
   MidiMapping,
   MidiTarget,
+  MixPresetId,
   NoteClip,
   NoteEvent,
   Project,
+  SendBusId,
   Track,
+  TrackEq,
 } from "./types";
 
 type Listener = () => void;
@@ -102,6 +110,77 @@ class Store {
       t.id === trackId ? { ...t, ...patch } : t,
     );
     this.patchProject({ tracks });
+  }
+
+  // ---- v2 mixer ops ----
+
+  /** Patch the EQ on a single track and forward the diff to the engine. */
+  setTrackEq(trackId: string, patch: Partial<TrackEq>) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const cur = t.eq ?? DEFAULTS.flatEq();
+    const next: TrackEq = { ...cur, ...patch };
+    this.patchTrack(trackId, { eq: next });
+    audio.setTrackEq(trackId, patch);
+    // Edits invalidate the mix preset id (project is no longer "pure preset").
+    if (this.state.project.mixPresetId) {
+      this.patchProject({ mixPresetId: undefined });
+    }
+  }
+
+  /** Patch one send amount (0..1) and forward to the engine. */
+  setTrackSend(trackId: string, busId: SendBusId, amount: number) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const cur = { ...DEFAULTS.zeroSends(), ...(t.sends ?? {}) };
+    cur[busId] = Math.max(0, Math.min(1, amount));
+    this.patchTrack(trackId, { sends: cur });
+    audio.setTrackSend(trackId, busId, cur[busId]);
+    if (this.state.project.mixPresetId) {
+      this.patchProject({ mixPresetId: undefined });
+    }
+  }
+
+  /** Patch a single FX module on a track (enable/disable + tweak). */
+  setFxModule(
+    trackId: string,
+    moduleId: FxModuleId,
+    patch: Partial<FxModuleSettings>,
+  ) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const rack = { ...(t.fxRack ?? {}) };
+    const cur = rack[moduleId] ?? { enabled: false };
+    const next: FxModuleSettings = { ...cur, ...patch };
+    rack[moduleId] = next;
+    this.patchTrack(trackId, { fxRack: rack });
+    audio.setEffectModule(trackId, moduleId, next);
+    if (this.state.project.mixPresetId) {
+      this.patchProject({ mixPresetId: undefined });
+    }
+  }
+
+  /** Reset an FX module back to disabled defaults. */
+  resetFxModule(trackId: string, moduleId: FxModuleId) {
+    this.setFxModule(trackId, moduleId, { enabled: false, amount: 0.5, params: {} });
+  }
+
+  /** Patch master-bus settings and push the diff to the engine. */
+  setMasterBus(patch: Partial<MasterBusSettings>) {
+    const cur = this.state.project.masterBus ?? { ...DEFAULT_MASTER_BUS };
+    const next = { ...cur, ...patch };
+    this.patchProject({ masterBus: next });
+    audio.setMasterBus(patch);
+  }
+
+  /** Apply one of the 6 named mix presets. Rewrites per-track mix fields
+   *  + master bus in one shot, then flushes the new values to the engine. */
+  applyMixPreset(id: MixPresetId) {
+    const next = applyMixPreset(this.state.project, id);
+    this.state = { ...this.state, project: next };
+    this.listeners.forEach((l) => l());
+    flushMixToEngine(next);
+    this.setStatus(`Mix preset applied: ${id}`, "info");
   }
 
   /** Update the project-wide groove default. Pushed to engine so the
@@ -498,6 +577,35 @@ export function resetStore(project: Project) {
   // Re-seed engine-level globals from the freshly loaded project so
   // persisted humanization is active immediately, not on next user edit.
   audio.setGlobalGroove(project.globalGroove);
+  flushMixToEngine(project);
+}
+
+/**
+ * Push every track's EQ / sends / FX-rack and the master bus to the
+ * engine. Called after applying a mix preset or restoring a project so
+ * the audio state matches the data store on the next sound.
+ */
+export function flushMixToEngine(project: Project) {
+  if (project.masterBus) audio.setMasterBus(project.masterBus);
+  for (const t of project.tracks) {
+    if (t.eq) audio.setTrackEq(t.id, t.eq);
+    if (t.sends) {
+      for (const [busId, amount] of Object.entries(t.sends) as [
+        SendBusId,
+        number,
+      ][]) {
+        audio.setTrackSend(t.id, busId, amount);
+      }
+    }
+    if (t.fxRack) {
+      for (const [moduleId, settings] of Object.entries(t.fxRack) as [
+        FxModuleId,
+        FxModuleSettings,
+      ][]) {
+        audio.setEffectModule(t.id, moduleId, settings);
+      }
+    }
+  }
 }
 
 export function useStore<T>(selector: (s: Store["state"]) => T): T {
@@ -517,6 +625,28 @@ export function makeId() {
   return newId();
 }
 
+const KIND_COLOR: Record<InstrumentKind, string> = {
+  piano: "#7dd3fc",
+  guitar: "#fbbf24",
+  drums: "#f97316",
+  bass: "#a78bfa",
+  vocals: "#ef4444",
+};
+const KIND_ICON: Record<InstrumentKind, string> = {
+  piano: "Piano",
+  guitar: "Guitar",
+  drums: "Drum",
+  bass: "AudioWaveform",
+  vocals: "Mic",
+};
+const KIND_SOURCE: Record<InstrumentKind, string> = {
+  piano: "MIDI",
+  guitar: "MIDI",
+  drums: "Sample",
+  bass: "MIDI",
+  vocals: "Live",
+};
+
 export function makeTrack(
   kind: InstrumentKind,
   name: string,
@@ -535,6 +665,15 @@ export function makeTrack(
     noteClips: [],
     audioClips: [],
     fx: { reverb: kind === "vocals" ? 0.25 : 0.1, delay: 0, filter: 1 },
+    // v2 defaults — flat EQ, zero sends, empty FX rack, channel meta.
+    eq: { low: 0, mid: 0, high: 0, hpfOn: false, hpfHz: 80 },
+    sends: { roomReverb: 0, neonHall: 0, tapeDelay: 0, darkSlapback: 0 },
+    fxRack: {},
+    meta: {
+      color: KIND_COLOR[kind],
+      icon: KIND_ICON[kind],
+      sourceLabel: KIND_SOURCE[kind],
+    },
   };
 }
 

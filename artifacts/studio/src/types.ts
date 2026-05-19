@@ -33,6 +33,87 @@ export interface DrumPieceSettings {
   solo: boolean;
 }
 
+// ---- v2 mixer / effects rack / send buses ----
+
+/** 3-band EQ + high-pass per channel strip. Gains are -12..+12 dB. */
+export interface TrackEq {
+  low: number;
+  mid: number;
+  high: number;
+  hpfOn: boolean;
+  hpfHz: number; // 20..400
+}
+
+/** Four named global send buses. Same ids on every track. */
+export type SendBusId = "roomReverb" | "neonHall" | "tapeDelay" | "darkSlapback";
+
+export const SEND_BUS_IDS: SendBusId[] = [
+  "roomReverb",
+  "neonHall",
+  "tapeDelay",
+  "darkSlapback",
+];
+
+export const SEND_BUS_LABELS: Record<SendBusId, string> = {
+  roomReverb: "Room Reverb",
+  neonHall: "Neon Hall",
+  tapeDelay: "Tape Delay",
+  darkSlapback: "Dark Slapback",
+};
+
+export type TrackSends = Record<SendBusId, number>; // 0..1
+
+/** Per-track effect modules. All optional; engine creates the node on enable. */
+export type FxModuleId =
+  | "eq"
+  | "compressor"
+  | "saturation"
+  | "delay"
+  | "reverb"
+  | "chorus"
+  | "bitcrusher"
+  | "stereoWidth";
+
+export interface FxModuleSettings {
+  enabled: boolean;
+  /** Module preset id, or "custom" when params have been edited. */
+  preset?: string;
+  /** 0..1 wet/dry or amount. Some modules ignore this. */
+  amount?: number;
+  /** Module-specific params, 0..1 each. */
+  params?: Record<string, number>;
+}
+
+export type FxRack = Partial<Record<FxModuleId, FxModuleSettings>>;
+
+/** Channel-strip metadata (color, icon, source). */
+export interface ChannelStripMeta {
+  color?: string; // tailwind/hex token (e.g. "#ef4444")
+  icon?: string;  // lucide icon name; UI maps to component
+  sourceLabel?: string; // e.g. "MIDI", "Sample", "Live"
+}
+
+/** Master-bus mix settings, persisted on the project. */
+export interface MasterBusSettings {
+  limiterThresholdDb: number; // -24..0
+  limiterGainDb: number; // -12..+12 (post-limiter makeup)
+  glueEnabled: boolean;
+  glueThresholdDb: number; // -36..0
+  glueRatio: number; // 1..10
+  glueAttack: number; // seconds 0..0.1
+  glueRelease: number; // seconds 0.05..1
+  softClip: boolean;
+  width: number; // 0..2 (1 = natural, 0 = mono, 2 = wide)
+}
+
+export type MixPresetId =
+  | "clean"
+  | "punchy"
+  | "loudDemo"
+  | "lofiDust"
+  | "darkCinematic"
+  | "wideNeon";
+
 export interface SoundParams {
   attack: number;       // 0..1 (mapped to 0..2s)
   decay: number;        // 0..1
@@ -158,6 +239,15 @@ export interface Track {
   sound?: Partial<SoundParams>;
   /** Per-track groove settings; missing means inherit project default. */
   groove?: Partial<GrooveSettings>;
+  // ---- v2 mixer ----
+  /** 3-band EQ + HPF; missing means flat / off. */
+  eq?: TrackEq;
+  /** Sends to the named global buses; missing means all zero. */
+  sends?: Partial<TrackSends>;
+  /** Per-track effect rack (modules + params). */
+  fxRack?: FxRack;
+  /** Channel-strip metadata (color, icon, source label). */
+  meta?: ChannelStripMeta;
 }
 
 export type MidiTarget =
@@ -211,4 +301,9 @@ export interface Project {
   updatedAt: number;
   /** Project-level groove. Per-track grooves override individual fields. */
   globalGroove?: Partial<GrooveSettings>;
+  /** v2: master-bus mix settings (limiter / glue comp / soft-clip / width). */
+  masterBus?: MasterBusSettings;
+  /** v2: currently-applied mix preset id (purely informational; the
+   *  actual values live on the tracks and `masterBus`). */
+  mixPresetId?: MixPresetId;
 }

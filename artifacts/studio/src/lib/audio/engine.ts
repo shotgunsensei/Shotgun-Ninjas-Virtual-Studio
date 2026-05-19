@@ -3,13 +3,19 @@ import type {
   AnyPreset,
   DrumKitId,
   DrumPieceSettings,
+  FxModuleId,
+  FxModuleSettings,
   GrooveSettings,
   InstrumentKind,
+  MasterBusSettings,
   NoteClip,
+  SendBusId,
   SoundParams,
   Track,
+  TrackEq,
   VocalsPreset,
 } from "../../types";
+import { SEND_BUS_IDS } from "../../types";
 import { MasterChain } from "./master";
 import {
   announceSamplerLoadIfNeeded,
@@ -65,6 +71,14 @@ interface TrackVoice {
   drive?: Tone.Distortion;
   chorus?: Tone.Chorus;
   widener?: Tone.StereoWidener;
+  /** v2 mixer nodes: high-pass + 3-band EQ inserted between filter and
+   *  drive; compressor + bitcrusher inserted later in the chain. */
+  hpf?: Tone.Filter;
+  eq3?: Tone.EQ3;
+  comp?: Tone.Compressor;
+  bitcrusher?: Tone.BitCrusher;
+  /** Per-track sends to the 4 named global buses (post-fader). */
+  sends?: Map<SendBusId, Tone.Gain>;
   poly?: MelodicVoice;
   drums?: DrumKit;
   /** v2 sound-model kit (when track.kitId is set). Coexists with `drums`. */
@@ -158,6 +172,137 @@ class AudioEngine {
 
   setMaster(volume0to1: number) {
     this.masterChain.setVolume(volume0to1);
+  }
+
+  // ---- v2 master bus ----
+
+  /** Apply a partial master-bus settings patch (limiter / glue / soft-clip
+   *  / width). UI sends diffs; engine owns the underlying Tone nodes. */
+  setMasterBus(patch: Partial<MasterBusSettings>) {
+    this.masterChain.applySettings(patch);
+  }
+
+  getMasterBus(): MasterBusSettings {
+    return this.masterChain.getSettings();
+  }
+
+  /** Latched "the master clipped" indicator. Cleared by `resetMasterClip`. */
+  getMasterClipped(): boolean {
+    return this.masterChain.getClipped();
+  }
+
+  resetMasterClip() {
+    this.masterChain.resetClip();
+  }
+
+  /** Stable list of send-bus ids (for UI iteration). */
+  getSendBusIds(): readonly SendBusId[] {
+    return SEND_BUS_IDS;
+  }
+
+  // ---- v2 per-track mixer ----
+
+  /** Apply EQ (low/mid/high gain dB + HPF on/off + HPF cutoff Hz). */
+  setTrackEq(trackId: string, eq: Partial<TrackEq>) {
+    const v = this.voices.get(trackId);
+    if (!v) return;
+    if (v.eq3) {
+      if (typeof eq.low === "number") v.eq3.low.value = clampDb(eq.low);
+      if (typeof eq.mid === "number") v.eq3.mid.value = clampDb(eq.mid);
+      if (typeof eq.high === "number") v.eq3.high.value = clampDb(eq.high);
+    }
+    if (v.hpf) {
+      const on = eq.hpfOn;
+      const hz = eq.hpfHz;
+      if (typeof on === "boolean" || typeof hz === "number") {
+        // When off, park the cutoff at 20 Hz so it's effectively bypassed.
+        const curHz = (typeof v.hpf.frequency.value === "number" ? v.hpf.frequency.value : 80) as number;
+        const targetHz = on === false ? 20 : Math.max(20, Math.min(2000, hz ?? curHz));
+        v.hpf.frequency.rampTo(targetHz, 0.03);
+      }
+    }
+  }
+
+  /** Set a single send (0..1) from this track to one of the global buses. */
+  setTrackSend(trackId: string, busId: SendBusId, amount: number) {
+    const v = this.voices.get(trackId);
+    if (!v?.sends) return;
+    const g = v.sends.get(busId);
+    if (!g) return;
+    g.gain.rampTo(Math.max(0, Math.min(1, amount)), 0.03);
+  }
+
+  /** Enable/disable + tweak a per-track effect module. Modules use
+   *  bypass-friendly defaults so disabling is audibly transparent. */
+  setEffectModule(
+    trackId: string,
+    moduleId: FxModuleId,
+    settings: Partial<FxModuleSettings>,
+  ) {
+    const v = this.voices.get(trackId);
+    if (!v) return;
+    const enabled = settings.enabled !== false;
+    const amount = Math.max(0, Math.min(1, settings.amount ?? 0.5));
+    const params = settings.params ?? {};
+    switch (moduleId) {
+      case "eq":
+        // EQ module is just an enable flag on top of the 3-band — disable
+        // flattens it. Discrete band values go through setTrackEq.
+        if (v.eq3 && !enabled) {
+          v.eq3.low.value = 0;
+          v.eq3.mid.value = 0;
+          v.eq3.high.value = 0;
+        }
+        if (v.hpf && !enabled) v.hpf.frequency.rampTo(20, 0.03);
+        return;
+      case "compressor":
+        if (v.comp) {
+          if (!enabled) {
+            v.comp.threshold.value = 0;
+            v.comp.ratio.value = 1;
+          } else {
+            const thrNorm = typeof params.threshold === "number" ? params.threshold : amount;
+            const ratNorm = typeof params.ratio === "number" ? params.ratio : amount;
+            v.comp.threshold.value = -6 - 24 * Math.max(0, Math.min(1, thrNorm));
+            v.comp.ratio.value = 1.5 + 8.5 * Math.max(0, Math.min(1, ratNorm));
+            v.comp.attack.value = 0.005 + 0.04 * (1 - amount);
+            v.comp.release.value = 0.08 + 0.4 * amount;
+          }
+        }
+        return;
+      case "saturation":
+        if (v.drive) {
+          v.drive.distortion = enabled ? 0.05 + 0.6 * amount : 0;
+          v.drive.wet.rampTo(enabled ? Math.max(0.2, amount) : 0, 0.05);
+        }
+        return;
+      case "delay":
+        if (v.delay) v.delay.wet.rampTo(enabled ? amount : 0, 0.05);
+        return;
+      case "reverb":
+        if (v.reverb) v.reverb.wet.rampTo(enabled ? amount : 0, 0.05);
+        return;
+      case "chorus":
+        if (v.chorus) {
+          v.chorus.depth = enabled ? 0.2 + 0.6 * amount : 0;
+          v.chorus.wet.rampTo(enabled ? amount : 0, 0.05);
+        }
+        return;
+      case "bitcrusher":
+        if (v.bitcrusher) {
+          const bits = enabled
+            ? Math.max(2, Math.round(16 - 14 * (typeof params.bits === "number" ? params.bits : amount)))
+            : 16;
+          v.bitcrusher.bits.value = bits;
+        }
+        return;
+      case "stereoWidth":
+        if (v.widener) {
+          // 0=mono, 0.5=normal stereo, 1=wide. Disable -> 0.5.
+          v.widener.width.rampTo(enabled ? Math.max(0, Math.min(1, amount)) : 0.5, 0.05);
+        }
+        return;
+    }
   }
 
   // ---- transport ----
@@ -952,17 +1097,37 @@ class AudioEngine {
     const drive = new Tone.Distortion({ distortion: 0, wet: 0 });
     const chorus = new Tone.Chorus({ frequency: 1.2, depth: 0.4, wet: 0 }).start();
     const widener = new Tone.StereoWidener({ width: 0.5 });
+    // v2 mixer nodes — bypass-friendly defaults so existing projects sound
+    // identical. HPF at 20 Hz is effectively transparent; EQ all 0 dB;
+    // compressor threshold 0 dB never engages; bitcrusher at 16 bits.
+    const hpf = new Tone.Filter({ frequency: 20, type: "highpass", rolloff: -24 });
+    const eq3 = new Tone.EQ3({ low: 0, mid: 0, high: 0, lowFrequency: 200, highFrequency: 3200 });
+    const comp = new Tone.Compressor({ threshold: 0, ratio: 1, attack: 0.01, release: 0.18, knee: 8 });
+    const bitcrusher = new Tone.BitCrusher(16);
     const meter = new Tone.Meter({ smoothing: 0.7 });
-    // chain: instrument -> filter -> drive -> chorus -> delay -> reverb -> widener -> channel -> master
-    filter.connect(drive);
+    // chain: instrument -> filter -> hpf -> eq3 -> drive -> chorus -> comp -> delay -> reverb -> bitcrusher -> widener -> channel -> master
+    filter.connect(hpf);
+    hpf.connect(eq3);
+    eq3.connect(drive);
     drive.connect(chorus);
-    chorus.connect(delay);
+    chorus.connect(comp);
+    comp.connect(delay);
     delay.connect(reverb);
-    reverb.connect(widener);
+    reverb.connect(bitcrusher);
+    bitcrusher.connect(widener);
     widener.connect(channel);
     channel.connect(this.masterChain.input);
     // post-fader meter tap
     channel.connect(meter);
+    // v2 sends — one gain per named bus, tapped post-fader off the channel.
+    const sends = new Map<SendBusId, Tone.Gain>();
+    for (const busId of SEND_BUS_IDS) {
+      const g = new Tone.Gain(0);
+      channel.connect(g);
+      const bus = this.masterChain.getBus(busId);
+      if (bus) g.connect(bus.input);
+      sends.set(busId, g);
+    }
     const voice: TrackVoice = {
       channel,
       meter,
@@ -972,6 +1137,11 @@ class AudioEngine {
       drive,
       chorus,
       widener,
+      hpf,
+      eq3,
+      comp,
+      bitcrusher,
+      sends,
       dispose: () => {
         if (voice.poly) voice.poly.dispose();
         if (voice.drums) {
@@ -1000,6 +1170,13 @@ class AudioEngine {
         widener.dispose();
         delay.dispose();
         reverb.dispose();
+        hpf.dispose();
+        eq3.dispose();
+        comp.dispose();
+        bitcrusher.dispose();
+        for (const g of sends.values()) {
+          try { g.dispose(); } catch { /* ignore */ }
+        }
         meter.dispose();
         channel.dispose();
       },
@@ -1065,3 +1242,7 @@ class AudioEngine {
 }
 
 export const audio = new AudioEngine();
+
+function clampDb(x: number): number {
+  return Math.max(-18, Math.min(18, x));
+}
