@@ -31,6 +31,7 @@ export const DRUM_PIECES = [
   "tomLow",
   "tomHigh",
   "crash",
+  "fx",
 ] as const;
 export type DrumPiece = (typeof DRUM_PIECES)[number];
 
@@ -104,7 +105,174 @@ export class PolyPluck {
   }
 }
 
-export type MelodicVoice = Tone.PolySynth | Tone.Sampler | PolyPluck;
+/**
+ * Mono 808 voice — a single MonoSynth with portamento for legato slides,
+ * a pitch envelope (drops `pitchEnvSemis` over `pitchEnvDecay` seconds
+ * starting from each note's frequency), and a sidechain duck that
+ * temporarily reduces the post-voice gain on every hit to emulate the
+ * 4-on-the-floor pump that 808 basses are usually heard with.
+ *
+ * Implements the `MelodicVoice` surface used by the engine
+ * (connect / triggerAttackRelease / triggerAttack / triggerRelease /
+ * releaseAll / dispose / set) so it slots into the same union without
+ * special casing at call sites.
+ */
+export class Mono808Voice {
+  private synth: Tone.MonoSynth;
+  private duck: Tone.Gain;
+  /** Pitch-env depth in semitones (positive = pitch dive from note). */
+  private pitchEnvSemis: number;
+  /** Sidechain depth 0..1 — how far the post-voice gain dips per hit. */
+  private sidechain: number;
+  /** Pitch envelope decay window. */
+  private pitchEnvDecay = 0.18;
+  /** Sidechain duck recovery window. */
+  private duckRecoverySec = 0.25;
+
+  constructor(opts: {
+    portamento?: number;
+    envelope?: Partial<Tone.EnvelopeOptions>;
+    filter?: Partial<Tone.FilterOptions>;
+    filterEnvelope?: Partial<Tone.FrequencyEnvelopeOptions>;
+    pitchEnvSemis?: number;
+    sidechain?: number;
+    volume?: number;
+  } = {}) {
+    this.synth = new Tone.MonoSynth({
+      oscillator: { type: "sine" },
+      portamento: opts.portamento ?? 0.05, // tiny default for legato slides
+      envelope: { attack: 0.005, decay: 0.6, sustain: 0.7, release: 0.8, ...(opts.envelope ?? {}) },
+      filter: { Q: 1.5, frequency: 200, type: "lowpass", rolloff: -24, ...(opts.filter ?? {}) },
+      filterEnvelope: {
+        attack: 0.005,
+        decay: 0.3,
+        sustain: 0.5,
+        release: 0.6,
+        baseFrequency: 100,
+        octaves: 2.5,
+        ...(opts.filterEnvelope ?? {}),
+      },
+      volume: opts.volume ?? -6,
+    });
+    this.duck = new Tone.Gain(1);
+    this.synth.connect(this.duck);
+    this.pitchEnvSemis = opts.pitchEnvSemis ?? 0;
+    this.sidechain = Math.max(0, Math.min(1, opts.sidechain ?? 0));
+  }
+
+  connect(dest: Tone.InputNode) {
+    this.duck.connect(dest);
+    return this;
+  }
+
+  /** Apply per-track sound-param updates. Only the fields relevant to
+   *  the 808's character are honored; everything else is ignored. */
+  set(opts: {
+    portamento?: number;
+    pitchEnvSemis?: number;
+    sidechain?: number;
+    envelope?: Partial<Tone.EnvelopeOptions>;
+  }) {
+    if (opts.portamento !== undefined) {
+      this.synth.portamento = opts.portamento;
+    }
+    if (opts.pitchEnvSemis !== undefined) {
+      this.pitchEnvSemis = opts.pitchEnvSemis;
+    }
+    if (opts.sidechain !== undefined) {
+      this.sidechain = Math.max(0, Math.min(1, opts.sidechain));
+    }
+    if (opts.envelope) {
+      try {
+        (this.synth as unknown as { set: (o: object) => void }).set({
+          envelope: opts.envelope,
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  triggerAttack(
+    note: Tone.Unit.Frequency,
+    time?: Tone.Unit.Time,
+    velocity = 0.9,
+  ) {
+    this.fireDuck(time);
+    this.firePitchEnv(note, time);
+    this.synth.triggerAttack(note, time, velocity);
+    return this;
+  }
+
+  triggerRelease(_note?: Tone.Unit.Frequency, time?: Tone.Unit.Time) {
+    this.synth.triggerRelease(time);
+    return this;
+  }
+
+  triggerAttackRelease(
+    note: Tone.Unit.Frequency,
+    duration: Tone.Unit.Time,
+    time?: Tone.Unit.Time,
+    velocity = 0.9,
+  ) {
+    this.fireDuck(time);
+    this.firePitchEnv(note, time);
+    this.synth.triggerAttackRelease(note, duration, time, velocity);
+    return this;
+  }
+
+  releaseAll() {
+    try {
+      this.synth.triggerRelease();
+    } catch {
+      // ignore
+    }
+    return this;
+  }
+
+  dispose() {
+    this.synth.dispose();
+    this.duck.dispose();
+    return this;
+  }
+
+  private fireDuck(time?: Tone.Unit.Time) {
+    if (this.sidechain <= 0) return;
+    const t = time !== undefined ? (time as number) : Tone.now();
+    const floor = Math.max(0.05, 1 - this.sidechain);
+    try {
+      this.duck.gain.cancelScheduledValues(t);
+      this.duck.gain.setValueAtTime(floor, t);
+      this.duck.gain.linearRampToValueAtTime(1, t + this.duckRecoverySec);
+    } catch {
+      // ignore
+    }
+  }
+
+  private firePitchEnv(note: Tone.Unit.Frequency, time?: Tone.Unit.Time) {
+    if (this.pitchEnvSemis <= 0) return;
+    const t = time !== undefined ? (time as number) : Tone.now();
+    try {
+      const baseHz = Tone.Frequency(note).toFrequency();
+      const startHz = baseHz * Math.pow(2, this.pitchEnvSemis / 12);
+      const freq = this.synth.frequency;
+      freq.cancelScheduledValues(t);
+      freq.setValueAtTime(startHz, t);
+      freq.exponentialRampToValueAtTime(
+        Math.max(0.1, baseHz),
+        t + this.pitchEnvDecay,
+      );
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export type MelodicVoice =
+  | Tone.PolySynth
+  | Tone.Sampler
+  | PolyPluck
+  | Mono808Voice;
 
 // ---------- helpers ----------
 
@@ -578,6 +746,39 @@ export function buildDrumKit(preset: DrumsPreset): DrumKit {
     tomLow: makeTom("A2"),
     tomHigh: makeTom("D3"),
     crash: makeCrash(),
+    fx: makeLegacyFx(),
+  };
+}
+
+/**
+ * Lightweight FX voice used by the legacy drum kit so the `fx` slot is
+ * populated even on projects that haven't migrated to the new kit
+ * system. New v2 kits in `sounds/kits.ts` provide richer per-kit FX.
+ */
+function makeLegacyFx(): DrumVoice {
+  const noise = new Tone.NoiseSynth({
+    noise: { type: "white" },
+    envelope: { attack: 0.02, decay: 0.4, sustain: 0, release: 0.2 },
+    volume: -18,
+  });
+  const lp = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.5 });
+  const hp = new Tone.Filter({ type: "highpass", frequency: 800, Q: 0.7 });
+  noise.chain(hp, lp);
+  return {
+    trigger: (time, velocity) => {
+      lp.frequency.cancelScheduledValues(time);
+      lp.frequency.setValueAtTime(800, time);
+      lp.frequency.linearRampToValueAtTime(6000, time + 0.25);
+      noise.triggerAttackRelease("4n", time, velocity);
+    },
+    connect: (dest) => {
+      lp.connect(dest);
+    },
+    dispose: () => {
+      noise.dispose();
+      hp.dispose();
+      lp.dispose();
+    },
   };
 }
 

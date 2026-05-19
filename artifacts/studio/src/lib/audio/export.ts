@@ -18,6 +18,8 @@ import {
   type DrumKit,
   type DrumPiece,
 } from "./engine";
+import { findKit, buildKit, type KitVoice } from "./sounds/kits";
+import { findPreset, buildPresetVoice } from "./sounds/presets";
 
 const SAMPLE_RATE = 44100;
 const CHANNELS = 2;
@@ -44,6 +46,7 @@ interface RenderVoice {
   filter: Tone.Filter;
   poly?: import("./engine").MelodicVoice;
   drums?: DrumKit;
+  kit?: KitVoice;
 }
 
 export async function renderProjectToWav(
@@ -216,6 +219,25 @@ function buildVoice(track: Track): RenderVoice {
 }
 
 function attachInstrument(v: RenderVoice, track: Track) {
+  // v2 path — honor explicit kit/preset selection so exports match playback.
+  if (track.kind === "drums" && track.kitId) {
+    const def = findKit(track.kitId);
+    v.kit = buildKit(def, v.filter, v.reverb, v.delay);
+    return;
+  }
+  if (
+    (track.kind === "piano" ||
+      track.kind === "guitar" ||
+      track.kind === "bass") &&
+    track.presetId
+  ) {
+    const def = findPreset(track.presetId);
+    if (def) {
+      v.poly = buildPresetVoice(def);
+      v.poly.connect(v.filter);
+      return;
+    }
+  }
   switch (track.kind) {
     case "piano":
       v.poly = buildPiano(track.preset as PianoPreset);
@@ -271,7 +293,12 @@ function scheduleNoteClip(
     const t = clip.start + ev.time;
     transport.schedule((time) => {
       if (track.kind === "drums") {
-        if (v.drums) triggerDrumPiece(v.drums, ev.note as DrumPiece, ev.velocity, time);
+        if (v.kit) {
+          const pv = v.kit.pieces.get(ev.note as DrumPiece);
+          if (pv) pv.trigger(time, ev.velocity);
+        } else if (v.drums) {
+          triggerDrumPiece(v.drums, ev.note as DrumPiece, ev.velocity, time);
+        }
       } else if (v.poly) {
         const dur = Math.max(0.05, (ev.duration * 60) / transport.bpm.value);
         try {

@@ -1,8 +1,12 @@
 import * as Tone from "tone";
 import type {
   AnyPreset,
+  DrumKitId,
+  DrumPieceSettings,
+  GrooveSettings,
   InstrumentKind,
   NoteClip,
+  SoundParams,
   Track,
   VocalsPreset,
 } from "../../types";
@@ -17,6 +21,10 @@ import {
   type DrumPiece,
   type MelodicVoice,
 } from "./voices";
+import { buildKit, cutoffNormToHz, findKit, type KitVoice } from "./sounds/kits";
+import { buildPresetVoice, findPreset } from "./sounds/presets";
+import { tryLoadMelodicSampler } from "./sounds/samples";
+import { applyGroove, getGroove, shouldFlam, shouldGhost } from "./sounds/groove";
 
 // Re-export voice primitives so existing call sites that import from
 // `./engine` (export.ts, components) keep compiling without churn.
@@ -51,8 +59,20 @@ interface TrackVoice {
   reverb: Tone.Reverb;
   delay: Tone.FeedbackDelay;
   filter: Tone.Filter;
+  /** v2 sound-shaping nodes inserted in the per-track chain after the
+   *  filter so per-voice sound params (drive, chorus, width) are
+   *  audible without rebuilding the voice. Wet defaults to 0 (bypass). */
+  drive?: Tone.Distortion;
+  chorus?: Tone.Chorus;
+  widener?: Tone.StereoWidener;
   poly?: MelodicVoice;
   drums?: DrumKit;
+  /** v2 sound-model kit (when track.kitId is set). Coexists with `drums`. */
+  kit?: KitVoice;
+  /** Active kit id so we know when to rebuild on kit change. */
+  kitId?: DrumKitId;
+  /** Active melodic preset id (when track.presetId is set). */
+  presetId?: string;
   mic?: Tone.UserMedia;
   micOn?: boolean;
   dispose: () => void;
@@ -64,6 +84,9 @@ class AudioEngine {
   private metronomeAccent: Tone.MembraneSynth;
 
   private voices = new Map<string, TrackVoice>();
+  /** Project-wide default groove merged under per-track overrides at
+   *  schedule time. `undefined` means "no global humanization". */
+  private globalGroove?: Partial<GrooveSettings>;
   /**
    * All Tone.Player instances scheduled for transport-aligned audio
    * clips. Kept here so `panicStopAll()` can hard-stop in-flight audio
@@ -269,8 +292,41 @@ class AudioEngine {
     if (!v) {
       v = this.buildVoice(track);
       this.voices.set(track.id, v);
+    } else {
+      // Rebuild instrument when v2 sound-model selectors change.
+      const wantKit = track.kitId;
+      const wantPreset = track.presetId;
+      if (track.kind === "drums" && wantKit && v.kitId !== wantKit) {
+        this.setKit(track.id, wantKit);
+      } else if (
+        track.kind !== "drums" &&
+        track.kind !== "vocals" &&
+        wantPreset &&
+        v.presetId !== wantPreset
+      ) {
+        this.setMelodicPreset(track.id, wantPreset);
+      }
     }
     this.applyTrackSettings(track);
+    // v2: re-apply per-track sound params and per-piece mixer overrides
+    // so the engine state matches the latest track snapshot.
+    if (track.sound) this.setSoundParams(track.id, track.sound);
+    if (track.kitId && track.pieceSettings) {
+      // Pass the full settings map on every call so kit-wide solo
+      // arbitration sees the complete picture during rehydration —
+      // otherwise the last piece written wins and stored mute/solo
+      // state can be lost.
+      for (const [piece, partial] of Object.entries(track.pieceSettings)) {
+        if (partial) {
+          this.setPieceSetting(
+            track.id,
+            piece as DrumPiece,
+            partial,
+            track.pieceSettings,
+          );
+        }
+      }
+    }
   }
 
   removeTrack(trackId: string) {
@@ -310,8 +366,256 @@ class AudioEngine {
   changePreset(track: Track) {
     const v = this.voices.get(track.id);
     if (!v) return;
+    this.disposeInstrument(v);
+    this.attachInstrument(v, track);
+  }
+
+  // ---- v2 sound-model methods ----
+
+  /** Switch this track to a named v2 drum kit, rebuilding pieces. */
+  setKit(trackId: string, kitId: DrumKitId) {
+    const v = this.voices.get(trackId);
+    if (!v) return;
+    if (v.kitId === kitId && v.kit) return;
+    this.disposeInstrument(v);
+    v.kitId = kitId;
+    const def = findKit(kitId);
+    v.kit = buildKit(def, v.filter, v.reverb, v.delay);
+  }
+
+  /** Switch this track to a named v2 melodic preset, rebuilding the voice. */
+  setMelodicPreset(trackId: string, presetId: string) {
+    const v = this.voices.get(trackId);
+    if (!v) return;
+    if (v.presetId === presetId && v.poly) return;
+    const def = findPreset(presetId);
+    if (!def) return;
+    this.disposeInstrument(v);
+    v.presetId = presetId;
+    const poly = buildPresetVoice(def);
+    v.poly = poly;
+    poly.connect(v.filter);
+    announceSamplerLoadIfNeeded(poly);
+    // Apply preset's send defaults as a starting point so the user hears
+    // the intended character without further tweaking.
+    v.reverb.wet.rampTo(def.synth.reverbSend, 0.05);
+    v.delay.wet.rampTo(def.synth.delaySend, 0.05);
+    this.maybeAttachMelodicSampler(v, def, presetId);
+  }
+
+  /**
+   * Probe the preset's sample layers in the background. If at least one
+   * layer is reachable, hot-swap the active voice from the synth fallback
+   * to the loaded Tone.Sampler — disposing the old voice and connecting
+   * the sampler into the existing track chain. Guarded by `presetId` so
+   * a preset change mid-load doesn't cross-wire voices.
+   */
+  private maybeAttachMelodicSampler(
+    v: TrackVoice,
+    def: ReturnType<typeof findPreset>,
+    presetId: string,
+  ) {
+    if (!def) return;
+    const r = def.synth;
+    void tryLoadMelodicSampler(def.layers, {
+      release: Math.max(0.1, r.release * 2),
+      attack: Math.max(0, r.attack * 0.4),
+      volume: -8,
+    }).then((sampler) => {
+      if (!sampler) return;
+      // User may have swapped presets, removed the track, or the engine
+      // may already have a sampler attached (e.g. duplicate probe).
+      if (v.presetId !== presetId) {
+        try { sampler.dispose(); } catch { /* ignore */ }
+        return;
+      }
+      if (v.poly instanceof Tone.Sampler) {
+        try { sampler.dispose(); } catch { /* ignore */ }
+        return;
+      }
+      try {
+        const old = v.poly;
+        v.poly = sampler;
+        sampler.connect(v.filter);
+        if (old) {
+          try {
+            (old as unknown as { releaseAll?: () => void }).releaseAll?.();
+          } catch { /* ignore */ }
+          try { old.dispose(); } catch { /* ignore */ }
+        }
+      } catch {
+        // ignore — best effort swap
+      }
+    });
+  }
+
+  /** Update one drum-piece's mixer fields. Pitch/decay are stored on the
+   *  PieceVoice and read on the next hit. Solo is reconciled across the
+   *  whole kit so any active solo silences un-soloed pieces. */
+  setPieceSetting(
+    trackId: string,
+    piece: DrumPiece,
+    partial: Partial<DrumPieceSettings>,
+    allSettings?: Partial<Record<string, Partial<DrumPieceSettings>>>,
+  ) {
+    const v = this.voices.get(trackId);
+    if (!v?.kit) return;
+    const pv = v.kit.pieces.get(piece);
+    if (!pv) return;
+    if (partial.volume !== undefined) {
+      const v01 = Math.max(0, Math.min(1, partial.volume));
+      const db = v01 <= 0.005 ? -60 : 20 * Math.log10(v01);
+      pv.channel.volume.rampTo(db, 0.04);
+    }
+    if (partial.pan !== undefined) {
+      pv.channel.pan.rampTo(Math.max(-1, Math.min(1, partial.pan)), 0.04);
+    }
+    if (partial.cutoff !== undefined) {
+      pv.filter.frequency.rampTo(cutoffNormToHz(partial.cutoff), 0.04);
+    }
+    if (partial.reverbSend !== undefined) {
+      pv.reverbSend.gain.rampTo(Math.max(0, Math.min(1, partial.reverbSend)), 0.04);
+    }
+    if (partial.delaySend !== undefined) {
+      pv.delaySend.gain.rampTo(Math.max(0, Math.min(1, partial.delaySend)), 0.04);
+    }
+    if (partial.pitch !== undefined) {
+      pv.pitchSemis = Math.max(-12, Math.min(12, partial.pitch));
+    }
+    if (partial.decay !== undefined) {
+      pv.decayMul = Math.max(0, Math.min(1, partial.decay));
+    }
+    if (partial.solo !== undefined) {
+      pv.solo = !!partial.solo;
+    }
+    if (partial.muted !== undefined || partial.solo !== undefined || allSettings) {
+      // Reconcile kit-wide solo/mute state. When any piece is soloed, all
+      // others go silent; otherwise each piece honors its own `muted`.
+      this.reconcileKitSolo(v, allSettings);
+    }
+  }
+
+  /** Walk the kit and compute effective mute = userMute || (anySolo && !solo). */
+  private reconcileKitSolo(
+    v: TrackVoice,
+    allSettings?: Partial<Record<string, Partial<DrumPieceSettings>>>,
+  ) {
+    if (!v.kit) return;
+    let anySolo = false;
+    v.kit.pieces.forEach((pv) => {
+      if (pv.solo) anySolo = true;
+    });
+    v.kit.pieces.forEach((pv, piece) => {
+      const userMute =
+        (allSettings?.[piece]?.muted as boolean | undefined) ?? false;
+      pv.channel.mute = userMute || (anySolo && !pv.solo);
+    });
+  }
+
+  /** Apply per-track sound parameters (ADSR + cutoff + sends + glide). */
+  setSoundParams(trackId: string, partial: Partial<SoundParams>) {
+    const v = this.voices.get(trackId);
+    if (!v) return;
+    if (partial.cutoff !== undefined) {
+      v.filter.frequency.rampTo(cutoffNormToHz(partial.cutoff), 0.05);
+    }
+    if (partial.reverbSend !== undefined) {
+      v.reverb.wet.rampTo(Math.max(0, Math.min(1, partial.reverbSend)), 0.05);
+    }
+    if (partial.delaySend !== undefined) {
+      v.delay.wet.rampTo(Math.max(0, Math.min(1, partial.delaySend)), 0.05);
+    }
+    if (partial.resonance !== undefined) {
+      v.filter.Q.rampTo(Math.max(0.1, partial.resonance * 16), 0.05);
+    }
+    if (partial.drive !== undefined && v.drive) {
+      const d = Math.max(0, Math.min(1, partial.drive));
+      v.drive.distortion = d * 0.9;
+      v.drive.wet.rampTo(d > 0 ? Math.min(1, d * 2) : 0, 0.05);
+    }
+    if (partial.chorusSend !== undefined && v.chorus) {
+      v.chorus.wet.rampTo(Math.max(0, Math.min(1, partial.chorusSend)), 0.05);
+    }
+    if (partial.width !== undefined && v.widener) {
+      v.widener.width.rampTo(Math.max(0, Math.min(1, partial.width)), 0.05);
+    }
+    if (!v.poly) return;
+    // Tone.PolySynth supports `.set()` to live-update voice options.
+    const poly = v.poly as unknown as { set?: (opts: object) => void };
+    if (typeof poly.set !== "function") return;
+    const env: Record<string, number> = {};
+    if (partial.attack !== undefined) env.attack = Math.max(0.001, partial.attack * 2);
+    if (partial.decay !== undefined) env.decay = Math.max(0.001, partial.decay * 1.5);
+    if (partial.sustain !== undefined) env.sustain = Math.max(0, Math.min(1, partial.sustain));
+    if (partial.release !== undefined) env.release = Math.max(0.01, partial.release * 3);
+    if (Object.keys(env).length > 0) {
+      try {
+        poly.set({ envelope: env });
+      } catch {
+        // some voices (Sampler, Pluck) don't expose envelope.set
+      }
+    }
+    if (partial.glide !== undefined) {
+      try {
+        poly.set({ portamento: Math.max(0, partial.glide) });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /** Per-track groove settings live on the Track object itself; this
+   *  method exists as the documented facade entry-point so the UI can
+   *  signal a change. The next `scheduleClip` will pick up the new
+   *  values from the patched Track and merge with `globalGroove`. */
+  setTrackGroove(_trackId: string, _settings: Partial<GrooveSettings>) {
+    // no-op on the engine cache; see scheduleClip for read site.
+  }
+
+  /** Project-wide groove default. Merged under per-track overrides at
+   *  schedule time so tracks without their own groove still humanize. */
+  setGlobalGroove(settings: Partial<GrooveSettings> | undefined) {
+    this.globalGroove = settings;
+  }
+
+  /** Snapshot the resolved groove for a track (template + global + track),
+   *  used by the UI to render the per-16th probability/flam grid against
+   *  the effective values. */
+  resolveGroove(track: Track) {
+    return getGroove(track.groove, this.globalGroove);
+  }
+
+  /** Trigger one note from a melodic preset preview (used by the browser UI). */
+  previewPresetNote(presetId: string, note = "C4", durationSec = 0.6) {
+    const def = findPreset(presetId);
+    if (!def) return;
+    // Build a one-shot preview voice on the master bus so it doesn't
+    // disturb any track's settings. Disposed shortly after the note.
+    const voice = buildPresetVoice(def);
+    voice.connect(this.masterChain.input);
+    try {
+      voice.triggerAttackRelease(note, durationSec, undefined, 0.85);
+    } catch {
+      // ignore — preset preview is best-effort
+    }
+    // Dispose after note + tail.
+    window.setTimeout(() => {
+      try {
+        voice.dispose();
+      } catch {
+        // ignore
+      }
+    }, Math.ceil((durationSec + 2.0) * 1000));
+  }
+
+  /** Internal: dispose whichever instrument(s) are attached. */
+  private disposeInstrument(v: TrackVoice) {
     if (v.poly) {
-      v.poly.dispose();
+      try {
+        v.poly.dispose();
+      } catch {
+        // ignore
+      }
       v.poly = undefined;
     }
     if (v.drums) {
@@ -319,7 +623,12 @@ class AudioEngine {
       (Object.keys(drums) as DrumPiece[]).forEach((k) => drums[k].dispose());
       v.drums = undefined;
     }
-    this.attachInstrument(v, track.kind, track.preset);
+    if (v.kit) {
+      v.kit.dispose();
+      v.kit = undefined;
+    }
+    v.presetId = undefined;
+    v.kitId = undefined;
   }
 
   // ---- live triggering ----
@@ -417,13 +726,25 @@ class AudioEngine {
     time?: number,
   ) {
     const v = this.voices.get(trackId);
-    if (!v?.drums) return;
-    const inst = v.drums[piece];
-    if (!inst) return;
+    if (!v) return;
     const t = time ?? Tone.now();
     try {
-      inst.trigger(t, velocity);
-      this.noteEverPlayed = true;
+      // v2 kit wins when present (the new sound model).
+      if (v.kit) {
+        const pv = v.kit.pieces.get(piece);
+        if (pv) {
+          pv.trigger(t, velocity);
+          this.noteEverPlayed = true;
+        }
+        return;
+      }
+      if (v.drums) {
+        const inst = v.drums[piece];
+        if (inst) {
+          inst.trigger(t, velocity);
+          this.noteEverPlayed = true;
+        }
+      }
     } catch {
       // ignore
     }
@@ -461,28 +782,62 @@ class AudioEngine {
 
   // ---- clip scheduling ----
 
-  /** Schedule notes from a clip on Tone.Transport. Returns event ids for cleanup. */
+  /** Schedule notes from a clip on Tone.Transport. Returns event ids for cleanup.
+   *
+   * When the track defines a groove, microtiming/velocity humanization
+   * is consulted per note at schedule time. The groove engine returns
+   * a small time offset (sec) and a possibly-modified velocity; notes
+   * may also be skipped (probability gate) or flammed (small lead-in
+   * grace note) depending on the template.
+   */
   scheduleClip(track: Track, clip: NoteClip): number[] {
     const ids: number[] = [];
     const v = this.voices.get(track.id);
     if (!v) return ids;
     const startBeats = clip.start;
+    // Merge project-wide groove (global defaults) under track overrides.
+    const groove = getGroove(track.groove, this.globalGroove);
     for (const ev of clip.notes) {
-      // Skip notes that fall outside the trimmed clip window. Resizing
-      // keeps the underlying note data intact (so growing the clip back
-      // restores them) — the play pass is what enforces the trim.
       if (ev.time < 0 || ev.time >= clip.length) continue;
       const t = startBeats + ev.time;
       const id = Tone.getTransport().schedule((time) => {
+        const bpm = Tone.getTransport().bpm.value;
+        const g = applyGroove(ev.time, ev.velocity, groove, bpm);
+        if (g.skip) return;
+        const fireAt = Math.max(time + g.timeOffsetSec, time - 0.05);
         if (track.kind === "drums") {
-          this.triggerDrumAt(track.id, ev.note as DrumPiece, ev.velocity, time);
+          // Flam: tiny lead-in hit before the main one. Per-step flam
+          // overrides win over template probability.
+          if (
+            shouldFlam(groove, ev.time) &&
+            ev.note !== "hat" &&
+            ev.note !== "ohat"
+          ) {
+            this.triggerDrumAt(
+              track.id,
+              ev.note as DrumPiece,
+              g.velocity * 0.45,
+              fireAt - 0.025,
+            );
+          }
+          // Ghost note: very quiet snare grace, off-grid, sprinkled by
+          // template probability. Only meaningful on snare-ish pieces.
+          if (
+            shouldGhost(groove) &&
+            (ev.note === "snare" || ev.note === "clap")
+          ) {
+            this.triggerDrumAt(
+              track.id,
+              ev.note as DrumPiece,
+              Math.max(0.05, g.velocity * 0.22),
+              fireAt + 0.06,
+            );
+          }
+          this.triggerDrumAt(track.id, ev.note as DrumPiece, g.velocity, fireAt);
         } else if (v.poly) {
-          const dur = Math.max(
-            0.05,
-            (ev.duration * 60) / Tone.getTransport().bpm.value,
-          );
+          const dur = Math.max(0.05, (ev.duration * 60) / bpm);
           try {
-            v.poly.triggerAttackRelease(ev.note, dur, time, ev.velocity);
+            v.poly.triggerAttackRelease(ev.note, dur, fireAt, g.velocity);
           } catch {
             // skip
           }
@@ -551,11 +906,19 @@ class AudioEngine {
       type: "lowpass",
       rolloff: -12,
     });
+    // v2 sound-shaping nodes — wet defaults to 0 so they are inaudible
+    // until the user opens MelodicParams and turns them up.
+    const drive = new Tone.Distortion({ distortion: 0, wet: 0 });
+    const chorus = new Tone.Chorus({ frequency: 1.2, depth: 0.4, wet: 0 }).start();
+    const widener = new Tone.StereoWidener({ width: 0.5 });
     const meter = new Tone.Meter({ smoothing: 0.7 });
-    // chain: instrument -> filter -> delay -> reverb -> channel -> master
-    filter.connect(delay);
+    // chain: instrument -> filter -> drive -> chorus -> delay -> reverb -> widener -> channel -> master
+    filter.connect(drive);
+    drive.connect(chorus);
+    chorus.connect(delay);
     delay.connect(reverb);
-    reverb.connect(channel);
+    reverb.connect(widener);
+    widener.connect(channel);
     channel.connect(this.masterChain.input);
     // post-fader meter tap
     channel.connect(meter);
@@ -565,6 +928,9 @@ class AudioEngine {
       reverb,
       delay,
       filter,
+      drive,
+      chorus,
+      widener,
       dispose: () => {
         if (voice.poly) voice.poly.dispose();
         if (voice.drums) {
@@ -573,18 +939,31 @@ class AudioEngine {
             drums[k].dispose(),
           );
         }
+        // v2 kits hold their own piece voices, channels, sends, and FX
+        // nodes — they're owned by the track and must be torn down here
+        // or the audio graph leaks them when the track is removed.
+        if (voice.kit) {
+          try {
+            voice.kit.dispose();
+          } catch {
+            // ignore
+          }
+        }
         if (voice.mic) {
           if (voice.micOn) voice.mic.close();
           voice.mic.dispose();
         }
         filter.dispose();
+        drive.dispose();
+        chorus.dispose();
+        widener.dispose();
         delay.dispose();
         reverb.dispose();
         meter.dispose();
         channel.dispose();
       },
     };
-    this.attachInstrument(voice, track.kind, track.preset);
+    this.attachInstrument(voice, track);
     if (track.kind === "vocals") {
       voice.mic = new Tone.UserMedia();
       voice.mic.connect(filter);
@@ -592,18 +971,27 @@ class AudioEngine {
     return voice;
   }
 
-  private attachInstrument(
-    v: TrackVoice,
-    kind: InstrumentKind,
-    preset: AnyPreset,
-  ) {
+  /**
+   * Attach an instrument to the voice. Honors the v2 sound model first:
+   *   - `track.kitId`  → build a `KitVoice` from `sounds/kits.ts`
+   *   - `track.presetId` → build a melodic voice from `sounds/presets.ts`
+   * Falls back to the legacy preset factories when those are unset, so
+   * old projects keep working unchanged.
+   */
+  private attachInstrument(v: TrackVoice, track: Track) {
+    const { kind, preset } = track;
     const target = v.filter;
     if (kind === "drums") {
-      const drums = buildDrumKit(preset as import("../../types").DrumsPreset);
-      v.drums = drums;
-      (Object.keys(drums) as DrumPiece[]).forEach((k) =>
-        drums[k].connect(target),
-      );
+      if (track.kitId) {
+        v.kitId = track.kitId;
+        v.kit = buildKit(findKit(track.kitId), target, v.reverb, v.delay);
+      } else {
+        const drums = buildDrumKit(preset as import("../../types").DrumsPreset);
+        v.drums = drums;
+        (Object.keys(drums) as DrumPiece[]).forEach((k) =>
+          drums[k].connect(target),
+        );
+      }
       return;
     }
     if (kind === "vocals") {
@@ -612,6 +1000,19 @@ class AudioEngine {
         preset as VocalsPreset,
       );
       return;
+    }
+    // melodic — v2 preset id wins.
+    if (track.presetId) {
+      const def = findPreset(track.presetId);
+      if (def) {
+        v.presetId = track.presetId;
+        const poly = buildPresetVoice(def);
+        v.poly = poly;
+        poly.connect(target);
+        announceSamplerLoadIfNeeded(poly);
+        this.maybeAttachMelodicSampler(v, def, track.presetId);
+        return;
+      }
     }
     const poly = buildMelodicVoice(kind, preset);
     if (poly) {

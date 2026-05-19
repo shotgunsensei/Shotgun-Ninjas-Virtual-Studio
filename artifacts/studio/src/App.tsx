@@ -11,6 +11,9 @@ import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
 import { VocalsPanel } from "./components/instruments/VocalsPanel";
+import { PresetBrowser } from "./components/PresetBrowser";
+import { GroovePanel } from "./components/GroovePanel";
+import { MelodicParams } from "./components/MelodicParams";
 import { useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
@@ -240,15 +243,27 @@ function Studio() {
 function SelectedInstrument({ trackId }: { trackId: string }) {
   const track = useStore((s) => s.project.tracks.find((t) => t.id === trackId));
   if (!track) return null;
-  switch (track.kind) {
-    case "piano":
-    case "bass":
-      return <Keyboard track={track} />;
-    case "guitar":
-      return <GuitarPanel track={track} />;
-    case "drums":
-      return <DrumPads track={track} />;
-    case "vocals":
-      return <VocalsPanel track={track} />;
-  }
+  const instrument = (() => {
+    switch (track.kind) {
+      case "piano":
+      case "bass":
+        return <Keyboard track={track} />;
+      case "guitar":
+        return <GuitarPanel track={track} />;
+      case "drums":
+        return <DrumPads track={track} />;
+      case "vocals":
+        return <VocalsPanel track={track} />;
+    }
+  })();
+  const isMelodic =
+    track.kind === "piano" || track.kind === "guitar" || track.kind === "bass";
+  return (
+    <div className="space-y-3">
+      {instrument}
+      {isMelodic && <PresetBrowser track={track} />}
+      {isMelodic && <MelodicParams track={track} />}
+      {track.kind !== "vocals" && <GroovePanel track={track} />}
+    </div>
+  );
 }

@@ -4,7 +4,14 @@ import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents } from "../../lib/midi/midi";
 import { useStore, getStore, makeId } from "../../store";
 import { MidiLearnButton } from "../MidiLearnButton";
-import type { Track, NoteEvent, NoteClip } from "../../types";
+import type {
+  Track,
+  NoteEvent,
+  NoteClip,
+  DrumKitId,
+  DrumPieceSettings,
+} from "../../types";
+import { DRUM_KIT_LIST, findKit } from "../../lib/audio/sounds/kits";
 
 const PAD_KEYS: Record<string, DrumPiece> = {
   q: "kick",
@@ -15,6 +22,7 @@ const PAD_KEYS: Record<string, DrumPiece> = {
   s: "tomLow",
   d: "tomHigh",
   f: "crash",
+  g: "fx",
 };
 
 const LABELS: Record<DrumPiece, string> = {
@@ -26,6 +34,7 @@ const LABELS: Record<DrumPiece, string> = {
   tomLow: "Tom L",
   tomHigh: "Tom H",
   crash: "Crash",
+  fx: "FX",
 };
 
 const STEPS_PER_BEAT = 4; // 16th notes
@@ -144,6 +153,8 @@ export function DrumPads({ track }: { track: Track }) {
     [track.id, isRecording, project.midiMappings],
   );
 
+  const [showMixer, setShowMixer] = useState(false);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -151,10 +162,28 @@ export function DrumPads({ track }: { track: Track }) {
           {track.name} · Pads
         </span>
         <span className="font-mono text-[10px] text-muted-foreground hidden sm:inline">
-          Q W E R / A S D F
+          Q W E R / A S D F G
         </span>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+
+      <KitPicker track={track} />
+
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setShowMixer((s) => !s)}
+          className={`text-[10px] font-mono px-2 py-0.5 border rounded transition-colors ${
+            showMixer
+              ? "border-primary/60 text-primary"
+              : "border-border hover:border-primary/60"
+          }`}
+        >
+          {showMixer ? "Hide" : "Show"} Piece Mixer
+        </button>
+      </div>
+
+      {showMixer && <PieceMixer track={track} />}
+
+      <div className="grid grid-cols-3 gap-2">
         {DRUM_PIECES.map((p) => (
           <div key={p} className="relative">
             <button
@@ -263,6 +292,165 @@ export function DrumPads({ track }: { track: Track }) {
         record live to a take when armed.
       </p>
     </div>
+  );
+}
+
+function KitPicker({ track }: { track: Track }) {
+  const current = track.kitId;
+  const set = (id: DrumKitId) => {
+    audio.setKit(track.id, id);
+    getStore().patchTrack(track.id, { kitId: id });
+  };
+  return (
+    <div className="panel-inset rounded-md p-2 space-y-1">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        Drum Kit
+      </div>
+      <div className="grid grid-cols-5 gap-1">
+        {DRUM_KIT_LIST.map((k) => (
+          <button
+            key={k.id}
+            onClick={() => set(k.id)}
+            title={k.description}
+            className={`text-[10px] font-mono px-1 py-1 rounded border transition-colors truncate ${
+              current === k.id
+                ? "border-primary text-primary glow-red"
+                : "border-border hover:border-primary/60"
+            }`}
+          >
+            {k.name.replace(/\s+Kit$/, "")}
+          </button>
+        ))}
+      </div>
+      {current && (
+        <div className="text-[9px] text-muted-foreground font-mono pt-1">
+          {findKit(current).description}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PieceMixer({ track }: { track: Track }) {
+  const settings = (track.pieceSettings ?? {}) as Record<
+    string,
+    Partial<DrumPieceSettings> | undefined
+  >;
+  const update = (piece: DrumPiece, patch: Partial<DrumPieceSettings>) => {
+    const next = {
+      ...settings,
+      [piece]: { ...(settings[piece] ?? {}), ...patch },
+    };
+    audio.setPieceSetting(track.id, piece, patch, next);
+    getStore().patchTrack(track.id, { pieceSettings: next });
+  };
+  return (
+    <div className="panel-inset rounded-md p-2 space-y-1">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+        Piece Mixer
+      </div>
+      <div className="grid grid-cols-[2.5rem_repeat(7,1fr)_auto_auto] gap-x-1 gap-y-0.5 items-center text-[9px] font-mono text-muted-foreground">
+        <div />
+        <div className="text-center">Vol</div>
+        <div className="text-center">Pan</div>
+        <div className="text-center">Pit</div>
+        <div className="text-center">Dec</div>
+        <div className="text-center">Cut</div>
+        <div className="text-center">Rev</div>
+        <div className="text-center">Dly</div>
+        <div className="text-center px-1">M</div>
+        <div className="text-center px-1">S</div>
+        {DRUM_PIECES.map((p) => {
+          const s = settings[p] ?? {};
+          const v = (k: keyof DrumPieceSettings, dflt: number) =>
+            (s[k] as number | undefined) ?? dflt;
+          return (
+            <Row
+              key={p}
+              label={LABELS[p]}
+              vol={v("volume", 1)}
+              pan={v("pan", 0)}
+              pitch={v("pitch", 0)}
+              decay={v("decay", 1)}
+              cutoff={v("cutoff", 1)}
+              reverb={v("reverbSend", 0)}
+              delay={v("delaySend", 0)}
+              muted={(s.muted as boolean | undefined) ?? false}
+              solo={(s.solo as boolean | undefined) ?? false}
+              onChange={(patch) => update(p, patch)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  vol,
+  pan,
+  pitch,
+  decay,
+  cutoff,
+  reverb,
+  delay,
+  muted,
+  solo,
+  onChange,
+}: {
+  label: string;
+  vol: number;
+  pan: number;
+  pitch: number;
+  decay: number;
+  cutoff: number;
+  reverb: number;
+  delay: number;
+  muted: boolean;
+  solo: boolean;
+  onChange: (patch: Partial<DrumPieceSettings>) => void;
+}) {
+  const slider = (val: number, on: (v: number) => void, min = 0, max = 1) => (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={(max - min) / 100}
+      value={val}
+      onChange={(e) => on(parseFloat(e.target.value))}
+      className="w-full h-3 accent-primary"
+    />
+  );
+  return (
+    <>
+      <div className="text-foreground/80 truncate text-[9px]">{label}</div>
+      {slider(vol, (v) => onChange({ volume: v }))}
+      {slider(pan, (v) => onChange({ pan: v }), -1, 1)}
+      {slider(pitch, (v) => onChange({ pitch: v }), -12, 12)}
+      {slider(decay, (v) => onChange({ decay: v }))}
+      {slider(cutoff, (v) => onChange({ cutoff: v }))}
+      {slider(reverb, (v) => onChange({ reverbSend: v }))}
+      {slider(delay, (v) => onChange({ delaySend: v }))}
+      <button
+        onClick={() => onChange({ muted: !muted })}
+        className={`px-1 rounded text-[9px] border ${
+          muted ? "bg-primary/30 border-primary text-primary" : "border-border"
+        }`}
+        title="Mute"
+      >
+        M
+      </button>
+      <button
+        onClick={() => onChange({ solo: !solo })}
+        className={`px-1 rounded text-[9px] border ${
+          solo ? "bg-accent/40 border-accent text-accent-foreground" : "border-border"
+        }`}
+        title="Solo"
+      >
+        S
+      </button>
+    </>
   );
 }
 

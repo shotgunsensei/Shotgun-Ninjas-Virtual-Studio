@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { audio } from "./lib/audio/engine";
 import type {
   AnyPreset,
   InstrumentKind,
@@ -92,6 +93,34 @@ class Store {
   patchTrack(trackId: string, patch: Partial<Track>) {
     const tracks = this.state.project.tracks.map((t) =>
       t.id === trackId ? { ...t, ...patch } : t,
+    );
+    this.patchProject({ tracks });
+  }
+
+  /** Update the project-wide groove default. Pushed to engine so the
+   *  next scheduleClip merges it under per-track overrides. */
+  setGlobalGroove(patch: Partial<import("./types").GrooveSettings>) {
+    const cur = this.state.project.globalGroove ?? {};
+    const merged = { ...cur, ...patch };
+    audio.setGlobalGroove(merged);
+    this.patchProject({ globalGroove: merged });
+  }
+
+  /** Stamp a groove onto every track in one click — useful for "apply
+   *  current pocket to the whole arrangement". */
+  applyGrooveToAllTracks(g: Partial<import("./types").GrooveSettings>) {
+    const tracks = this.state.project.tracks.map((t) => ({
+      ...t,
+      groove: { ...(t.groove ?? {}), ...g },
+    }));
+    this.patchProject({ tracks });
+  }
+
+  /** Clear a single track's groove overrides so it falls back to the
+   *  project-wide global groove. */
+  resetTrackGroove(trackId: string) {
+    const tracks = this.state.project.tracks.map((t) =>
+      t.id === trackId ? { ...t, groove: undefined } : t,
     );
     this.patchProject({ tracks });
   }
@@ -459,7 +488,9 @@ export function getStore(initial?: Project) {
 
 export function resetStore(project: Project) {
   storeInstance = new Store(project);
-  // notify nothing — caller should re-render from root
+  // Re-seed engine-level globals from the freshly loaded project so
+  // persisted humanization is active immediately, not on next user edit.
+  audio.setGlobalGroove(project.globalGroove);
 }
 
 export function useStore<T>(selector: (s: Store["state"]) => T): T {
@@ -508,9 +539,13 @@ export function defaultProject(): Project {
 // 4-bar loop. Beats are 0..16. Notes are encoded as Tone note strings for melodic, drum piece names for drums.
 function seedDemoProject(): Project {
   const piano = makeTrack("piano", "Piano", "electric");
+  piano.presetId = "keys.electric";
   const guitar = makeTrack("guitar", "Guitar", "clean");
+  guitar.presetId = "guitar.clean";
   const drums = makeTrack("drums", "Drums", "acoustic");
+  drums.kitId = "boombap";
   const bass = makeTrack("bass", "Bass", "finger");
+  bass.presetId = "bass.808";
   const vocals = makeTrack("vocals", "Vocals", "warm");
   vocals.armed = true;
   vocals.fx.reverb = 0.4;
