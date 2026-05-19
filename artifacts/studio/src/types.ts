@@ -78,7 +78,21 @@ export interface NoteEvent {
   // beats
   duration: number;
   velocity: number;
+  // ---- v2 per-step fields (all optional, backward-compatible) ----
+  /** 0..1 chance the step fires. Missing = always fires. */
+  probability?: number;
+  /** Beats of timing nudge applied at schedule time. */
+  microTiming?: number;
+  /** Number of quick hits to fire across the step (>=1). 1 = no retrigger. */
+  retrigger?: number;
+  /** If true, schedule a quiet grace-note slightly before the main hit. */
+  flam?: boolean;
+  /** If true, boost effective velocity (and render brighter). */
+  accent?: boolean;
 }
+
+/** Division selector for the step sequencer / piano roll. */
+export type StepDivision = "1/4" | "1/8" | "1/16" | "1/16T" | "1/32";
 
 export interface NoteClip {
   id: string;
@@ -87,6 +101,14 @@ export interface NoteClip {
   // beats
   length: number;
   notes: NoteEvent[];
+  // ---- v2 sequencer fields (all optional, backward-compatible) ----
+  /** Number of bars (4/4). Falls back to round(length/4). */
+  bars?: number;
+  /** Step grid division. Falls back to "1/16". */
+  division?: StepDivision;
+  /** Optional scale highlight for melodic piano roll. */
+  scaleRoot?: string;
+  scaleMode?: "major" | "minor" | "pentMajor" | "pentMinor" | "dorian" | "chromatic";
 }
 
 export interface AudioClip {

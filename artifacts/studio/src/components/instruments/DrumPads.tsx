@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { audio, type DrumPiece, DRUM_PIECES } from "../../lib/audio/engine";
 import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents } from "../../lib/midi/midi";
@@ -10,8 +10,18 @@ import type {
   NoteClip,
   DrumKitId,
   DrumPieceSettings,
+  StepDivision,
 } from "../../types";
 import { DRUM_KIT_LIST, findKit } from "../../lib/audio/sounds/kits";
+import {
+  addGhostNotes,
+  generateBoomBap,
+  generateCinematic,
+  generateTrapHats,
+  randomizeKit,
+  randomizeLane,
+  simplifyPattern,
+} from "../../lib/audio/patterns";
 
 const PAD_KEYS: Record<string, DrumPiece> = {
   q: "kick",
@@ -37,42 +47,75 @@ const LABELS: Record<DrumPiece, string> = {
   fx: "FX",
 };
 
-const STEPS_PER_BEAT = 4; // 16th notes
-const STEP_DURATION_BEATS = 1 / STEPS_PER_BEAT;
-
-function clipPatternBeats(clip: NoteClip | undefined, fallback = 4): number {
-  return clip?.length ?? fallback;
+const VELOCITY_CYCLE = [0.55, 0.85, 1.0] as const;
+type VelTier = "soft" | "normal" | "hard";
+function velocityTier(v: number): VelTier {
+  if (v <= 0.65) return "soft";
+  if (v >= 0.95) return "hard";
+  return "normal";
 }
 
-function isOn(notes: NoteEvent[], piece: DrumPiece, beat: number): boolean {
-  // tolerance for floats
+const DIVISIONS: { id: StepDivision; label: string; stepBeats: number }[] = [
+  { id: "1/4", label: "1/4", stepBeats: 1 },
+  { id: "1/8", label: "1/8", stepBeats: 0.5 },
+  { id: "1/16", label: "1/16", stepBeats: 0.25 },
+  { id: "1/16T", label: "1/16T", stepBeats: 1 / 6 },
+  { id: "1/32", label: "1/32", stepBeats: 0.125 },
+];
+
+const BAR_OPTIONS = [1, 2, 4, 8] as const;
+
+function divInfo(id: StepDivision | undefined) {
+  return DIVISIONS.find((d) => d.id === (id ?? "1/16")) ?? DIVISIONS[2];
+}
+
+function clipBars(clip: NoteClip | undefined): number {
+  if (clip?.bars) return clip.bars;
+  if (!clip) return 1;
+  return Math.max(1, Math.round(clip.length / 4));
+}
+
+function findStepNote(
+  notes: NoteEvent[],
+  piece: DrumPiece,
+  beat: number,
+): NoteEvent | undefined {
   const tol = 0.01;
-  return notes.some(
+  return notes.find(
     (n) => n.note === piece && Math.abs(n.time - beat) < tol,
   );
 }
 
-function toggleStep(clip: NoteClip, piece: DrumPiece, beat: number): NoteClip {
-  if (isOn(clip.notes, piece, beat)) {
+function replaceStepNote(
+  clip: NoteClip,
+  piece: DrumPiece,
+  beat: number,
+  patch: Partial<NoteEvent> | null,
+  stepBeats: number,
+): NoteClip {
+  const existing = findStepNote(clip.notes, piece, beat);
+  if (!patch) {
     return {
       ...clip,
-      notes: clip.notes.filter(
-        (n) => !(n.note === piece && Math.abs(n.time - beat) < 0.01),
+      notes: clip.notes.filter((n) => n !== existing),
+    };
+  }
+  if (existing) {
+    return {
+      ...clip,
+      notes: clip.notes.map((n) =>
+        n === existing ? { ...existing, ...patch } : n,
       ),
     };
   }
-  return {
-    ...clip,
-    notes: [
-      ...clip.notes,
-      {
-        time: beat,
-        note: piece,
-        duration: STEP_DURATION_BEATS,
-        velocity: 0.9,
-      },
-    ],
+  const base: NoteEvent = {
+    time: beat,
+    note: piece,
+    duration: stepBeats,
+    velocity: 0.85,
+    ...patch,
   };
+  return { ...clip, notes: [...clip.notes, base] };
 }
 
 export function DrumPads({ track }: { track: Track }) {
@@ -81,54 +124,117 @@ export function DrumPads({ track }: { track: Track }) {
   const isPlaying = useStore((s) => s.isPlaying);
 
   const clip = track.noteClips[0];
-  const patternBeats = clipPatternBeats(clip, 4);
-  const totalSteps = Math.round(patternBeats * STEPS_PER_BEAT);
-  const totalBeats = Math.max(1, Math.round(patternBeats));
+  const bars = clipBars(clip);
+  const div = divInfo(clip?.division);
+  const totalBeats = bars * 4;
+  const totalSteps = Math.max(1, Math.round(totalBeats / div.stepBeats));
+  const stepsPerBeat = 1 / div.stepBeats;
 
   const stepBeats = useMemo(
-    () => Array.from({ length: totalSteps }, (_, i) => i * STEP_DURATION_BEATS),
-    [totalSteps],
+    () => Array.from({ length: totalSteps }, (_, i) => i * div.stepBeats),
+    [totalSteps, div.stepBeats],
   );
 
-  // Live "current step" indicator while playing
-  const playheadStep = usePlayheadStep(isPlaying, patternBeats);
+  const playheadStep = usePlayheadStep(isPlaying, totalBeats, div.stepBeats);
 
-  // Two grid templates that share a single label-gutter CSS variable so
-  // the row labels and beat columns line up pixel-perfectly:
-  //   • `padRowTemplate` is used for every drum row — one column per
-  //     16th-step (totalSteps cells).
-  //   • `beatHeaderTemplate` is used for the beat-number header row —
-  //     one column per beat (totalBeats cells), each spanning the same
-  //     width as 4 step cells, so the beat number is centered over its
-  //     4-step quartet rather than left-aligned on the beat-start step.
   const PAD_LABEL_GUTTER = "3rem";
   const padRowTemplate = `var(--pad-label-gutter) repeat(${totalSteps}, minmax(0, 1fr))`;
-  const beatHeaderTemplate = `var(--pad-label-gutter) repeat(${totalBeats}, minmax(0, 1fr))`;
 
-  const hit = (piece: DrumPiece) => {
-    audio.triggerDrum(track.id, piece, 0.95);
-    if (isRecording) noteRecorder.hit(track.id, piece, 0.95);
+  const ensureClip = (): NoteClip => {
+    if (clip) return clip;
+    const fresh: NoteClip = {
+      id: makeId(),
+      start: 0,
+      length: totalBeats,
+      notes: [],
+      bars,
+      division: div.id,
+    };
+    getStore().addNoteClip(track.id, fresh);
+    return fresh;
   };
 
-  const onToggle = (piece: DrumPiece, beat: number) => {
-    if (!clip) {
-      const baseClip: NoteClip = {
-        id: makeId(),
-        start: 0,
-        length: patternBeats,
-        notes: [],
-      };
-      const next = toggleStep(baseClip, piece, beat);
-      getStore().addNoteClip(track.id, next);
-      return;
-    }
-    const next = toggleStep(clip, piece, beat);
+  const writeClip = (next: NoteClip) => {
     getStore().updateNoteClip(track.id, next);
   };
 
+  const hit = (piece: DrumPiece, velocity = 0.95) => {
+    audio.triggerDrum(track.id, piece, velocity);
+    if (isRecording) noteRecorder.hit(track.id, piece, velocity);
+  };
+
+  const onCellClick = (
+    e: React.MouseEvent,
+    piece: DrumPiece,
+    beat: number,
+  ) => {
+    const c = ensureClip();
+    const existing = findStepNote(c.notes, piece, beat);
+    if (e.shiftKey) {
+      // shift-click cycles velocity through soft -> normal -> hard
+      const cur = existing?.velocity ?? VELOCITY_CYCLE[1];
+      const tier = velocityTier(cur);
+      const nextTier: VelTier =
+        tier === "soft" ? "normal" : tier === "normal" ? "hard" : "soft";
+      const nextVel =
+        VELOCITY_CYCLE[
+          nextTier === "soft" ? 0 : nextTier === "normal" ? 1 : 2
+        ];
+      const accent = nextTier === "hard";
+      writeClip(
+        replaceStepNote(
+          c,
+          piece,
+          beat,
+          { velocity: nextVel, accent },
+          div.stepBeats,
+        ),
+      );
+      hit(piece, nextVel);
+      return;
+    }
+    // normal click toggles
+    writeClip(
+      replaceStepNote(
+        c,
+        piece,
+        beat,
+        existing ? null : { velocity: 0.85 },
+        div.stepBeats,
+      ),
+    );
+    if (!existing) hit(piece, 0.85);
+  };
+
+  const [editor, setEditor] = useState<{
+    piece: DrumPiece;
+    beat: number;
+  } | null>(null);
+
+  const onCellContext = (
+    e: React.MouseEvent,
+    piece: DrumPiece,
+    beat: number,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const c = ensureClip();
+    if (!findStepNote(c.notes, piece, beat)) {
+      writeClip(
+        replaceStepNote(c, piece, beat, { velocity: 0.85 }, div.stepBeats),
+      );
+    }
+    setEditor({ piece, beat });
+  };
+
+  // qwerty pads
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return;
       const p = PAD_KEYS[e.key.toLowerCase()];
       if (!p) return;
       hit(p);
@@ -138,7 +244,6 @@ export function DrumPads({ track }: { track: Track }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track.id, isRecording]);
 
-  // direct MIDI: notes 36..43 -> drum pieces (skip if user-mapped)
   useMidiEvents(
     (e) => {
       if (e.type !== "noteon") return;
@@ -154,6 +259,76 @@ export function DrumPads({ track }: { track: Track }) {
   );
 
   const [showMixer, setShowMixer] = useState(false);
+
+  // ---- pattern actions ----
+  const seedRef = useRef(1);
+  const nextSeed = () => {
+    seedRef.current = (seedRef.current * 1103515245 + 12345) & 0x7fffffff;
+    return seedRef.current ^ Date.now();
+  };
+
+  const action = (label: string, build: (c: NoteClip) => NoteClip) => () => {
+    const c = ensureClip();
+    const next = build(c);
+    writeClip(next);
+    getStore().setStatus(label, "info");
+  };
+
+  const duplicateAction = action("Pattern duplicated", (c) => {
+    // duplicate by appending a copy of all notes shifted by totalBeats
+    // and growing the clip's bars/length to fit.
+    const shifted = c.notes.map((n) => ({ ...n, time: n.time + totalBeats }));
+    const newBars = bars * 2;
+    return {
+      ...c,
+      bars: newBars,
+      length: newBars * 4,
+      notes: [...c.notes, ...shifted],
+    };
+  });
+  const clearAction = action("Pattern cleared", (c) => ({ ...c, notes: [] }));
+  const randomLaneAction = (piece: DrumPiece) =>
+    action(`Randomized ${LABELS[piece]}`, (c) => ({
+      ...c,
+      notes: randomizeLane(c.notes, piece, totalBeats, nextSeed()),
+    }));
+  const randomKitAction = action("Kit randomized", (c) => ({
+    ...c,
+    notes: randomizeKit(c.notes, totalBeats, nextSeed()),
+  }));
+  const trapAction = action("Trap hats generated", (c) => ({
+    ...c,
+    notes: generateTrapHats(c.notes, totalBeats, nextSeed()),
+  }));
+  const boomBapAction = action("Boom-bap groove", (c) => ({
+    ...c,
+    notes: generateBoomBap(c.notes, totalBeats, nextSeed()),
+  }));
+  const cinematicAction = action("Cinematic hits", (c) => ({
+    ...c,
+    notes: generateCinematic(c.notes, totalBeats, nextSeed()),
+  }));
+  const simplifyAction = action("Pattern simplified", (c) => ({
+    ...c,
+    notes: simplifyPattern(c.notes),
+  }));
+  const ghostAction = action("Ghost notes added", (c) => ({
+    ...c,
+    notes: addGhostNotes(c.notes, totalBeats, nextSeed()),
+  }));
+
+  const setBars = (b: number) => {
+    const c = ensureClip();
+    writeClip({ ...c, bars: b, length: b * 4 });
+  };
+  const setDivision = (id: StepDivision) => {
+    const c = ensureClip();
+    // Re-snap existing notes' duration to the new step length so previously
+    // toggled cells continue to read as "on" in the new grid.
+    const newStep = divInfo(id).stepBeats;
+    const notes = c.notes.map((n) => ({ ...n, duration: newStep }));
+    writeClip({ ...c, division: id, notes });
+  };
 
   return (
     <div className="space-y-3">
@@ -204,44 +379,70 @@ export function DrumPads({ track }: { track: Track }) {
 
       {/* Step sequencer */}
       <div
-        className="panel-inset panel-glow rounded-md p-2"
+        className="panel-inset panel-glow rounded-md p-2 space-y-2"
         style={{ ["--pad-label-gutter" as string]: PAD_LABEL_GUTTER }}
+        data-step-sequencer
+        data-total-steps={totalSteps}
       >
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Step Sequencer · {totalSteps} steps · 16ths
+            Sequencer · {totalSteps} steps
           </span>
-          <button
-            onClick={() => {
-              if (!clip) return;
-              getStore().updateNoteClip(track.id, { ...clip, notes: [] });
-            }}
-            className="text-[10px] font-mono px-2 py-0.5 border border-border rounded hover:border-primary/60"
-          >
-            Clear
-          </button>
+          <div className="flex items-center gap-1 text-[9px] font-mono">
+            <span className="text-muted-foreground">Bars</span>
+            {BAR_OPTIONS.map((b) => (
+              <button
+                key={b}
+                onClick={() => setBars(b)}
+                className={`px-1.5 py-0.5 border rounded ${
+                  bars === b
+                    ? "border-primary text-primary"
+                    : "border-border hover:border-primary/60"
+                }`}
+                data-bar-option={b}
+              >
+                {b}
+              </button>
+            ))}
+            <span className="text-muted-foreground ml-2">Div</span>
+            {DIVISIONS.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => setDivision(d.id)}
+                className={`px-1.5 py-0.5 border rounded ${
+                  div.id === d.id
+                    ? "border-primary text-primary"
+                    : "border-border hover:border-primary/60"
+                }`}
+                data-division={d.id}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/*
-          Beat-number header. Each cell after the gutter spans one beat's
-          worth of step columns (4 × 1fr), so the number ends up centered
-          over its 4-step quartet rather than sitting on the beat-start
-          step. The gutter column reuses the same CSS variable as the pad
-          rows below so the rest of the columns align perfectly.
-        */}
-        <div
-          className="grid gap-x-0.5 mb-1"
-          style={{ gridTemplateColumns: beatHeaderTemplate }}
-        >
-          <div />
-          {Array.from({ length: totalBeats }, (_, beat) => (
-            <div
-              key={beat}
-              className="text-center font-mono leading-none text-[9px] text-foreground/80"
-            >
-              {beat + 1}
-            </div>
-          ))}
+        <div className="flex flex-wrap items-center gap-1">
+          <ActionBtn onClick={duplicateAction}>Duplicate</ActionBtn>
+          <ActionBtn onClick={clearAction}>Clear</ActionBtn>
+          <ActionBtn onClick={randomKitAction} data-action="randomize-kit">
+            Random Kit
+          </ActionBtn>
+          <ActionBtn onClick={trapAction} data-action="trap">
+            Trap Hats
+          </ActionBtn>
+          <ActionBtn onClick={boomBapAction} data-action="boombap">
+            Boom Bap
+          </ActionBtn>
+          <ActionBtn onClick={cinematicAction} data-action="cinematic">
+            Cinematic
+          </ActionBtn>
+          <ActionBtn onClick={simplifyAction} data-action="simplify">
+            Simplify
+          </ActionBtn>
+          <ActionBtn onClick={ghostAction} data-action="ghosts">
+            + Ghosts
+          </ActionBtn>
         </div>
 
         <div className="space-y-1">
@@ -251,15 +452,39 @@ export function DrumPads({ track }: { track: Track }) {
               className="grid items-center gap-x-0.5"
               style={{ gridTemplateColumns: padRowTemplate }}
             >
-              <div className="font-mono text-[9px] text-muted-foreground pr-1 truncate">
-                {LABELS[piece]}
+              <div className="flex items-center gap-0.5 pr-1">
+                <button
+                  onClick={randomLaneAction(piece)}
+                  title={`Randomize ${LABELS[piece]}`}
+                  className="font-mono text-[9px] text-muted-foreground hover:text-primary truncate text-left flex-1"
+                  data-randomize-lane={piece}
+                >
+                  {LABELS[piece]}
+                </button>
               </div>
               {stepBeats.map((beat, i) => {
-                const on = clip ? isOn(clip.notes, piece, beat) : false;
-                const isBeat = i % STEPS_PER_BEAT === 0;
+                const ev = clip ? findStepNote(clip.notes, piece, beat) : undefined;
+                const on = !!ev;
+                const isBeat = Math.abs((i % stepsPerBeat)) < 0.001;
                 const isAtPlayhead = isPlaying && i === playheadStep;
-                // Faint vertical divider between beat groups (4-step quartets).
-                const startsBeat = i > 0 && i % STEPS_PER_BEAT === 0;
+                const startsBeat =
+                  i > 0 && Math.abs(i % stepsPerBeat) < 0.001;
+                const accent = !!ev?.accent;
+                const prob = ev?.probability ?? 1;
+                const ret = ev?.retrigger ?? 1;
+                const flam = !!ev?.flam;
+                const tier = ev ? velocityTier(ev.velocity) : "normal";
+                const fillCls = !on
+                  ? isBeat
+                    ? "bg-graphite/80 border-border"
+                    : "bg-graphite/40 border-border/60 hover:bg-graphite/60"
+                  : accent
+                    ? "bg-primary border-primary glow-red ring-1 ring-primary/80"
+                    : tier === "hard"
+                      ? "bg-primary border-primary glow-red"
+                      : tier === "soft"
+                        ? "bg-primary/40 border-primary/60"
+                        : "bg-primary/70 border-primary";
                 return (
                   <div key={i} className="relative">
                     {startsBeat && (
@@ -269,28 +494,266 @@ export function DrumPads({ track }: { track: Track }) {
                       />
                     )}
                     <button
-                      onClick={() => onToggle(piece, beat)}
-                      className={`block w-full h-4 rounded-[2px] border transition-colors ${
-                        on
-                          ? "bg-primary border-primary glow-red"
-                          : isBeat
-                            ? "bg-graphite/80 border-border"
-                            : "bg-graphite/40 border-border/60 hover:bg-graphite/60"
-                      } ${isAtPlayhead ? "ring-1 ring-neon" : ""}`}
+                      onClick={(e) => onCellClick(e, piece, beat)}
+                      onContextMenu={(e) => onCellContext(e, piece, beat)}
+                      className={`block w-full h-4 rounded-[2px] border transition-colors relative ${fillCls} ${
+                        isAtPlayhead ? "ring-1 ring-neon" : ""
+                      }`}
                       aria-label={`${LABELS[piece]} step ${i + 1}`}
-                    />
+                      data-step
+                      data-piece={piece}
+                      data-step-index={i}
+                      data-on={on ? "1" : "0"}
+                      data-accent={accent ? "1" : "0"}
+                    >
+                      {on && prob < 1 && (
+                        <span
+                          aria-hidden
+                          data-marker="prob"
+                          className="absolute left-0 top-0 text-[7px] leading-none text-foreground/90 px-[1px]"
+                        >
+                          ?
+                        </span>
+                      )}
+                      {on && ret > 1 && (
+                        <span
+                          aria-hidden
+                          data-marker="retrigger"
+                          className="absolute right-0 top-0 text-[7px] leading-none text-foreground px-[1px] font-bold"
+                        >
+                          {ret > 4 ? "≣" : ret > 2 ? "≡" : "∥"}
+                        </span>
+                      )}
+                      {on && flam && (
+                        <span
+                          aria-hidden
+                          data-marker="flam"
+                          className="absolute left-0 bottom-0 w-1 h-1 rounded-full bg-foreground/80"
+                        />
+                      )}
+                    </button>
                   </div>
                 );
               })}
             </div>
           ))}
         </div>
+
+        <p className="text-[9px] text-muted-foreground font-mono">
+          Click toggles · Shift-click cycles velocity · Right-click opens step
+          editor.
+        </p>
       </div>
 
-      <p className="text-[10px] text-muted-foreground font-mono">
-        Click cells to edit the pattern — it plays in the timeline. Pad hits also
-        record live to a take when armed.
-      </p>
+      {editor && clip && (
+        <StepEditor
+          clip={clip}
+          piece={editor.piece}
+          beat={editor.beat}
+          stepBeats={div.stepBeats}
+          onChange={(patch) =>
+            writeClip(
+              replaceStepNote(clip, editor.piece, editor.beat, patch, div.stepBeats),
+            )
+          }
+          onClose={() => setEditor(null)}
+          onClear={() => {
+            writeClip(
+              replaceStepNote(clip, editor.piece, editor.beat, null, div.stepBeats),
+            );
+            setEditor(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ActionBtn({
+  onClick,
+  children,
+  ...rest
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+} & React.HTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-[10px] font-mono px-2 py-0.5 border border-border rounded hover:border-primary/60"
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StepEditor({
+  clip,
+  piece,
+  beat,
+  stepBeats,
+  onChange,
+  onClose,
+  onClear,
+}: {
+  clip: NoteClip;
+  piece: DrumPiece;
+  beat: number;
+  stepBeats: number;
+  onChange: (patch: Partial<NoteEvent>) => void;
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  const ev = findStepNote(clip.notes, piece, beat);
+  const velocity = ev?.velocity ?? 0.85;
+  const probability = ev?.probability ?? 1;
+  const microTiming = ev?.microTiming ?? 0;
+  const retrigger = ev?.retrigger ?? 1;
+  const flam = !!ev?.flam;
+  const accent = !!ev?.accent;
+
+  // close on Escape and on outside click
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const onDown = (e: MouseEvent) => {
+      if (
+        rootRef.current &&
+        !rootRef.current.contains(e.target as Node)
+      ) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={rootRef}
+      data-step-editor
+      data-piece={piece}
+      className="panel-inset rounded-md p-2 space-y-1.5 border border-primary/40 glow-red"
+    >
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-primary">
+          Step Editor · {LABELS[piece]} · {(beat + 1).toFixed(2)}
+        </span>
+        <button
+          onClick={onClose}
+          className="text-[9px] font-mono px-1.5 py-0.5 border border-border rounded hover:border-primary/60"
+        >
+          Close
+        </button>
+      </div>
+      <Slider
+        label="Velocity"
+        value={velocity}
+        onChange={(v) => onChange({ velocity: v })}
+      />
+      <Slider
+        label="Probability"
+        value={probability}
+        onChange={(v) => onChange({ probability: v })}
+      />
+      <Slider
+        label="Nudge"
+        value={microTiming}
+        min={-stepBeats}
+        max={stepBeats}
+        onChange={(v) => onChange({ microTiming: v })}
+      />
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[9px] text-muted-foreground w-16">
+          Retrigger
+        </span>
+        <div className="flex gap-1">
+          {[1, 2, 3, 4, 6].map((n) => (
+            <button
+              key={n}
+              onClick={() => onChange({ retrigger: n })}
+              data-retrigger={n}
+              className={`text-[9px] font-mono px-1.5 py-0.5 border rounded ${
+                retrigger === n
+                  ? "border-primary text-primary"
+                  : "border-border"
+              }`}
+            >
+              ×{n}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={() => onChange({ flam: !flam })}
+          data-flam-toggle
+          className={`text-[9px] font-mono px-2 py-0.5 border rounded ${
+            flam ? "border-primary text-primary" : "border-border"
+          }`}
+        >
+          Flam
+        </button>
+        <button
+          onClick={() => onChange({ accent: !accent })}
+          data-accent-toggle
+          className={`text-[9px] font-mono px-2 py-0.5 border rounded ${
+            accent ? "border-primary text-primary" : "border-border"
+          }`}
+        >
+          Accent
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={onClear}
+          className="text-[9px] font-mono px-2 py-0.5 border border-border rounded hover:border-primary/60 text-muted-foreground"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  onChange,
+  min = 0,
+  max = 1,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-[9px] text-muted-foreground w-16">
+        {label}
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={(max - min) / 100}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="flex-1 h-3 accent-primary"
+      />
+      <span className="font-mono text-[9px] text-foreground/80 w-10 text-right">
+        {Math.abs(max - min) <= 1
+          ? Math.round(value * 100) + "%"
+          : value.toFixed(2)}
+      </span>
     </div>
   );
 }
@@ -454,18 +917,22 @@ function Row({
   );
 }
 
-function usePlayheadStep(isPlaying: boolean, patternBeats: number) {
+function usePlayheadStep(
+  isPlaying: boolean,
+  totalBeats: number,
+  stepBeats: number,
+) {
   const [step, setStep] = useState(0);
   useEffect(() => {
-    if (!isPlaying || patternBeats <= 0) return;
+    if (!isPlaying || totalBeats <= 0 || stepBeats <= 0) return;
     let raf = 0;
     const tick = () => {
-      const pos = audio.positionBeats() % patternBeats;
-      setStep(Math.floor(pos * STEPS_PER_BEAT));
+      const pos = audio.positionBeats() % totalBeats;
+      setStep(Math.floor(pos / stepBeats));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying, patternBeats]);
+  }, [isPlaying, totalBeats, stepBeats]);
   return step;
 }

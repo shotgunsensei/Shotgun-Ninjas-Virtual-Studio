@@ -12,6 +12,7 @@ import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
+import { PianoRoll } from "./components/instruments/PianoRoll";
 import { VocalsPanel } from "./components/instruments/VocalsPanel";
 import { PresetBrowser } from "./components/PresetBrowser";
 import { GroovePanel } from "./components/GroovePanel";
@@ -289,6 +290,7 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
   return (
     <div className="space-y-3">
       {instrument}
+      {isMelodic && <PianoRoll track={track} />}
       {isMelodic && <PresetBrowser track={track} />}
       {isMelodic && <MelodicParams track={track} />}
       {track.kind !== "vocals" && <GroovePanel track={track} />}

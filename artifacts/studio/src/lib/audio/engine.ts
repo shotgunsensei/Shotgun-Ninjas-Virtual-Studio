@@ -802,44 +802,85 @@ class AudioEngine {
       const t = startBeats + ev.time;
       const id = Tone.getTransport().schedule((time) => {
         const bpm = Tone.getTransport().bpm.value;
+        // Per-step probability gate (independent of groove template prob).
+        if (ev.probability !== undefined && ev.probability < 1) {
+          if (Math.random() > ev.probability) return;
+        }
         const g = applyGroove(ev.time, ev.velocity, groove, bpm);
         if (g.skip) return;
-        const fireAt = Math.max(time + g.timeOffsetSec, time - 0.05);
+        // Per-step microTiming nudge (beats -> sec) added on top of groove.
+        const microSec = ev.microTiming
+          ? (ev.microTiming * 60) / bpm
+          : 0;
+        // Accent boosts velocity ~25% and is capped at 1.
+        const accentMul = ev.accent ? 1.25 : 1;
+        const baseVel = Math.max(0.05, Math.min(1, g.velocity * accentMul));
+        const fireAt = Math.max(time + g.timeOffsetSec + microSec, time - 0.05);
+        const retrigger = Math.max(1, Math.min(8, ev.retrigger ?? 1));
+        const stepSec = (ev.duration * 60) / bpm;
         if (track.kind === "drums") {
-          // Flam: tiny lead-in hit before the main one. Per-step flam
-          // overrides win over template probability.
-          if (
-            shouldFlam(groove, ev.time) &&
-            ev.note !== "hat" &&
-            ev.note !== "ohat"
-          ) {
+          const piece = ev.note as DrumPiece;
+          // Per-step flam (explicit) OR groove-template flam.
+          const flam =
+            ev.flam ||
+            (shouldFlam(groove, ev.time) && piece !== "hat" && piece !== "ohat");
+          if (flam) {
             this.triggerDrumAt(
               track.id,
-              ev.note as DrumPiece,
-              g.velocity * 0.45,
+              piece,
+              baseVel * 0.45,
               fireAt - 0.025,
             );
           }
-          // Ghost note: very quiet snare grace, off-grid, sprinkled by
-          // template probability. Only meaningful on snare-ish pieces.
-          if (
-            shouldGhost(groove) &&
-            (ev.note === "snare" || ev.note === "clap")
-          ) {
+          // Ghost note from groove template (snare/clap only).
+          if (shouldGhost(groove) && (piece === "snare" || piece === "clap")) {
             this.triggerDrumAt(
               track.id,
-              ev.note as DrumPiece,
-              Math.max(0.05, g.velocity * 0.22),
+              piece,
+              Math.max(0.05, baseVel * 0.22),
               fireAt + 0.06,
             );
           }
-          this.triggerDrumAt(track.id, ev.note as DrumPiece, g.velocity, fireAt);
+          if (retrigger > 1) {
+            const spacing = stepSec / retrigger;
+            for (let i = 0; i < retrigger; i++) {
+              // Decay velocity slightly across the retrigger tail so it
+              // sounds like a roll rather than N equal hits.
+              const v = baseVel * (1 - i * 0.15);
+              this.triggerDrumAt(
+                track.id,
+                piece,
+                Math.max(0.1, v),
+                fireAt + spacing * i,
+              );
+            }
+          } else {
+            this.triggerDrumAt(track.id, piece, baseVel, fireAt);
+          }
         } else if (v.poly) {
           const dur = Math.max(0.05, (ev.duration * 60) / bpm);
-          try {
-            v.poly.triggerAttackRelease(ev.note, dur, fireAt, g.velocity);
-          } catch {
-            // skip
+          if (retrigger > 1) {
+            const spacing = stepSec / retrigger;
+            const subDur = Math.max(0.04, spacing * 0.9);
+            for (let i = 0; i < retrigger; i++) {
+              const vel = baseVel * (1 - i * 0.1);
+              try {
+                v.poly.triggerAttackRelease(
+                  ev.note,
+                  subDur,
+                  fireAt + spacing * i,
+                  Math.max(0.1, vel),
+                );
+              } catch {
+                // skip
+              }
+            }
+          } else {
+            try {
+              v.poly.triggerAttackRelease(ev.note, dur, fireAt, baseVel);
+            } catch {
+              // skip
+            }
           }
         }
       }, `0:${t}:0`);
