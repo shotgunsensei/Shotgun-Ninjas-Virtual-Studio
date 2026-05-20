@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as Tone from "tone";
 
 /**
@@ -14,6 +14,8 @@ export function StereoMeter({
   getLevels,
   label,
   showClip = false,
+  resetKey,
+  onClip,
 }: {
   getMeter?: () => Tone.Meter | undefined;
   /**
@@ -24,6 +26,10 @@ export function StereoMeter({
   getLevels?: () => { peakDb: [number, number]; rmsDb: [number, number] };
   label?: string;
   showClip?: boolean;
+  /** Increment to externally reset the latched clip indicator. */
+  resetKey?: number;
+  /** Called once each time a new clip event is detected (after latch was clear). */
+  onClip?: () => void;
 }) {
   const [levels, setLevels] = useState<[number, number]>([0, 0]);
   const [peaksDb, setPeaksDb] = useState<[number, number]>([-Infinity, -Infinity]);
@@ -32,6 +38,12 @@ export function StereoMeter({
     db: [-Infinity, -Infinity],
     until: [0, 0],
   });
+  const onClipRef = useRef(onClip);
+  onClipRef.current = onClip;
+
+  useEffect(() => {
+    setClipped([false, false]);
+  }, [resetKey]);
 
   useEffect(() => {
     let raf = 0;
@@ -84,6 +96,7 @@ export function StereoMeter({
             const nextL = prev[0] || dbL >= 0;
             const nextR = prev[1] || dbR >= 0;
             if (nextL === prev[0] && nextR === prev[1]) return prev;
+            if (!prev[0] && !prev[1]) onClipRef.current?.();
             return [nextL, nextR];
           });
         }

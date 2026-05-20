@@ -62,6 +62,12 @@ class Store {
     statusVariant: "info" | "warn" | "error" | null;
     vocalDeviceId: string | null;
     countInTimers: { interval: number | null; timeout: number | null };
+    /**
+     * Incrementing key broadcast to all per-track StereoMeter instances
+     * so they clear their latched clip indicator in sync. Bumped by
+     * `resetAllTrackClips()` which is called from the transport CLIP LED.
+     */
+    trackClipResetKey: number;
     /** Pending sample to surface in the SamplePreviewDialog. */
     pendingSample: {
       blob: Blob;
@@ -91,6 +97,7 @@ class Store {
       statusVariant: null,
       vocalDeviceId: null,
       countInTimers: { interval: null, timeout: null },
+      trackClipResetKey: 0,
       pendingSample: null,
     };
   }
@@ -222,6 +229,10 @@ class Store {
       t.id === trackId ? { ...t, groove: undefined } : t,
     );
     this.patchProject({ tracks });
+  }
+
+  resetAllTrackClips() {
+    this.set({ trackClipResetKey: this.state.trackClipResetKey + 1 });
   }
 
   setStatus(message: string | null, variant: "info" | "warn" | "error" | null = "info") {

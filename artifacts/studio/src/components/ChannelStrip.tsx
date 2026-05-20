@@ -337,7 +337,8 @@ const ChannelStrip = memo(function ChannelStrip({
 
 function TrackMeter({ trackId }: { trackId: string }) {
   const getMeter = useCallback(() => audio.getTrackMeter(trackId), [trackId]);
-  return <StereoMeter getMeter={getMeter} label="LVL" showClip />;
+  const resetKey = useStore((s) => s.trackClipResetKey);
+  return <StereoMeter getMeter={getMeter} label="LVL" showClip resetKey={resetKey} />;
 }
 
 function EqKnob({

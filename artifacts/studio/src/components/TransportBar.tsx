@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle } from "lucide-react";
+import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower } from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
@@ -238,6 +238,7 @@ export function TransportBar() {
       <OfflineReadyIndicator />
       <MasterScope width={96} height={28} />
       <MasterMeter bpm={bpm} pulsing={isPlaying} />
+      <ProjectClipBadge />
       <MasterClipBadge />
 
       <div className="flex items-center gap-2 min-w-[180px]">
@@ -394,6 +395,94 @@ function MidiActivityIndicator() {
           {active ? label : "MIDI"}
         </span>
       </div>
+    </Tip>
+  );
+}
+
+/**
+ * Project-wide latching CLIP LED in the transport bar.
+ *
+ * Polls every track's Tone.Meter at ~30 Hz. As soon as any track peaks
+ * at or above 0 dBFS the LED latches red. Clicking it:
+ *   1. Scrolls into view and highlights every channel strip that clipped.
+ *   2. Resets all per-track clip indicators (via store.resetAllTrackClips).
+ *   3. Clears this transport LED.
+ */
+function ProjectClipBadge() {
+  const [clippedIds, setClippedIds] = useState<Set<string>>(new Set());
+  const lastWarnRef = useRef(0);
+
+  useEffect(() => {
+    let raf = 0;
+    const FRAME_MS = 1000 / 30;
+    let lastFrame = 0;
+    const tick = (ts: number) => {
+      if (ts - lastFrame >= FRAME_MS && !document.hidden) {
+        lastFrame = ts;
+        const trackIds = getStore().state.project.tracks.map((t) => t.id);
+        const newClips: string[] = [];
+        for (const id of trackIds) {
+          const meter = audio.getTrackMeter(id);
+          if (!meter) continue;
+          const v = meter.getValue();
+          const dbL = typeof v === "number" ? v : (v[0] ?? -Infinity);
+          const dbR = typeof v === "number" ? v : (v[1] ?? dbL);
+          if (dbL >= 0 || dbR >= 0) newClips.push(id);
+        }
+        if (newClips.length > 0) {
+          setClippedIds((prev) => {
+            const next = new Set(prev);
+            let changed = false;
+            for (const id of newClips) {
+              if (!next.has(id)) { next.add(id); changed = true; }
+            }
+            if (!changed) return prev;
+            const now = performance.now();
+            if (now - lastWarnRef.current > 5000) {
+              lastWarnRef.current = now;
+              getStore().setStatus(
+                `Track clipping detected — check channel strips.`,
+                "warn",
+              );
+            }
+            return next;
+          });
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const anyClipped = clippedIds.size > 0;
+
+  const handleClick = () => {
+    const ids = Array.from(clippedIds);
+    for (const id of ids) {
+      const el = document.querySelector(`[data-testid="channel-strip-${id}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        el.classList.add("ring-2", "ring-red-500", "ring-offset-1");
+        setTimeout(() => el.classList.remove("ring-2", "ring-red-500", "ring-offset-1"), 2000);
+      }
+    }
+    getStore().resetAllTrackClips();
+    setClippedIds(new Set());
+  };
+
+  if (!anyClipped) return null;
+  return (
+    <Tip label={`${clippedIds.size} track(s) clipped — click to locate & reset`}>
+      <button
+        type="button"
+        onClick={handleClick}
+        className="flex items-center gap-1 px-2 h-7 rounded-md border border-red-500/60 bg-red-500/15 text-red-300 font-mono text-[10px] uppercase tracking-widest studio-clip-led animate-pulse"
+        aria-label="Track clipping detected, click to locate and reset"
+      >
+        <RadioTower className="w-3 h-3" />
+        Clip ({clippedIds.size})
+      </button>
     </Tip>
   );
 }
