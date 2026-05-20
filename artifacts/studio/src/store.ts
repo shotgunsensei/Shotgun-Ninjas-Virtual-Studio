@@ -14,6 +14,7 @@ import type {
   NoteClip,
   NoteEvent,
   Project,
+  Section,
   SendBusId,
   Track,
   TrackEq,
@@ -446,6 +447,118 @@ class Store {
   clearTrackClips(trackId: string) {
     this.patchTrack(trackId, { noteClips: [], audioClips: [] });
     this.set({ selectedClipId: null });
+  }
+
+  /** Rename a clip block on the arrangement timeline. */
+  renameClip(trackId: string, clipId: string, name: string) {
+    const trimmed = name.trim();
+    const tracks = this.state.project.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      return {
+        ...t,
+        noteClips: t.noteClips.map((c) =>
+          c.id === clipId ? { ...c, name: trimmed || undefined } : c,
+        ),
+        audioClips: t.audioClips.map((c) =>
+          c.id === clipId ? { ...c, name: trimmed || undefined } : c,
+        ),
+      };
+    });
+    this.patchProject({ tracks });
+  }
+
+  /** Set a color-code on a clip block (CSS color). Pass null to clear. */
+  setClipColor(trackId: string, clipId: string, color: string | null) {
+    const value = color || undefined;
+    const tracks = this.state.project.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      return {
+        ...t,
+        noteClips: t.noteClips.map((c) =>
+          c.id === clipId ? { ...c, color: value } : c,
+        ),
+        audioClips: t.audioClips.map((c) =>
+          c.id === clipId ? { ...c, color: value } : c,
+        ),
+      };
+    });
+    this.patchProject({ tracks });
+  }
+
+  /** Duplicate a specific clip on its track, placing the copy right after it. */
+  duplicateClipById(trackId: string, clipId: string) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const note = t.noteClips.find((c) => c.id === clipId);
+    if (note) {
+      const dup: NoteClip = {
+        ...note,
+        id: newId(),
+        start: note.start + note.length,
+        notes: note.notes.map((n) => ({ ...n })),
+      };
+      this.patchTrack(trackId, { noteClips: [...t.noteClips, dup] });
+      this.set({ selectedClipId: dup.id });
+      return;
+    }
+    const audioClip = t.audioClips.find((c) => c.id === clipId);
+    if (audioClip) {
+      const beatsPerSecond = this.state.project.bpm / 60;
+      const lengthBeats = audioClip.durationSec * beatsPerSecond;
+      const dup = {
+        ...audioClip,
+        id: newId(),
+        start: audioClip.start + lengthBeats,
+      };
+      this.patchTrack(trackId, { audioClips: [...t.audioClips, dup] });
+      this.set({ selectedClipId: dup.id });
+    }
+  }
+
+  // ---- section ops ----
+  addSection(bar: number, label: string) {
+    const sections = [...(this.state.project.sections ?? [])];
+    const totalBars = this.state.project.bars;
+    const clamped = Math.max(0, Math.min(totalBars, Math.round(bar)));
+    const s: Section = { id: newId(), bar: clamped, label };
+    sections.push(s);
+    sections.sort((a, b) => a.bar - b.bar);
+    this.patchProject({ sections });
+  }
+
+  renameSection(id: string, label: string) {
+    const sections = (this.state.project.sections ?? []).map((s) =>
+      s.id === id ? { ...s, label } : s,
+    );
+    this.patchProject({ sections });
+  }
+
+  moveSection(id: string, bar: number) {
+    const totalBars = this.state.project.bars;
+    const clamped = Math.max(0, Math.min(totalBars, Math.round(bar)));
+    const sections = (this.state.project.sections ?? [])
+      .map((s) => (s.id === id ? { ...s, bar: clamped } : s))
+      .sort((a, b) => a.bar - b.bar);
+    this.patchProject({ sections });
+  }
+
+  removeSection(id: string) {
+    const sections = (this.state.project.sections ?? []).filter(
+      (s) => s.id !== id,
+    );
+    this.patchProject({ sections });
+  }
+
+  /** Set the loop region in beats; clamps so start < end and within bars. */
+  setLoopRegion(startBeat: number, endBeat: number) {
+    const totalBeats = this.state.project.bars * 4;
+    const SNAP = 0.25;
+    const snap = (b: number) =>
+      Math.max(0, Math.min(totalBeats, Math.round(b / SNAP) * SNAP));
+    let s = snap(startBeat);
+    let e = snap(endBeat);
+    if (e <= s) e = Math.min(totalBeats, s + SNAP);
+    this.patchProject({ loopStartBeat: s, loopEndBeat: e });
   }
 
   duplicateClip(trackId: string) {

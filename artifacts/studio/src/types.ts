@@ -182,6 +182,10 @@ export interface NoteClip {
   // beats
   length: number;
   notes: NoteEvent[];
+  /** Optional user-visible name for the clip block (e.g. "Verse hook"). */
+  name?: string;
+  /** Optional color (CSS hex/hsl) for color-coding clip blocks. */
+  color?: string;
   // ---- v2 sequencer fields (all optional, backward-compatible) ----
   /** Number of bars (4/4). Falls back to round(length/4). */
   bars?: number;
@@ -209,6 +213,28 @@ export interface AudioClip {
   sourceDurationSec?: number;
   blob?: Blob; // not serialized to JSON; persisted separately
   blobKey?: string; // IndexedDB key
+  /** Optional user-visible name for the clip block. */
+  name?: string;
+  /** Optional color (CSS hex/hsl) for color-coding clip blocks. */
+  color?: string;
+}
+
+/** Named section flag dropped on the arrangement timeline. */
+export type SectionLabel =
+  | "Intro"
+  | "Verse"
+  | "Hook"
+  | "Bridge"
+  | "Outro"
+  | string;
+
+export interface Section {
+  id: string;
+  /** Bar position on the timeline (0-indexed). */
+  bar: number;
+  label: SectionLabel;
+  /** Optional color for the flag; falls back to label-based palette. */
+  color?: string;
 }
 
 export interface Track {
@@ -298,6 +324,8 @@ export interface Project {
   midiMappings: MidiMapping[];
   /** Reusable sample library (imported files, recordings). */
   samples?: SampleLibraryItem[];
+  /** Ordered list of section markers placed on the arrangement ruler. */
+  sections?: Section[];
   updatedAt: number;
   /** Project-level groove. Per-track grooves override individual fields. */
   globalGroove?: Partial<GrooveSettings>;
