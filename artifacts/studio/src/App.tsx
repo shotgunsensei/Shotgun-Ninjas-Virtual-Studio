@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Header } from "./components/Header";
+import { StudioFooter } from "./components/Footer";
 import { TransportBar } from "./components/TransportBar";
 import { Timeline } from "./components/Timeline";
 import { ChannelStripsBar } from "./components/ChannelStrip";
-import { MidiPanel } from "./components/MidiPanel";
+// MidiPanel is heavier than the rest of the inspector (pulls in the
+// MIDI runtime + device listing) and lives in a collapsible aside, so
+// lazy-loading it keeps the initial bundle smaller without affecting
+// users who never open the right-hand inspector.
+const MidiPanel = lazy(() =>
+  import("./components/MidiPanel").then((m) => ({ default: m.MidiPanel })),
+);
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
 import { BackgroundFx } from "./components/BackgroundFx";
@@ -505,7 +512,15 @@ function Studio() {
               {selectedTrack && <SelectedInstrument trackId={selectedTrack.id} />}
             </div>
             <div className="p-3 flex-1 overflow-hidden">
-              <MidiPanel />
+              <Suspense
+                fallback={
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Loading MIDI…
+                  </div>
+                }
+              >
+                <MidiPanel />
+              </Suspense>
             </div>
           </aside>
         )}
@@ -525,6 +540,7 @@ function Studio() {
         }}
       />
       <PendingSampleHost />
+      <StudioFooter />
     </div>
   );
 }

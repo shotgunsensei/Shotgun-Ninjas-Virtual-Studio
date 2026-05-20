@@ -67,10 +67,17 @@ export function MasterScope({
       ctx.stroke();
     };
 
-    const tick = () => {
-      // Skip canvas redraws when the tab is hidden. The transport keeps
-      // running so the analyser still has fresh data when we resume.
-      if (!document.hidden) draw();
+    // Throttle to ~30 fps. The waveform changes too fast to need 60fps
+    // and the lower rate keeps the studio responsive on lower-end devices.
+    // Also skip canvas redraws when the tab is hidden — the transport
+    // keeps running so the analyser still has fresh data when we resume.
+    const FRAME_MS = 1000 / 30;
+    let lastFrame = 0;
+    const tick = (ts: number) => {
+      if (ts - lastFrame >= FRAME_MS) {
+        lastFrame = ts;
+        if (!document.hidden) draw();
+      }
       raf = requestAnimationFrame(tick);
     };
     if (prefersReduced) {
