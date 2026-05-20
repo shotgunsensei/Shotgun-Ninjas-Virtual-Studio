@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { FxModuleId, FxModuleSettings, Track } from "../types";
+import { MidiLearnButton } from "./MidiLearnButton";
 
 interface ModuleDef {
   id: FxModuleId;
@@ -188,6 +189,10 @@ function ModuleRow({ module, track }: { module: ModuleDef; track: Track }) {
             max={100}
             step={1}
             onValueChange={([v]) => patch({ amount: (v ?? 0) / 100, preset: "custom" })}
+          />
+          <MidiLearnButton
+            target={{ kind: "fx-amount", trackId: track.id, moduleId: module.id }}
+            small
           />
         </div>
       )}

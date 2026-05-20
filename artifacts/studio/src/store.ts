@@ -19,6 +19,7 @@ import type {
   Track,
   TrackEq,
 } from "./types";
+import { SEND_BUS_LABELS } from "./types";
 
 type Listener = () => void;
 
@@ -681,6 +682,23 @@ export function midiTargetLabel(target: MidiTarget, project: Project): string {
     case "track-volume": {
       const t = project.tracks.find((tr) => tr.id === target.trackId);
       return `${t?.name ?? "Track"} Volume`;
+    }
+    case "track-pan": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Track"} Pan`;
+    }
+    case "track-send": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Track"} Send: ${SEND_BUS_LABELS[target.busId]}`;
+    }
+    case "track-eq": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      const band = target.band === "hpf" ? "HPF" : target.band.toUpperCase();
+      return `${t?.name ?? "Track"} EQ ${band}`;
+    }
+    case "fx-amount": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Track"} FX: ${target.moduleId}`;
     }
     case "drum-pad":
       return `Drum Pad: ${target.pad}`;

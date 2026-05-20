@@ -282,6 +282,10 @@ export type MidiTarget =
   | { kind: "transport-record" }
   | { kind: "metronome-toggle" }
   | { kind: "track-volume"; trackId: string }
+  | { kind: "track-pan"; trackId: string }
+  | { kind: "track-send"; trackId: string; busId: SendBusId }
+  | { kind: "track-eq"; trackId: string; band: "low" | "mid" | "high" | "hpf" }
+  | { kind: "fx-amount"; trackId: string; moduleId: FxModuleId }
   | { kind: "drum-pad"; pad: string };
 
 export interface MidiMapping {

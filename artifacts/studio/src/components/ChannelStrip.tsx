@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
 import { audio } from "../lib/audio/engine";
-import type { AnyPreset, InstrumentKind, SendBusId, Track, TrackEq } from "../types";
+import type { AnyPreset, InstrumentKind, MidiTarget, SendBusId, Track, TrackEq } from "../types";
 import { SEND_BUS_IDS, SEND_BUS_LABELS } from "../types";
 import { MidiLearnButton } from "./MidiLearnButton";
 
@@ -187,6 +187,7 @@ const ChannelStrip = memo(function ChannelStrip({
           step={1}
           onValueChange={([v]) => getStore().patchTrack(track.id, { pan: ((v ?? 50) / 50) - 1 })}
         />
+        <MidiLearnButton target={{ kind: "track-pan", trackId: track.id }} small />
       </div>
 
       <div className="grid grid-cols-3 gap-1">
@@ -237,16 +238,19 @@ const ChannelStrip = memo(function ChannelStrip({
           label="LO"
           value={eq.low}
           onChange={(v) => getStore().setTrackEq(track.id, { low: v })}
+          learnTarget={{ kind: "track-eq", trackId: track.id, band: "low" }}
         />
         <EqKnob
           label="MID"
           value={eq.mid}
           onChange={(v) => getStore().setTrackEq(track.id, { mid: v })}
+          learnTarget={{ kind: "track-eq", trackId: track.id, band: "mid" }}
         />
         <EqKnob
           label="HI"
           value={eq.high}
           onChange={(v) => getStore().setTrackEq(track.id, { high: v })}
+          learnTarget={{ kind: "track-eq", trackId: track.id, band: "high" }}
         />
       </div>
 
@@ -274,6 +278,7 @@ const ChannelStrip = memo(function ChannelStrip({
           onValueChange={([v]) => getStore().setTrackEq(track.id, { hpfHz: v ?? 80 })}
         />
         <span className="text-[8px] font-mono text-muted-foreground w-7 text-right">{Math.round(eq.hpfHz)}</span>
+        <MidiLearnButton target={{ kind: "track-eq", trackId: track.id, band: "hpf" }} small />
       </div>
 
       {/* 4 sends */}
@@ -339,23 +344,28 @@ function EqKnob({
   label,
   value,
   onChange,
+  learnTarget,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
+  learnTarget?: MidiTarget;
 }) {
   return (
     <div className="flex flex-col items-center gap-0.5">
-      <input
-        type="range"
-        min={-12}
-        max={12}
-        step={0.5}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full accent-primary h-1"
-        onClick={(e) => e.stopPropagation()}
-      />
+      <div className="flex items-center gap-0.5 w-full">
+        <input
+          type="range"
+          min={-12}
+          max={12}
+          step={0.5}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="w-full accent-primary h-1"
+          onClick={(e) => e.stopPropagation()}
+        />
+        {learnTarget && <MidiLearnButton target={learnTarget} small />}
+      </div>
       <span className="text-[8px] text-muted-foreground font-mono">
         {label}{value !== 0 ? ` ${value > 0 ? "+" : ""}${value.toFixed(0)}` : ""}
       </span>
@@ -387,6 +397,7 @@ function SendRow({
         className="w-full accent-primary h-1"
         data-testid={`send-${busId}-${trackId}`}
       />
+      <MidiLearnButton target={{ kind: "track-send", trackId, busId }} small />
     </div>
   );
 }

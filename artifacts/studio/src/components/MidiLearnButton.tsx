@@ -10,6 +10,10 @@ interface Props {
 function targetMatches(a: MidiTarget, b: MidiTarget): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "track-volume" && b.kind === "track-volume") return a.trackId === b.trackId;
+  if (a.kind === "track-pan" && b.kind === "track-pan") return a.trackId === b.trackId;
+  if (a.kind === "track-send" && b.kind === "track-send") return a.trackId === b.trackId && a.busId === b.busId;
+  if (a.kind === "track-eq" && b.kind === "track-eq") return a.trackId === b.trackId && a.band === b.band;
+  if (a.kind === "fx-amount" && b.kind === "fx-amount") return a.trackId === b.trackId && a.moduleId === b.moduleId;
   if (a.kind === "drum-pad" && b.kind === "drum-pad") return a.pad === b.pad;
   return true;
 }

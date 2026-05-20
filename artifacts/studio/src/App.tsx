@@ -479,6 +479,36 @@ function Studio() {
             store.patchTrack(m.target.trackId, { volume: v });
             break;
           }
+          case "track-pan": {
+            if (e.type !== "cc") break;
+            const v = (e.data2 / 127) * 2 - 1;
+            store.patchTrack(m.target.trackId, { pan: v });
+            break;
+          }
+          case "track-send": {
+            if (e.type !== "cc") break;
+            store.setTrackSend(m.target.trackId, m.target.busId, e.data2 / 127);
+            break;
+          }
+          case "track-eq": {
+            if (e.type !== "cc") break;
+            if (m.target.band === "hpf") {
+              const hz = 20 + (e.data2 / 127) * 380;
+              store.setTrackEq(m.target.trackId, { hpfHz: hz, hpfOn: true });
+            } else {
+              const db = (e.data2 / 127) * 24 - 12;
+              store.setTrackEq(m.target.trackId, { [m.target.band]: db });
+            }
+            break;
+          }
+          case "fx-amount": {
+            if (e.type !== "cc") break;
+            store.setFxModule(m.target.trackId, m.target.moduleId, {
+              amount: e.data2 / 127,
+              preset: "custom",
+            });
+            break;
+          }
           case "drum-pad": {
             if (e.type !== "noteon") break;
             const drumTrack = store.state.project.tracks.find((t) => t.kind === "drums");
