@@ -5,10 +5,12 @@ import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
 import { listProjects, loadProject, relocateSampleBlob } from "../lib/storage/db";
 import { flushMixToEngine } from "../store";
 import { PluginBrowser } from "./PluginBrowser";
+import { SoundLibraryPanel } from "./SoundLibraryPanel";
 
-type TabId = "tracks" | "kits" | "presets" | "samples" | "projects" | "plugins";
+type TabId = "library" | "tracks" | "kits" | "presets" | "samples" | "projects" | "plugins";
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: "library", label: "Library" },
   { id: "tracks", label: "Tracks" },
   { id: "kits", label: "Kits" },
   { id: "presets", label: "Presets" },
@@ -53,6 +55,7 @@ export function LeftBrowser() {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
+        {tab === "library" && <SoundLibraryPanel />}
         {tab === "tracks" && <TracksTab />}
         {tab === "kits" && <KitsTab />}
         {tab === "presets" && <PresetsTab />}

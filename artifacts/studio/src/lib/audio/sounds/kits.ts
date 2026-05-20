@@ -410,12 +410,464 @@ const CINEMATIC: DrumKitDef = {
   },
 };
 
+// ---------------- Demon Truck 808 Kit ----------------
+const DEMONTRUCK: DrumKitDef = {
+  id: "demontruck",
+  name: "Demon Truck 808 Kit",
+  description: "Heavy sub-saturated 808 kick, slow open hats, rumble bass FX.",
+  pieces: {
+    kick: piece("kick", "808 Sub Kick", {
+      category: "kick",
+      synth: {
+        engine: "kick",
+        pitch: 32,
+        octaves: 10,
+        pitchDecay: 0.1,
+        decay: 1.1,
+        bodyLevelDb: 0,
+        clickLevelDb: -36,
+        drive: 0.5,
+      },
+      defaultDecay: 0.9,
+      defaultReverbSend: 0.1,
+    }),
+    snare: piece("snare", "Truck Snap", {
+      category: "snare",
+      synth: {
+        engine: "snare",
+        decay: 0.2,
+        noise: "white",
+        highpass: 2000,
+        bodyLevelDb: -10,
+        clickLevelDb: -8,
+        drive: 0.35,
+      },
+      defaultDecay: 0.4,
+    }),
+    clap: piece("clap", "Rumble Clap", {
+      category: "clap",
+      synth: { engine: "clap", decay: 0.14, noise: "white", highpass: 2000 },
+      defaultReverbSend: 0.15,
+    }),
+    hat: piece("hat", "808 Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.03, highpass: 8000, layers: 4, pitchSpread: 0.3 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.65,
+    }),
+    ohat: piece("ohat", "Slow Open Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.7, highpass: 7000 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.6,
+    }),
+    tomLow: piece("tomLow", "Sub Perc", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 36, decay: 0.5 },
+      defaultPan: -0.3,
+    }),
+    tomHigh: piece("tomHigh", "Clank Perc", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 60, decay: 0.2 },
+      defaultPan: 0.3,
+    }),
+    crash: piece("crash", "Truck Crash", {
+      category: "crash",
+      synth: { engine: "crash", decay: 2.0 },
+      defaultVolume: 0.5,
+      defaultReverbSend: 0.4,
+    }),
+    fx: piece("fx", "Sub Rumble", {
+      category: "fx",
+      synth: { engine: "fx", decay: 0.8, noise: "brown", highpass: 200 },
+      defaultVolume: 0.55,
+      defaultReverbSend: 0.2,
+    }),
+  },
+};
+
+// ---------------- Neon Dojo Percussion ----------------
+const NEONDOJO: DrumKitDef = {
+  id: "neondojo",
+  name: "Neon Dojo Percussion",
+  description: "Layered toms, metallic cymbals, tight neon groove.",
+  pieces: {
+    kick: piece("kick", "Dojo Kick", {
+      category: "kick",
+      synth: {
+        engine: "kick",
+        pitch: 40,
+        octaves: 6,
+        pitchDecay: 0.055,
+        decay: 0.42,
+        bodyLevelDb: -3,
+        clickLevelDb: -18,
+      },
+      defaultDecay: 0.55,
+    }),
+    snare: piece("snare", "Rim Shot", {
+      category: "snare",
+      synth: {
+        engine: "snare",
+        decay: 0.13,
+        noise: "white",
+        highpass: 2200,
+        bodyLevelDb: -12,
+        clickLevelDb: -6,
+      },
+      defaultDecay: 0.35,
+    }),
+    clap: piece("clap", "Dojo Clap", {
+      category: "clap",
+      synth: { engine: "clap", decay: 0.1, noise: "white", highpass: 2400 },
+    }),
+    hat: piece("hat", "Metal Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.035, highpass: 9000, layers: 4, pitchSpread: 0.2 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.72,
+    }),
+    ohat: piece("ohat", "Splash", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.25, highpass: 8500 },
+      chokeGroup: "hihat",
+    }),
+    tomLow: piece("tomLow", "Low Tom", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 46, decay: 0.35 },
+      defaultPan: -0.4,
+      defaultReverbSend: 0.2,
+    }),
+    tomHigh: piece("tomHigh", "High Tom", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 62, decay: 0.25 },
+      defaultPan: 0.4,
+      defaultReverbSend: 0.2,
+    }),
+    crash: piece("crash", "Gong Crash", {
+      category: "crash",
+      synth: { engine: "crash", decay: 1.9 },
+      defaultReverbSend: 0.5,
+    }),
+    fx: piece("fx", "Bell Strike", {
+      category: "fx",
+      synth: { engine: "fx", decay: 0.7, noise: "white", highpass: 3500 },
+      defaultVolume: 0.5,
+      defaultReverbSend: 0.45,
+    }),
+  },
+};
+
+// ---------------- Garage Band Chaos Kit ----------------
+const GARAGEBAND: DrumKitDef = {
+  id: "garageband",
+  name: "Garage Band Chaos Kit",
+  description: "Overdriven snare, live room kick, crash-heavy, raw energy.",
+  pieces: {
+    kick: piece("kick", "Room Kick", {
+      category: "kick",
+      synth: {
+        engine: "kick",
+        pitch: 44,
+        octaves: 5,
+        pitchDecay: 0.04,
+        decay: 0.48,
+        bodyLevelDb: -2,
+        clickLevelDb: -16,
+        drive: 0.3,
+      },
+      defaultReverbSend: 0.25,
+    }),
+    snare: piece("snare", "Blown Snare", {
+      category: "snare",
+      synth: {
+        engine: "snare",
+        decay: 0.28,
+        noise: "white",
+        highpass: 1000,
+        bodyLevelDb: -8,
+        clickLevelDb: -6,
+        drive: 0.55,
+      },
+      defaultDecay: 0.65,
+      defaultReverbSend: 0.3,
+    }),
+    clap: piece("clap", "Live Clap", {
+      category: "clap",
+      synth: { engine: "clap", decay: 0.15, noise: "white", highpass: 1200 },
+      defaultReverbSend: 0.2,
+    }),
+    hat: piece("hat", "Open Hi-Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.07, highpass: 6000, layers: 3 },
+      chokeGroup: "hihat",
+    }),
+    ohat: piece("ohat", "Crash Ride", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.8, highpass: 5500 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.7,
+      defaultReverbSend: 0.25,
+    }),
+    tomLow: piece("tomLow", "Floor Tom", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 41, decay: 0.55 },
+      defaultPan: -0.35,
+      defaultReverbSend: 0.2,
+    }),
+    tomHigh: piece("tomHigh", "Rack Tom", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 56, decay: 0.4 },
+      defaultPan: 0.35,
+      defaultReverbSend: 0.2,
+    }),
+    crash: piece("crash", "Big Crash", {
+      category: "crash",
+      synth: { engine: "crash", decay: 2.4 },
+      defaultVolume: 0.7,
+      defaultReverbSend: 0.45,
+    }),
+    fx: piece("fx", "Garage FX", {
+      category: "fx",
+      synth: { engine: "fx", decay: 0.5, noise: "white", highpass: 800 },
+      defaultVolume: 0.45,
+      defaultReverbSend: 0.35,
+    }),
+  },
+};
+
+// ---------------- Southern Dirt Drum Kit ----------------
+const SOUTHERNDIRT: DrumKitDef = {
+  id: "southerndirt",
+  name: "Southern Dirt Drum Kit",
+  description: "Boomy kick, rimshot snare, brush hats, swamp-grown groove.",
+  pieces: {
+    kick: piece("kick", "Swamp Kick", {
+      category: "kick",
+      synth: {
+        engine: "kick",
+        pitch: 43,
+        octaves: 6,
+        pitchDecay: 0.05,
+        decay: 0.65,
+        bodyLevelDb: -2,
+        clickLevelDb: -24,
+        lowpass: 4000,
+      },
+      defaultDecay: 0.75,
+      defaultReverbSend: 0.18,
+    }),
+    snare: piece("snare", "Rimshot", {
+      category: "snare",
+      synth: {
+        engine: "snare",
+        decay: 0.22,
+        noise: "pink",
+        highpass: 1600,
+        bodyLevelDb: -11,
+        clickLevelDb: -9,
+      },
+      defaultDecay: 0.5,
+      defaultReverbSend: 0.2,
+    }),
+    clap: piece("clap", "Dirt Clap", {
+      category: "clap",
+      synth: { engine: "clap", decay: 0.09, noise: "pink", highpass: 1300 },
+    }),
+    hat: piece("hat", "Brush Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.055, highpass: 5800, layers: 4 },
+      chokeGroup: "hihat",
+      defaultCutoff: 0.75,
+    }),
+    ohat: piece("ohat", "Brush Open", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.45, highpass: 5200 },
+      chokeGroup: "hihat",
+      defaultCutoff: 0.75,
+    }),
+    tomLow: piece("tomLow", "Conga Low", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 44, decay: 0.5 },
+      defaultPan: -0.3,
+    }),
+    tomHigh: piece("tomHigh", "Conga High", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 58, decay: 0.3 },
+      defaultPan: 0.3,
+    }),
+    crash: piece("crash", "Sizzle Ride", {
+      category: "crash",
+      synth: { engine: "crash", decay: 1.5 },
+      defaultReverbSend: 0.25,
+    }),
+    fx: piece("fx", "Dusty Snap", {
+      category: "fx",
+      synth: { engine: "fx", decay: 0.3, noise: "brown", highpass: 600 },
+      defaultVolume: 0.45,
+    }),
+  },
+};
+
+// ---------------- Cyber Trap Essentials ----------------
+const CYBERTRAP: DrumKitDef = {
+  id: "cybertrap",
+  name: "Cyber Trap Essentials",
+  description: "Glitchy hats, distorted 808, digital snap snare, future streets.",
+  pieces: {
+    kick: piece("kick", "Dist 808", {
+      category: "kick",
+      synth: {
+        engine: "kick",
+        pitch: 34,
+        octaves: 9,
+        pitchDecay: 0.08,
+        decay: 0.85,
+        bodyLevelDb: -1,
+        clickLevelDb: -30,
+        drive: 0.65,
+      },
+      defaultDecay: 0.8,
+    }),
+    snare: piece("snare", "Digital Snap", {
+      category: "snare",
+      synth: {
+        engine: "snare",
+        decay: 0.11,
+        noise: "white",
+        highpass: 2500,
+        bodyLevelDb: -8,
+        clickLevelDb: -4,
+        drive: 0.4,
+      },
+      defaultDecay: 0.3,
+    }),
+    clap: piece("clap", "Trap Clap", {
+      category: "clap",
+      synth: { engine: "clap", decay: 0.12, noise: "white", highpass: 2600 },
+      defaultReverbSend: 0.12,
+    }),
+    hat: piece("hat", "Glitch Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.028, highpass: 9500, layers: 4, pitchSpread: 0.6 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.7,
+    }),
+    ohat: piece("ohat", "Open Glitch", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.38, highpass: 8500 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.6,
+    }),
+    tomLow: piece("tomLow", "Electro Perc", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 48, decay: 0.25 },
+      defaultPan: -0.4,
+    }),
+    tomHigh: piece("tomHigh", "Digital Snap 2", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 72, decay: 0.12 },
+      defaultPan: 0.4,
+    }),
+    crash: piece("crash", "Cyber Crash", {
+      category: "crash",
+      synth: { engine: "crash", decay: 1.6 },
+      defaultReverbSend: 0.3,
+      defaultDelaySend: 0.2,
+    }),
+    fx: piece("fx", "Glitch FX", {
+      category: "fx",
+      synth: { engine: "fx", decay: 0.4, noise: "white", highpass: 5000 },
+      defaultVolume: 0.6,
+      defaultDelaySend: 0.5,
+    }),
+  },
+};
+
+// ---------------- Arcade Ghosts FX ----------------
+const ARCADEGHOSTS: DrumKitDef = {
+  id: "arcadeghosts",
+  name: "Arcade Ghosts FX",
+  description: "Chiptune hits, bitcrushed snare, 8-bit blip FX.",
+  pieces: {
+    kick: piece("kick", "8-Bit Kick", {
+      category: "kick",
+      synth: {
+        engine: "kick",
+        pitch: 48,
+        octaves: 6,
+        pitchDecay: 0.03,
+        decay: 0.3,
+        bodyLevelDb: -2,
+        clickLevelDb: -20,
+        drive: 0.6,
+      },
+      defaultDecay: 0.4,
+    }),
+    snare: piece("snare", "Bit Snare", {
+      category: "snare",
+      synth: {
+        engine: "snare",
+        decay: 0.1,
+        noise: "white",
+        highpass: 3000,
+        bodyLevelDb: -6,
+        clickLevelDb: -4,
+        drive: 0.7,
+      },
+      defaultDecay: 0.25,
+    }),
+    clap: piece("clap", "Pixel Clap", {
+      category: "clap",
+      synth: { engine: "clap", decay: 0.08, noise: "white", highpass: 3200 },
+    }),
+    hat: piece("hat", "Blip Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.022, highpass: 10000, layers: 4, pitchSpread: 0.8 },
+      chokeGroup: "hihat",
+      defaultVolume: 0.68,
+    }),
+    ohat: piece("ohat", "Square Hat", {
+      category: "hat",
+      synth: { engine: "hat", decay: 0.2, highpass: 9000 },
+      chokeGroup: "hihat",
+    }),
+    tomLow: piece("tomLow", "Pixel Tom", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 52, decay: 0.18 },
+      defaultPan: -0.4,
+    }),
+    tomHigh: piece("tomHigh", "Blip Tom", {
+      category: "perc",
+      synth: { engine: "tom", pitch: 72, decay: 0.12 },
+      defaultPan: 0.4,
+    }),
+    crash: piece("crash", "8-Bit Crash", {
+      category: "crash",
+      synth: { engine: "crash", decay: 0.9 },
+      defaultReverbSend: 0.2,
+    }),
+    fx: piece("fx", "Retro Blip", {
+      category: "fx",
+      synth: { engine: "fx", decay: 0.35, noise: "white", highpass: 4500 },
+      defaultVolume: 0.6,
+      defaultDelaySend: 0.35,
+    }),
+  },
+};
+
 export const DRUM_KITS: Record<DrumKitId, DrumKitDef> = {
   trap: TRAP,
   boombap: BOOMBAP,
   cyberpunk: CYBERPUNK,
   lofi: LOFI,
   cinematic: CINEMATIC,
+  demontruck: DEMONTRUCK,
+  neondojo: NEONDOJO,
+  garageband: GARAGEBAND,
+  southerndirt: SOUTHERNDIRT,
+  cybertrap: CYBERTRAP,
+  arcadeghosts: ARCADEGHOSTS,
 };
 
 export const DRUM_KIT_LIST: DrumKitDef[] = [
@@ -424,6 +876,12 @@ export const DRUM_KIT_LIST: DrumKitDef[] = [
   CYBERPUNK,
   LOFI,
   CINEMATIC,
+  DEMONTRUCK,
+  NEONDOJO,
+  GARAGEBAND,
+  SOUTHERNDIRT,
+  CYBERTRAP,
+  ARCADEGHOSTS,
 ];
 
 // ---------------- Voice construction ----------------

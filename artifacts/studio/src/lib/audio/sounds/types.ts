@@ -18,7 +18,13 @@ export type DrumKitId =
   | "boombap"
   | "cyberpunk"
   | "lofi"
-  | "cinematic";
+  | "cinematic"
+  | "demontruck"
+  | "neondojo"
+  | "garageband"
+  | "southerndirt"
+  | "cybertrap"
+  | "arcadeghosts";
 
 export type DrumCategory =
   | "kick"

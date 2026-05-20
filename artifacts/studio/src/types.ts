@@ -19,7 +19,13 @@ export type DrumKitId =
   | "boombap"
   | "cyberpunk"
   | "lofi"
-  | "cinematic";
+  | "cinematic"
+  | "demontruck"
+  | "neondojo"
+  | "garageband"
+  | "southerndirt"
+  | "cybertrap"
+  | "arcadeghosts";
 
 export interface DrumPieceSettings {
   volume: number;       // 0..1 multiplier on the piece channel
@@ -366,4 +372,9 @@ export interface Project {
   /** Human-readable metadata (creator, description, tags, mood, genre).
    *  All fields are optional and editable from the Project Info dialog. */
   metadata?: ProjectMetadata;
+  /** Active Sound Library pack id (from soundLibrary.ts). Persisted so
+   *  the pack badge shows correctly on reload. Does not affect playback
+   *  directly — the kit/preset ids on each track are the authoritative
+   *  sound selectors. */
+  soundPackId?: string;
 }
