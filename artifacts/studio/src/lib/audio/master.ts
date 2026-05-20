@@ -22,8 +22,8 @@ export interface SendBusNode {
   id: SendBusId;
   /** Public input node for tracks to connect their send gains to. */
   input: Tone.Gain;
-  /** The effect node that processes the bus (Reverb or FeedbackDelay). */
-  fx: Tone.Reverb | Tone.FeedbackDelay;
+  /** The effect node that processes the bus (Freeverb, JCReverb, or FeedbackDelay). */
+  fx: Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay;
 }
 
 export const DEFAULT_MASTER_BUS: MasterBusSettings = {
@@ -242,12 +242,15 @@ export class MasterChain {
   }
 }
 
-function makeBusFx(id: SendBusId): Tone.Reverb | Tone.FeedbackDelay {
+function makeBusFx(id: SendBusId): Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay {
   switch (id) {
     case "roomReverb":
-      return new Tone.Reverb({ decay: 1.6, preDelay: 0.01, wet: 1 });
+      // Freeverb: algorithmic, instantaneous — avoids the OfflineAudioContext
+      // IR-generation cost of Tone.Reverb (~6-8 s per instance).
+      return new Tone.Freeverb({ roomSize: 0.6, dampening: 2500, wet: 1 });
     case "neonHall":
-      return new Tone.Reverb({ decay: 4.5, preDelay: 0.04, wet: 1 });
+      // JCReverb gives a lusher, larger-room character for the "hall" bus.
+      return new Tone.JCReverb({ roomSize: 0.85, wet: 1 });
     case "tapeDelay":
       return new Tone.FeedbackDelay({
         delayTime: "8n.",

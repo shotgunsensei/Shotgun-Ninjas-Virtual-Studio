@@ -62,7 +62,7 @@ export type { DrumKit, DrumPiece, DrumVoice, MelodicVoice } from "./voices";
 interface TrackVoice {
   channel: Tone.Channel;
   meter: Tone.Meter;
-  reverb: Tone.Reverb;
+  reverb: Tone.Freeverb;
   delay: Tone.FeedbackDelay;
   filter: Tone.Filter;
   /** v2 sound-shaping nodes inserted in the per-track chain after the
@@ -1127,7 +1127,11 @@ class AudioEngine {
   // ---- voice construction ----
   private buildVoice(track: Track): TrackVoice {
     const channel = new Tone.Channel({ volume: 0 });
-    const reverb = new Tone.Reverb({ decay: 2.5, wet: 0 });
+    // Freeverb is an algorithmic reverb (Schroeder/Moorer) — instantaneous
+    // to create unlike Tone.Reverb which generates a convolution IR buffer
+    // via OfflineAudioContext and blocks the main thread for ~6-8 s per
+    // instance. With 5+ tracks this was causing a 45-50 s freeze on load.
+    const reverb = new Tone.Freeverb({ roomSize: 0.65, dampening: 3000, wet: 0 });
     const delay = new Tone.FeedbackDelay({
       delayTime: "8n",
       feedback: 0.35,

@@ -41,7 +41,7 @@ export interface ExportResult {
 
 interface RenderVoice {
   channel: Tone.Channel;
-  reverb: Tone.Reverb;
+  reverb: Tone.Freeverb;
   delay: Tone.FeedbackDelay;
   filter: Tone.Filter;
   poly?: import("./engine").MelodicVoice;
@@ -153,14 +153,13 @@ async function renderOffline(
     const beatOffset = startBeat;
 
     const anySolo = project.tracks.some((t) => t.solo);
-    const reverbReady: Promise<unknown>[] = [];
 
     for (const track of project.tracks) {
       const audible = !track.muted && (!anySolo || track.solo);
       if (!audible) continue;
 
       const v = buildVoice(track);
-      reverbReady.push(v.reverb.ready);
+      // Tone.Freeverb is instantaneous (algorithmic) — no .ready wait needed.
 
       v.reverb.wet.value = clamp01(track.fx.reverb);
       v.delay.wet.value = clamp01(track.fx.delay);
@@ -206,7 +205,7 @@ async function renderOffline(
       }
     }
 
-    await Promise.all(reverbReady);
+    // (No reverb IR to await — Freeverb is ready immediately.)
     // Wait for any Tone.Sampler URL fetches (e.g. Salamander grand piano)
     // to finish loading before starting offline render — otherwise sampled
     // notes would silently drop out of the rendered mix.
@@ -238,7 +237,7 @@ async function renderOffline(
 
 function buildVoice(track: Track): RenderVoice {
   const channel = new Tone.Channel({ volume: 0 }).toDestination();
-  const reverb = new Tone.Reverb({ decay: 2.5, wet: 0 });
+  const reverb = new Tone.Freeverb({ roomSize: 0.65, dampening: 3000, wet: 0 });
   const delay = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.35, wet: 0 });
   const filter = new Tone.Filter({ frequency: 18000, type: "lowpass", rolloff: -12 });
   filter.connect(delay);

@@ -790,7 +790,7 @@ function makeLegacyFx(): DrumVoice {
  * defaults of the channel's reverb/delay/filter.
  */
 export function applyVocalPresetTo(
-  fx: { reverb: Tone.Reverb; delay: Tone.FeedbackDelay; filter: Tone.Filter },
+  fx: { reverb: Tone.Freeverb | Tone.Reverb; delay: Tone.FeedbackDelay; filter: Tone.Filter },
   preset: VocalsPreset,
 ) {
   switch (preset) {
