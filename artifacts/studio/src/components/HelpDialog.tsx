@@ -67,7 +67,21 @@ export function HelpDialog() {
             your browser via IndexedDB.
           </Section>
         </div>
-        <div className="flex justify-end pt-2">
+        <div className="flex items-center justify-between pt-2 gap-2">
+          <button
+            data-testid="help-load-demo"
+            onClick={() =>
+              getStore().set({
+                showHelp: false,
+                showOnboarding: false,
+                requestOpenLoadDialog: true,
+              })
+            }
+            className="px-3 h-9 rounded-md border border-primary/60 text-primary font-mono text-[11px] uppercase tracking-widest hover:bg-primary/10"
+            title="Open the demo picker"
+          >
+            Load a demo
+          </button>
           <button
             onClick={() => {
               try {

@@ -499,6 +499,16 @@ class AudioEngine {
     this.soloSet.delete(trackId);
   }
 
+  /** Tear down every voice — used when swapping in a fresh project
+   * (e.g. loading a demo) so we don't leak instruments or accumulate
+   * stale voice ids in the engine. */
+  disposeAllTracks() {
+    for (const id of Array.from(this.voices.keys())) {
+      this.removeTrack(id);
+    }
+    this.soloSet.clear();
+  }
+
   applyTrackSettings(track: Track) {
     const v = this.voices.get(track.id);
     if (!v) return;

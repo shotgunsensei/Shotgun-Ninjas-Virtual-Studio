@@ -396,12 +396,15 @@ function Studio() {
     [play, pause, stop, record],
   );
 
-  // autosave debounced
+  // autosave debounced — skipped when the current project is a demo
+  // (transient). User must Save As to keep their changes.
+  const isTransient = useStore((s) => s.isTransientProject);
   const saveTimerRef = useRef<number | null>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
   useEffect(() => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    if (isTransient) return;
     saveTimerRef.current = window.setTimeout(() => {
       saveProject(projectRef.current).catch(() => {
         /* ignore quota errors */
@@ -410,7 +413,7 @@ function Studio() {
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
-  }, [project]);
+  }, [project, isTransient]);
 
   // stop vocals on unmount safety
   useEffect(() => {

@@ -48,6 +48,15 @@ class Store {
     dropTargetTrackId: string | null;
     showOnboarding: boolean;
     showHelp: boolean;
+    /** True when the current project came from `loadDemo` and has never
+     * been explicitly saved by the user. The autosave loop skips this
+     * project so demos don't pollute the saved-projects list. Cleared on
+     * Save / Save As or when a real project is loaded. */
+    isTransientProject: boolean;
+    /** When true, the Header opens its Load/Demo picker dialog. Set by
+     * other components (e.g. HelpDialog "Load a Demo" shortcut) to
+     * surface the demo picker without duplicating the dialog markup. */
+    requestOpenLoadDialog: boolean;
     statusMessage: string | null;
     statusVariant: "info" | "warn" | "error" | null;
     vocalDeviceId: string | null;
@@ -75,6 +84,8 @@ class Store {
       dropTargetTrackId: null,
       showOnboarding: false,
       showHelp: false,
+      isTransientProject: false,
+      requestOpenLoadDialog: false,
       statusMessage: null,
       statusVariant: null,
       vocalDeviceId: null,
@@ -686,7 +697,16 @@ export function getStore(initial?: Project) {
 }
 
 export function resetStore(project: Project) {
-  storeInstance = new Store(project);
+  if (storeInstance) {
+    // Mutate the existing instance so React subscriptions (bound to the
+    // current Store via `useSyncExternalStore`) keep working. This is
+    // important for in-place project swaps like `loadDemo` that don't
+    // trigger a full page reload.
+    const fresh = new Store(project).state;
+    storeInstance.set(fresh);
+  } else {
+    storeInstance = new Store(project);
+  }
   // Re-seed engine-level globals from the freshly loaded project so
   // persisted humanization is active immediately, not on next user edit.
   audio.setGlobalGroove(project.globalGroove);

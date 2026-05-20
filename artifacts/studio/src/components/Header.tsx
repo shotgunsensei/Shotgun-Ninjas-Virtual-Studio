@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useStore, getStore, resetStore, defaultProject } from "../store";
 import { audio } from "../lib/audio/engine";
+import { DEMOS, loadDemo } from "../lib/demos";
 import {
   renderProject,
   downloadBlob,
@@ -100,6 +101,17 @@ export function Header() {
   const [projects, setProjects] = useState<
     Array<{ id: string; name: string; updatedAt: number }>
   >([]);
+  // External components (HelpDialog) request the demo picker via a
+  // store flag rather than duplicating the dialog markup.
+  const requestOpenLoadDialog = useStore((s) => s.requestOpenLoadDialog);
+  useEffect(() => {
+    if (!requestOpenLoadDialog) return;
+    (async () => {
+      setProjects(await listProjects());
+      setOpenLoad(true);
+      getStore().set({ requestOpenLoadDialog: false });
+    })();
+  }, [requestOpenLoadDialog]);
   const [exporting, setExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("wav");
   const [exportProgress, setExportProgress] = useState<RenderProgress>({
@@ -212,6 +224,11 @@ export function Header() {
   const onSave = async () => {
     try {
       await saveProject(getStore().state.project);
+      // Promote a transient demo into a real saved project so future
+      // edits autosave normally.
+      if (getStore().state.isTransientProject) {
+        getStore().set({ isTransientProject: false });
+      }
       getStore().setStatus("Project saved", "info");
     } catch (err) {
       getStore().setStatus(`Save failed: ${(err as Error).message}`, "error");
@@ -515,14 +532,55 @@ export function Header() {
       </Dialog>
 
       <Dialog open={openLoad} onOpenChange={setOpenLoad}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Load project</DialogTitle>
             <DialogDescription>
-              Saved locally in your browser.
+              Pick a built-in demo to play with, or open one of your saved
+              sessions.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 max-h-80 overflow-y-auto">
+          <div className="space-y-4 max-h-[28rem] overflow-y-auto pr-1">
+            <section data-testid="demo-list">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-primary mb-2">
+                Demos
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {DEMOS.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    data-testid={`demo-card-${d.id}`}
+                    onClick={() => {
+                      loadDemo(d.id);
+                      setOpenLoad(false);
+                    }}
+                    className="text-left border border-border rounded-md p-2 bg-background hover:border-primary hover:bg-primary/5 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-mono text-sm">{d.name}</div>
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-primary border border-primary/40 rounded px-1.5 py-0.5">
+                        {d.bpm} BPM
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1 leading-snug">
+                      {d.description}
+                    </div>
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-foreground/60 mt-1">
+                      {d.styleTag}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Demos load fresh and are not saved automatically — hit{" "}
+                <span className="font-mono">Save As</span> to keep your edits.
+              </p>
+            </section>
+            <section>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-primary mb-2">
+                Your projects
+              </div>
             {projects.length === 0 && (
               <p className="text-sm text-muted-foreground">No saved projects.</p>
             )}
@@ -558,6 +616,7 @@ export function Header() {
                 </div>
               </div>
             ))}
+            </section>
           </div>
         </DialogContent>
       </Dialog>
