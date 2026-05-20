@@ -1,5 +1,5 @@
-import { useCallback, useEffect } from "react";
-import { Play, Pause, Square, Circle, Volume2, AlertOctagon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle } from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,8 @@ import { audio } from "../lib/audio/engine";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { useTransport } from "../hooks/useTransport";
 import { MidiLearnButton } from "./MidiLearnButton";
+import { Tip } from "./Tip";
+import { useSettings } from "../lib/settings";
 
 export function TransportBar() {
   const project = useStore((s) => s.project);
@@ -19,6 +21,8 @@ export function TransportBar() {
   const countInBeat = useStore((s) => s.countInBeat);
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const { play, pause, stop, record } = useTransport();
+  const metronomeVolume = useSettings((s) => s.metronomeVolume);
+  const globalSwing = project.globalGroove?.swing ?? 0;
 
   // keep engine in sync with project bpm/master/loop/metronome
   useEffect(() => {
@@ -33,6 +37,14 @@ export function TransportBar() {
   useEffect(() => {
     audio.setMetronome(project.metronome);
   }, [project.metronome]);
+  useEffect(() => {
+    audio.setMetronomeVolume(metronomeVolume);
+  }, [metronomeVolume]);
+  // Forward project-level swing into the engine transport so 8ths swing
+  // even when no per-track groove is configured.
+  useEffect(() => {
+    audio.setSwing(globalSwing);
+  }, [globalSwing]);
 
   return (
     <div className="h-16 border-b border-border flex items-center px-4 gap-3 bg-graphite/60 backdrop-blur">
@@ -125,17 +137,40 @@ export function TransportBar() {
         <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
           BPM
         </label>
-        <input
-          type="number"
-          min={40}
-          max={240}
-          value={project.bpm}
-          onChange={(e) =>
-            getStore().patchProject({ bpm: Math.max(40, Math.min(240, Number(e.target.value) || 0)) })
-          }
-          className="bg-background border border-border rounded-md w-16 h-7 text-center font-mono text-sm"
-        />
+        <Tip label="Project tempo (40–240)">
+          <input
+            type="number"
+            min={40}
+            max={240}
+            value={project.bpm}
+            onChange={(e) =>
+              getStore().patchProject({ bpm: Math.max(40, Math.min(240, Number(e.target.value) || 0)) })
+            }
+            className="bg-background border border-border rounded-md w-16 h-7 text-center font-mono text-sm"
+          />
+        </Tip>
       </div>
+
+      <div className="flex flex-col items-center min-w-[88px]">
+        <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
+          Swing
+        </label>
+        <div className="flex items-center gap-1 w-full">
+          <Slider
+            value={[Math.round(globalSwing * 100)]}
+            max={100}
+            step={1}
+            onValueChange={([v]) =>
+              getStore().setGlobalGroove({ swing: (v ?? 0) / 100 })
+            }
+          />
+          <span className="font-mono text-[10px] w-6 text-right tabular-nums">
+            {Math.round(globalSwing * 100)}
+          </span>
+        </div>
+      </div>
+
+      <PositionReadout bpm={project.bpm} isPlaying={isPlaying} />
 
       <div className="flex items-center gap-2">
         <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -205,6 +240,7 @@ export function TransportBar() {
 
       <MasterScope width={96} height={28} />
       <MasterMeter bpm={project.bpm} pulsing={isPlaying} />
+      <MasterClipBadge />
 
       <div className="flex items-center gap-2 min-w-[180px]">
         <Volume2 className="w-4 h-4 text-muted-foreground" />
@@ -229,6 +265,97 @@ export function TransportBar() {
  * for one beat (60/bpm seconds) so the highlight visually breathes with the
  * project tempo whenever the transport is rolling.
  */
+/**
+ * Bar.beat.step transport readout polled from the engine while playback
+ * is rolling. Frozen at the last value when stopped so the user can read
+ * exactly where they left off.
+ */
+function PositionReadout({ bpm: _bpm, isPlaying }: { bpm: number; isPlaying: boolean }) {
+  const [pos, setPos] = useState<{ bar: number; beat: number; step: number }>({
+    bar: 1,
+    beat: 1,
+    step: 1,
+  });
+  useEffect(() => {
+    if (!isPlaying) return;
+    let raf = 0;
+    let last = 0;
+    const tick = (ts: number) => {
+      if (ts - last > 60) {
+        last = ts;
+        const beats = audio.positionBeats();
+        // Beats are 0-indexed internally; display 1-indexed musical time.
+        const bar = Math.floor(beats / 4) + 1;
+        const beat = Math.floor(beats % 4) + 1;
+        const step = Math.floor((beats * 4) % 4) + 1;
+        setPos({ bar, beat, step });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying]);
+  return (
+    <Tip label="Bar . beat . sixteenth (musical position)">
+      <div className="flex flex-col items-center px-2 py-1 rounded-md panel-inset min-w-[78px]">
+        <span className="text-[9px] uppercase tracking-widest text-muted-foreground">
+          Position
+        </span>
+        <span className="font-mono text-sm tabular-nums text-primary">
+          {pos.bar}.{pos.beat}.{pos.step}
+        </span>
+      </div>
+    </Tip>
+  );
+}
+
+/**
+ * Latching clip-warning badge that sits next to the master meter. Polls
+ * the engine's peak meter and lights up red when the master ever exceeds
+ * -0.1 dBFS; clicking the badge clears the latch.
+ */
+function MasterClipBadge() {
+  const [clipped, setClipped] = useState(false);
+  const lastWarnRef = useRef(0);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const lv = audio.getMasterLevels().peakDb;
+      const peak = Math.max(lv[0], lv[1]);
+      if (peak >= -0.1 && Number.isFinite(peak)) {
+        setClipped(true);
+        // Surface a toast at most once every 5s so the user notices
+        // without getting spammed during a long loud section.
+        const now = performance.now();
+        if (now - lastWarnRef.current > 5000) {
+          lastWarnRef.current = now;
+          getStore().setStatus(
+            `Master clipped (${peak.toFixed(1)} dBFS) — lower master volume.`,
+            "warn",
+          );
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  if (!clipped) return null;
+  return (
+    <Tip label="Master clipped — click to clear">
+      <button
+        type="button"
+        onClick={() => setClipped(false)}
+        className="flex items-center gap-1 px-2 h-7 rounded-md border border-red-500/60 bg-red-500/15 text-red-300 font-mono text-[10px] uppercase tracking-widest studio-clip-led"
+        aria-label="Master clipped, click to reset"
+      >
+        <AlertTriangle className="w-3 h-3" />
+        Clip
+      </button>
+    </Tip>
+  );
+}
+
 function MasterMeter({ bpm, pulsing }: { bpm: number; pulsing: boolean }) {
   const getLevels = useCallback(() => audio.getMasterLevels(), []);
   const beatSec = 60 / Math.max(40, Math.min(240, bpm));

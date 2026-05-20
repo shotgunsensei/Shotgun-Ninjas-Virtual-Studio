@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Info } from "lucide-react";
 import { APP_VERSION } from "../lib/version";
-import { DiagnosticsDialog } from "./DiagnosticsDialog";
+import { AboutDialog } from "./AboutDialog";
 
 /**
  * Tiny footer strip pinned at the bottom of the studio shell. Surfaces
  * the app version (so users can quote it in bug reports) and a discreet
- * About link that opens the Diagnostics panel.
+ * About link that opens the brand / changelog / diagnostics surface.
  */
 export function StudioFooter() {
   const [open, setOpen] = useState(false);
@@ -18,14 +18,14 @@ export function StudioFooter() {
           type="button"
           onClick={() => setOpen(true)}
           className="flex items-center gap-1 hover:text-foreground"
-          aria-label="Open About and Diagnostics"
-          title="About &amp; Diagnostics"
+          aria-label="About Shotgun Ninjas Virtual Studio"
+          title="About"
         >
           <Info className="w-2.5 h-2.5" />
-          About · {APP_VERSION}
+          About · v{APP_VERSION}
         </button>
       </div>
-      <DiagnosticsDialog open={open} onOpenChange={setOpen} />
+      <AboutDialog open={open} onOpenChange={setOpen} />
     </>
   );
 }

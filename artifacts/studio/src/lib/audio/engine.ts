@@ -429,6 +429,14 @@ class AudioEngine {
   }
 
   // ---- metronome ----
+  /** Set the metronome ticks loudness (0..1). 0 mutes them. */
+  setMetronomeVolume(v: number) {
+    const clamped = Math.max(0, Math.min(1, v));
+    // -60 dB at 0, 0 dB at 1 — matches the slider feel of the master bus.
+    const db = clamped <= 0.001 ? -Infinity : (clamped - 1) * 60;
+    this.metronomeSynth.volume.value = db;
+    this.metronomeAccent.volume.value = db;
+  }
   setMetronome(on: boolean) {
     this.metronomeEnabled = on;
     if (on && this.metronomeId === null) {

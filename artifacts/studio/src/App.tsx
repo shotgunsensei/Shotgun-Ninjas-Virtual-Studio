@@ -15,6 +15,10 @@ const MidiPanel = lazy(() =>
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
 import { BackgroundFx } from "./components/BackgroundFx";
+import { Logo } from "./components/Logo";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { applySideEffects, getSettings } from "./lib/settings";
+import { APP_NAME } from "./lib/version";
 import { DropZone } from "./components/DropZone";
 import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
 import { StudioErrorBoundary } from "./components/ErrorBoundary";
@@ -36,6 +40,7 @@ import { defaultProject, flushMixToEngine, getStore, resetStore, useStore } from
 import { getLastProjectId, loadProject, saveProject } from "./lib/storage/db";
 import { useMidiEvents } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
+import { useSettings } from "./lib/settings";
 
 let bootstrapped = false;
 let bootstrapPromise: Promise<void> | null = null;
@@ -43,10 +48,15 @@ let bootstrapPromise: Promise<void> | null = null;
 function bootstrap() {
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
+    const settings = getSettings();
     let project = null;
     try {
       const lastId = await getLastProjectId();
-      if (lastId) project = await loadProject(lastId);
+      // Honor the "Restore last project on launch" preference — when the
+      // user has turned it off we always boot into a fresh project.
+      if (lastId && settings.restoreLastProjectOnLaunch) {
+        project = await loadProject(lastId);
+      }
     } catch (err) {
       console.error("bootstrap load failed", err);
       project = null;
@@ -79,11 +89,13 @@ function bootstrap() {
   return bootstrapPromise;
 }
 
-// Apply the persisted theme synchronously at module-eval time so the
-// very first render doesn't flash the default palette.
+// Apply the persisted theme + UI preferences synchronously at module-
+// eval time so the very first render doesn't flash the default palette
+// or scroll past unwanted animations.
 if (typeof document !== "undefined") {
   try {
     applyTheme(getStoredThemeId());
+    applySideEffects();
   } catch {
     /* SSR-safe no-op */
   }
@@ -106,17 +118,25 @@ export default function App() {
   }, []);
   if (!ready) {
     return (
-      <div className="h-full flex items-center justify-center bg-background text-foreground">
-        <div className="font-mono text-xs uppercase tracking-[0.4em] text-primary animate-pulse">
-          Loading Studio…
+      <div className="h-full flex flex-col items-center justify-center bg-background text-foreground gap-4">
+        <Logo className="w-20 h-20 studio-loading-pulse" />
+        <div className="text-center leading-tight">
+          <div className="font-display text-lg tracking-[0.3em]">
+            {APP_NAME.toUpperCase()}
+          </div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.4em] text-primary mt-1 studio-loading-pulse">
+            Tuning the dojo…
+          </div>
         </div>
       </div>
     );
   }
   return (
-    <StudioErrorBoundary onPanic={() => audio.panicStopAll()}>
-      <Studio />
-    </StudioErrorBoundary>
+    <TooltipProvider delayDuration={250}>
+      <StudioErrorBoundary onPanic={() => audio.panicStopAll()}>
+        <Studio />
+      </StudioErrorBoundary>
+    </TooltipProvider>
   );
 }
 
@@ -404,23 +424,26 @@ function Studio() {
   );
 
   // autosave debounced — skipped when the current project is a demo
-  // (transient). User must Save As to keep their changes.
+  // (transient) and when the user has disabled autosave in settings.
+  // The debounce interval is also user-configurable.
   const isTransient = useStore((s) => s.isTransientProject);
+  const autosaveEnabled = useSettings((s) => s.autosaveEnabled);
+  const autosaveIntervalMs = useSettings((s) => s.autosaveIntervalMs);
   const saveTimerRef = useRef<number | null>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
   useEffect(() => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    if (isTransient) return;
+    if (isTransient || !autosaveEnabled) return;
     saveTimerRef.current = window.setTimeout(() => {
       saveProject(projectRef.current).catch(() => {
         /* ignore quota errors */
       });
-    }, 1500);
+    }, autosaveIntervalMs);
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
-  }, [project, isTransient]);
+  }, [project, isTransient, autosaveEnabled, autosaveIntervalMs]);
 
   // stop vocals on unmount safety
   useEffect(() => {

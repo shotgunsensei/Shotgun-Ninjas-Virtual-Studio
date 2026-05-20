@@ -12,10 +12,16 @@ import {
   Maximize2,
   Minimize2,
   Keyboard as KeyboardIcon,
+  Settings as SettingsIcon,
+  Info,
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { ShortcutOverlay } from "./ShortcutOverlay";
+import { SettingsModal } from "./SettingsModal";
+import { AboutDialog } from "./AboutDialog";
+import { Tip } from "./Tip";
+import { useSettings, getSettings } from "../lib/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -52,6 +58,9 @@ export function Header() {
   const project = useStore((s) => s.project);
   const [openLoad, setOpenLoad] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const showShortcutsButton = useSettings((s) => s.showShortcutsButton);
   const [isFullscreen, setIsFullscreen] = useState(
     typeof document !== "undefined" && !!document.fullscreenElement,
   );
@@ -213,8 +222,22 @@ export function Header() {
   };
 
   const onNew = async () => {
+    const settings = getSettings();
+    if (
+      settings.confirmBeforeOverwrite &&
+      !window.confirm(
+        "Start a fresh project? Your current project will stay saved in the Load dialog.",
+      )
+    ) {
+      return;
+    }
     audio.stop();
     const proj = defaultProject();
+    // Honor user defaults for new projects.
+    proj.bpm = settings.defaultBpm;
+    proj.masterVolume = settings.defaultMasterVolume;
+    const drumTrack = proj.tracks.find((t) => t.kind === "drums");
+    if (drumTrack) drumTrack.kitId = settings.defaultKit;
     await saveProject(proj);
     await setLastProjectId(proj.id);
     resetStore(proj);
@@ -334,38 +357,66 @@ export function Header() {
         >
           <Download className="w-3.5 h-3.5 mr-1" /> Export
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => getStore().set({ showHelp: true })}
-          className="font-mono text-xs"
-        >
-          <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShortcutsOpen(true)}
-          className="font-mono text-xs"
-          title="Keyboard shortcuts (?)"
-          aria-label="Keyboard shortcuts"
-        >
-          <KeyboardIcon className="w-3.5 h-3.5" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleFullscreen}
-          className="font-mono text-xs"
-          title={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
-          aria-label="Toggle fullscreen"
-        >
-          {isFullscreen ? (
-            <Minimize2 className="w-3.5 h-3.5" />
-          ) : (
-            <Maximize2 className="w-3.5 h-3.5" />
-          )}
-        </Button>
+        <Tip label="Help & onboarding">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => getStore().set({ showHelp: true })}
+            className="font-mono text-xs"
+          >
+            <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
+          </Button>
+        </Tip>
+        {showShortcutsButton && (
+          <Tip label="Keyboard shortcuts (?)">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShortcutsOpen(true)}
+              className="font-mono text-xs"
+              aria-label="Keyboard shortcuts"
+            >
+              <KeyboardIcon className="w-3.5 h-3.5" />
+            </Button>
+          </Tip>
+        )}
+        <Tip label="Studio settings">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSettingsOpen(true)}
+            className="font-mono text-xs"
+            aria-label="Settings"
+          >
+            <SettingsIcon className="w-3.5 h-3.5" />
+          </Button>
+        </Tip>
+        <Tip label="About, changelog & feedback">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAboutOpen(true)}
+            className="font-mono text-xs"
+            aria-label="About"
+          >
+            <Info className="w-3.5 h-3.5" />
+          </Button>
+        </Tip>
+        <Tip label={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleFullscreen}
+            className="font-mono text-xs"
+            aria-label="Toggle fullscreen"
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5" />
+            )}
+          </Button>
+        </Tip>
         <ThemeSwitcher />
         <input
           ref={jsonImportRef}
@@ -622,6 +673,8 @@ export function Header() {
       </Dialog>
 
       <ShortcutOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
     </header>
   );
 }
