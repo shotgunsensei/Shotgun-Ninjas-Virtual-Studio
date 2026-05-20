@@ -355,10 +355,11 @@ function MasterClipBadge() {
 /**
  * Glowing dot in the transport bar that pulses on every incoming MIDI noteon
  * or CC and shows the last note name / CC number for ~1 s.
- * Hidden entirely when MIDI status is not 'ready'.
+ * Also displays the selected MIDI device name (truncated) when a device is
+ * active. Hidden entirely when MIDI status is not 'ready'.
  */
 function MidiActivityIndicator() {
-  const { status } = useMidi();
+  const { status, selectedId, inputs } = useMidi();
   const [active, setActive] = useState(false);
   const [label, setLabel] = useState<string>("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -380,20 +381,33 @@ function MidiActivityIndicator() {
 
   if (status !== "ready") return null;
 
+  const deviceName = selectedId
+    ? (inputs.find((i) => i.id === selectedId)?.name ?? null)
+    : null;
+
+  const tipLabel = deviceName
+    ? `MIDI: ${deviceName} — last incoming note or CC`
+    : "MIDI activity — no device selected";
+
   return (
-    <Tip label="MIDI activity — last incoming note or CC">
-      <div className="flex items-center gap-1 px-1.5 h-7 rounded-md border border-border bg-background/50 select-none">
+    <Tip label={tipLabel}>
+      <div className="flex items-center gap-1.5 px-1.5 h-7 rounded-md border border-border bg-background/50 select-none max-w-[160px]">
         <span
-          className={`inline-block w-2 h-2 rounded-full transition-colors duration-75 ${
+          className={`inline-block shrink-0 w-2 h-2 rounded-full transition-colors duration-75 ${
             active
               ? "bg-primary shadow-[0_0_6px_2px_hsl(var(--primary)/0.7)]"
               : "bg-muted-foreground/30"
           }`}
           aria-hidden
         />
-        <span className="font-mono text-[10px] w-7 tabular-nums text-primary leading-none">
+        <span className="font-mono text-[10px] w-7 shrink-0 tabular-nums text-primary leading-none">
           {active ? label : "MIDI"}
         </span>
+        {deviceName && (
+          <span className="font-mono text-[10px] text-muted-foreground leading-none min-w-0 flex-1 truncate">
+            {deviceName}
+          </span>
+        )}
       </div>
     </Tip>
   );
