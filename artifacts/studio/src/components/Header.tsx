@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useStore, getStore, resetStore, defaultProject } from "../store";
 import { audio } from "../lib/audio/engine";
-import { DEMOS, loadDemo } from "../lib/demos";
+import { DEMOS, loadDemo, remixDemo } from "../lib/demos";
 import {
   renderProject,
   downloadBlob,
@@ -598,15 +598,10 @@ export function Header() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {DEMOS.map((d) => (
-                  <button
+                  <div
                     key={d.id}
-                    type="button"
                     data-testid={`demo-card-${d.id}`}
-                    onClick={() => {
-                      loadDemo(d.id);
-                      setOpenLoad(false);
-                    }}
-                    className="text-left border border-border rounded-md p-2 bg-background hover:border-primary hover:bg-primary/5 transition-colors"
+                    className="border border-border rounded-md p-2 bg-background hover:border-primary/60 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-mono text-sm">{d.name}</div>
@@ -620,12 +615,47 @@ export function Header() {
                     <div className="font-mono text-[10px] uppercase tracking-widest text-foreground/60 mt-1">
                       {d.styleTag}
                     </div>
-                  </button>
+                    <div className="flex gap-2 mt-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        data-testid={`demo-load-${d.id}`}
+                        onClick={() => {
+                          loadDemo(d.id);
+                          setOpenLoad(false);
+                        }}
+                        className="flex-1 font-mono text-[11px]"
+                      >
+                        Load
+                      </Button>
+                      <Button
+                        size="sm"
+                        data-testid={`demo-remix-${d.id}`}
+                        onClick={async () => {
+                          remixDemo(d.id);
+                          try {
+                            const proj = getStore().state.project;
+                            await saveProject(proj);
+                            await setLastProjectId(proj.id);
+                          } catch {
+                            /* autosave will retry */
+                          }
+                          setOpenLoad(false);
+                        }}
+                        className="flex-1 font-mono text-[11px]"
+                        title="Fork this demo into a new editable project"
+                      >
+                        Remix
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground mt-2">
-                Demos load fresh and are not saved automatically — hit{" "}
-                <span className="font-mono">Save As</span> to keep your edits.
+                <span className="font-mono">Load</span> plays the demo without
+                saving — hit <span className="font-mono">Save As</span> to keep
+                your edits. <span className="font-mono">Remix</span> forks it
+                into a fresh editable project.
               </p>
             </section>
             <section>

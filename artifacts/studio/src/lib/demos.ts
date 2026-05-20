@@ -210,7 +210,7 @@ function buildTrapStarter(): Project {
 
   const proj: Project = {
     id: `demo-trap-${makeId()}`,
-    name: "Trap Starter (demo)",
+    name: "Trap Starter",
     bpm: 140,
     bars: 32,
     loopEnabled: false,
@@ -325,7 +325,7 @@ function buildBoomBap(): Project {
 
   const proj: Project = {
     id: `demo-boombap-${makeId()}`,
-    name: "Boom Bap Sketch (demo)",
+    name: "Boom Bap Dojo",
     bpm: 86,
     bars: 32,
     loopEnabled: false,
@@ -434,7 +434,7 @@ function buildCyberNinja(): Project {
 
   const proj: Project = {
     id: `demo-cyber-${makeId()}`,
-    name: "Cyber Ninja Theme (demo)",
+    name: "Cyber Ninja Theme",
     bpm: 110,
     bars: 32,
     loopEnabled: false,
@@ -525,7 +525,7 @@ function buildLoFi(): Project {
 
   const proj: Project = {
     id: `demo-lofi-${makeId()}`,
-    name: "Lo-Fi Loop (demo)",
+    name: "Lo-Fi Smoke Loop",
     bpm: 78,
     bars: 32,
     loopEnabled: true,
@@ -658,7 +658,7 @@ function buildCinematic(): Project {
 
   const proj: Project = {
     id: `demo-cinematic-${makeId()}`,
-    name: "Cinematic Intro (demo)",
+    name: "Cinematic Trailer Hit",
     bpm: 90,
     bars: 32,
     loopEnabled: false,
@@ -679,6 +679,173 @@ function buildCinematic(): Project {
   return applyMixPreset(proj, "darkCinematic");
 }
 
+// ---- demo #6: 808 Bass Test (90 BPM) ----
+
+function build808BassTest(): Project {
+  const drums = makeTrack("drums", "808 Drums", "trap");
+  drums.kitId = "trap";
+  const bass = makeTrack("bass", "808 Sub", "sub");
+  bass.presetId = "bass.808";
+  const vocals = makeTrack("vocals", "Vox", "warm");
+
+  // Simple kick/snare/hat reference pattern so the 808 has context
+  const bar: DrumStep[] = [
+    { beat: 0, piece: "kick", vel: 0.95, accent: true },
+    { beat: 1, piece: "snare", vel: 0.9, accent: true },
+    { beat: 1, piece: "clap", vel: 0.55 },
+    { beat: 2, piece: "kick", vel: 0.85 },
+    { beat: 3, piece: "snare", vel: 0.9, accent: true },
+    { beat: 3, piece: "clap", vel: 0.55 },
+  ];
+  for (let i = 0; i < 8; i++) {
+    bar.push({ beat: i * 0.5, piece: "hat", vel: i % 2 === 0 ? 0.55 : 0.35 });
+  }
+  drums.noteClips = [clip(0, 16, drum(repeatBar(bar, 4)), "Drums", "#f97316")];
+
+  // 808 bass cycles through the lowest notes of each octave so you can hear
+  // how the sub responds across the range. Two bars per note.
+  const notes = ["A1", "F1", "D1", "C1", "G1", "E1", "Bb1", "A2"];
+  const bassNotes: NoteEvent[] = notes.map((n, i) => ({
+    time: i * 2,
+    note: n,
+    duration: 1.8,
+    velocity: 0.9,
+  }));
+  bass.noteClips = [clip(0, 16, bassNotes, "808 Test", "#a78bfa")];
+
+  vocals.armed = false;
+
+  const proj: Project = {
+    id: `demo-808-${makeId()}`,
+    name: "808 Bass Test",
+    bpm: 90,
+    bars: 24,
+    loopEnabled: true,
+    loopStartBeat: 0,
+    loopEndBeat: 64,
+    metronome: false,
+    countIn: true,
+    masterVolume: 0.8,
+    tracks: [drums, bass, vocals],
+    midiMappings: [],
+    updatedAt: Date.now(),
+  };
+  return applyMixPreset(proj, "punchy");
+}
+
+// ---- demo #7: Sample Chop Template (94 BPM) ----
+
+function buildSampleChop(): Project {
+  const drums = makeTrack("drums", "Chop Drums", "acoustic");
+  drums.kitId = "boombap";
+  const bass = makeTrack("bass", "Sub", "sub");
+  bass.presetId = "bass.sub";
+  const keys = makeTrack("piano", "Felt Keys", "grand");
+  keys.presetId = "keys.soft";
+  const vocals = makeTrack("vocals", "Sample / Vox", "warm");
+  vocals.armed = true;
+
+  // 4-bar dusty break to chop over
+  const barChop: DrumStep[] = [
+    { beat: 0, piece: "kick", vel: 0.95, accent: true },
+    { beat: 0.5, piece: "hat", vel: 0.5 },
+    { beat: 1, piece: "snare", vel: 0.9, accent: true },
+    { beat: 1.5, piece: "hat", vel: 0.45 },
+    { beat: 2, piece: "kick", vel: 0.8 },
+    { beat: 2.5, piece: "hat", vel: 0.5 },
+    { beat: 2.75, piece: "kick", vel: 0.6 },
+    { beat: 3, piece: "snare", vel: 0.9 },
+    { beat: 3.5, piece: "ohat", vel: 0.5 },
+  ];
+  drums.noteClips = [
+    clip(0, 16, drum(repeatBar(barChop, 4)), "Break", "#f97316"),
+  ];
+
+  // Sub bass holds the root for each 4-beat slice — Dm pedal
+  bass.noteClips = [
+    clip(
+      0,
+      16,
+      mel([
+        [0, "D1", 3.5, 0.85],
+        [4, "D1", 3.5, 0.85],
+        [8, "Bb1", 3.5, 0.85],
+        [12, "A1", 3.5, 0.85],
+      ]),
+      "Sub",
+      "#a78bfa",
+    ),
+  ];
+
+  // Keys vamp — quiet so a chopped sample sits on top
+  keys.noteClips = [
+    clip(
+      0,
+      16,
+      chordStabs([
+        [0, ["D3", "F3", "A3"], 3.5, 0.5],
+        [4, ["D3", "F3", "A3"], 3.5, 0.5],
+        [8, ["Bb2", "D3", "F3"], 3.5, 0.5],
+        [12, ["A2", "C3", "E3"], 3.5, 0.5],
+      ]),
+      "Pad",
+      "#7dd3fc",
+    ),
+  ];
+
+  const proj: Project = {
+    id: `demo-chop-${makeId()}`,
+    name: "Sample Chop Template",
+    bpm: 94,
+    bars: 32,
+    loopEnabled: true,
+    loopStartBeat: 0,
+    loopEndBeat: 64,
+    metronome: false,
+    countIn: true,
+    masterVolume: 0.78,
+    tracks: [drums, bass, keys, vocals],
+    midiMappings: [],
+    sections: [
+      { id: makeId(), bar: 0, label: "Chop here →" },
+      { id: makeId(), bar: 4, label: "Drop a sample on the Sample / Vox track" },
+    ],
+    updatedAt: Date.now(),
+  };
+  return applyMixPreset(proj, "lofiDust");
+}
+
+// ---- demo #8: Empty Studio (120 BPM) ----
+
+function buildEmptyStudio(): Project {
+  const drums = makeTrack("drums", "Drums", "acoustic");
+  drums.kitId = "boombap";
+  const bass = makeTrack("bass", "Bass", "finger");
+  bass.presetId = "bass.finger";
+  const keys = makeTrack("piano", "Keys", "electric");
+  keys.presetId = "keys.electric";
+  const guitar = makeTrack("guitar", "Guitar", "clean");
+  guitar.presetId = "guitar.clean";
+  const vocals = makeTrack("vocals", "Vocals", "warm");
+
+  const proj: Project = {
+    id: `demo-empty-${makeId()}`,
+    name: "Empty Studio",
+    bpm: 120,
+    bars: 16,
+    loopEnabled: false,
+    loopStartBeat: 0,
+    loopEndBeat: 16,
+    metronome: false,
+    countIn: true,
+    masterVolume: 0.78,
+    tracks: [drums, bass, keys, guitar, vocals],
+    midiMappings: [],
+    updatedAt: Date.now(),
+  };
+  return applyMixPreset(proj, "clean");
+}
+
 // ---- registry ----
 
 export const DEMOS: DemoDefinition[] = [
@@ -692,8 +859,8 @@ export const DEMOS: DemoDefinition[] = [
     build: buildTrapStarter,
   },
   {
-    id: "boom-bap-sketch",
-    name: "Boom Bap Sketch",
+    id: "boom-bap-dojo",
+    name: "Boom Bap Dojo",
     description: "Dusty kick, swung hats and rhodes chords. Am — F — C — G.",
     bpm: 86,
     styleTag: "Boom Bap · Swing",
@@ -710,8 +877,8 @@ export const DEMOS: DemoDefinition[] = [
     build: buildCyberNinja,
   },
   {
-    id: "lofi-loop",
-    name: "Lo-Fi Loop",
+    id: "lofi-smoke-loop",
+    name: "Lo-Fi Smoke Loop",
     description: "Laid-back beats, felt piano and bell top-line. Cmaj7 vamp.",
     bpm: 78,
     styleTag: "Lo-Fi · Chill",
@@ -719,13 +886,90 @@ export const DEMOS: DemoDefinition[] = [
     build: buildLoFi,
   },
   {
-    id: "cinematic-intro",
-    name: "Cinematic Intro",
+    id: "cinematic-trailer-hit",
+    name: "Cinematic Trailer Hit",
     description: "Taiko hits, sub pedal, grand piano and heroic brass. E minor.",
     bpm: 90,
     styleTag: "Cinematic · Score",
     mixPreset: "darkCinematic",
     build: buildCinematic,
+  },
+  {
+    id: "808-bass-test",
+    name: "808 Bass Test",
+    description: "Reference 808 sweep with a punchy trap pattern to A/B subs.",
+    bpm: 90,
+    styleTag: "Reference · 808",
+    mixPreset: "punchy",
+    build: build808BassTest,
+  },
+  {
+    id: "sample-chop-template",
+    name: "Sample Chop Template",
+    description: "Dusty break + Dm pedal — drop a sample on Sample / Vox and chop.",
+    bpm: 94,
+    styleTag: "Template · Chop",
+    mixPreset: "lofiDust",
+    build: buildSampleChop,
+  },
+  {
+    id: "empty-studio",
+    name: "Empty Studio",
+    description: "Five empty tracks at 120 BPM. Start from a blank slate.",
+    bpm: 120,
+    styleTag: "Blank · Sketch",
+    mixPreset: "clean",
+    build: buildEmptyStudio,
+  },
+];
+
+/** First-run "starting mode" tiles. Each maps to a demo id that
+ *  `loadDemo` will hand to the user. Keep this list small so the
+ *  welcome flow stays a single, fast decision. */
+export type StartingModeId =
+  | "beat-sketch"
+  | "drum-machine"
+  | "sample-chop"
+  | "cinematic-intro"
+  | "blank-project";
+
+export interface StartingMode {
+  id: StartingModeId;
+  label: string;
+  description: string;
+  demoId: string;
+}
+
+export const STARTING_MODES: StartingMode[] = [
+  {
+    id: "beat-sketch",
+    label: "Beat Sketch",
+    description: "Boom-bap drums, walking bass and rhodes to jam over.",
+    demoId: "boom-bap-dojo",
+  },
+  {
+    id: "drum-machine",
+    label: "Drum Machine",
+    description: "Trap kit + 808 sub — perfect for punchy beats.",
+    demoId: "808-bass-test",
+  },
+  {
+    id: "sample-chop",
+    label: "Sample Chop",
+    description: "Dusty break + a Sample / Vox track ready for your sample.",
+    demoId: "sample-chop-template",
+  },
+  {
+    id: "cinematic-intro",
+    label: "Cinematic Intro",
+    description: "Taiko hits, grand piano and heroic brass for trailers.",
+    demoId: "cinematic-trailer-hit",
+  },
+  {
+    id: "blank-project",
+    label: "Blank Project",
+    description: "Five empty tracks at 120 BPM. Build from scratch.",
+    demoId: "empty-studio",
   },
 ];
 
@@ -758,6 +1002,39 @@ export function loadDemo(id: string): boolean {
     showOnboarding: false,
   });
   store.setStatus(`Loaded demo: ${def.name}`, "info");
+  return true;
+}
+
+/**
+ * "Remix This Demo" — build a fresh copy of the demo as an editable
+ * project (new id + " (remix)" suffix). The source demo definition is
+ * untouched. The remix is loaded as a non-transient project so autosave
+ * persists it to IndexedDB on the first change.
+ */
+export function remixDemo(id: string): boolean {
+  const def = findDemo(id);
+  if (!def) return false;
+  const base = def.build();
+  const project: Project = {
+    ...base,
+    id: `remix-${def.id}-${makeId()}`,
+    name: `${def.name} (remix)`,
+    updatedAt: Date.now(),
+  };
+  audio.stop();
+  audio.disposeAllTracks();
+  resetStore(project);
+  for (const t of project.tracks) audio.ensureTrack(t);
+  flushMixToEngine(project);
+  const store = getStore();
+  store.set({
+    isTransientProject: false,
+    selectedTrackId: project.tracks[0]?.id ?? "",
+    selectedClipId: null,
+    showHelp: false,
+    showOnboarding: false,
+  });
+  store.setStatus(`Remixed "${def.name}" — autosave is on`, "info");
   return true;
 }
 
