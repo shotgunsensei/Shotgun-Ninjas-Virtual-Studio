@@ -53,6 +53,7 @@ import { HealthBanner } from "./components/HealthBanner";
 import { RecoveryBanner } from "./components/RecoveryBanner";
 import { useMidiEvents } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
+import { initPluginSystem } from "./lib/plugins";
 import { useSettings } from "./lib/settings";
 import { useViewport } from "./hooks/use-mobile";
 import { MobileStudio } from "./components/MobileStudio";
@@ -85,6 +86,9 @@ let bootstrapResult: BootstrapResult = { health: null, draftAvailable: null };
 function bootstrap() {
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
+    // Register all built-in instrument and effect plugins before the engine
+    // starts so the plugin browser and automation hooks are ready immediately.
+    initPluginSystem();
     const settings = getSettings();
     let project = null;
     try {

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { audio } from "./lib/audio/engine";
 import { DEFAULT_MASTER_BUS } from "./lib/audio/master";
 import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
+import { wireTrackAutomationTargets } from "./lib/plugins/automation";
 import type {
   AnyPreset,
   FxModuleId,
@@ -767,6 +768,13 @@ export function flushMixToEngine(project: Project) {
         audio.setEffectModule(t.id, moduleId, settings);
       }
     }
+    // Wire automatable plugin parameters for this track so the automation
+    // system can address them via "{trackId}:{pluginId}:{parameterId}".
+    wireTrackAutomationTargets(
+      t.id,
+      (moduleId, patch) => audio.setEffectModule(t.id, moduleId, patch),
+      (params) => audio.setSoundParams(t.id, params),
+    );
   }
 }
 

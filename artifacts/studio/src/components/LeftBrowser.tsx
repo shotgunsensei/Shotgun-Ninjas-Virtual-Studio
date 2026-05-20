@@ -4,8 +4,9 @@ import { DRUM_KIT_LIST } from "../lib/audio/sounds/kits";
 import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
 import { listProjects, loadProject, relocateSampleBlob } from "../lib/storage/db";
 import { flushMixToEngine } from "../store";
+import { PluginBrowser } from "./PluginBrowser";
 
-type TabId = "tracks" | "kits" | "presets" | "samples" | "projects";
+type TabId = "tracks" | "kits" | "presets" | "samples" | "projects" | "plugins";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "tracks", label: "Tracks" },
@@ -13,6 +14,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "presets", label: "Presets" },
   { id: "samples", label: "Samples" },
   { id: "projects", label: "Projects" },
+  { id: "plugins", label: "Plugins" },
 ];
 
 const STORAGE_KEY = "studio.browser.tab";
@@ -56,6 +58,7 @@ export function LeftBrowser() {
         {tab === "presets" && <PresetsTab />}
         {tab === "samples" && <SamplesTab />}
         {tab === "projects" && <ProjectsTab />}
+        {tab === "plugins" && <PluginBrowser />}
       </div>
     </div>
   );
