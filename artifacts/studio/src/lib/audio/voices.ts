@@ -268,11 +268,138 @@ export class Mono808Voice {
   }
 }
 
+/**
+ * Clean guitar voice — triangle FMSynth fed through a gentle 3rd-order
+ * Chebyshev waveshaper (adds 3rd harmonic for warm amp breakup) and a
+ * presence-boosting bandpass EQ. Gives the "clean" guitar preset a
+ * richer, more amp-like character compared to a bare FMSynth.
+ */
+export class PolyAmpGuitar {
+  private poly: Tone.PolySynth;
+  private shaper: Tone.Chebyshev;
+  private body: Tone.Filter;
+
+  constructor() {
+    this.poly = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 1.2,
+      modulationIndex: 2.8,
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.003, decay: 0.95, sustain: 0.1, release: 1.1 },
+      modulation: { type: "triangle" },
+      modulationEnvelope: { attack: 0.003, decay: 0.55, sustain: 0.0, release: 0.6 },
+      volume: -13,
+    });
+    this.shaper = new Tone.Chebyshev(3);
+    this.shaper.wet.value = 0.18;
+    this.body = new Tone.Filter({ type: "lowpass", frequency: 5500, Q: 0.6 });
+    this.poly.chain(this.shaper, this.body);
+  }
+
+  connect(dest: Tone.InputNode) { this.body.connect(dest); return this; }
+  triggerAttack(note: Tone.Unit.Frequency, time?: Tone.Unit.Time, velocity = 0.9) {
+    this.poly.triggerAttack(note, time, velocity); return this;
+  }
+  triggerRelease(note: Tone.Unit.Frequency, time?: Tone.Unit.Time) {
+    this.poly.triggerRelease(note, time); return this;
+  }
+  triggerAttackRelease(
+    note: Tone.Unit.Frequency,
+    duration: Tone.Unit.Time,
+    time?: Tone.Unit.Time,
+    velocity = 0.9,
+  ) {
+    this.poly.triggerAttackRelease(note, duration, time, velocity); return this;
+  }
+  releaseAll() { this.poly.releaseAll(); return this; }
+  dispose() { this.poly.dispose(); this.shaper.dispose(); this.body.dispose(); return this; }
+}
+
+/**
+ * Finger bass voice with a sub-oscillator layer. Pairs a warm triangle
+ * MonoSynth (mid body, pluck attack) with a sine sub an octave below
+ * (deep low end). Both feed a shared Gain mix node so the blend is clean
+ * and only one cable leaves the voice.
+ */
+export class SubFingerBass {
+  private high: Tone.PolySynth;
+  private sub: Tone.PolySynth;
+  private mix: Tone.Gain;
+
+  constructor() {
+    this.high = new Tone.PolySynth(Tone.MonoSynth, {
+      oscillator: { type: "triangle" },
+      filter: { Q: 2.0, frequency: 1400, type: "lowpass", rolloff: -24 },
+      envelope: { attack: 0.008, decay: 0.45, sustain: 0.55, release: 0.5 },
+      filterEnvelope: {
+        attack: 0.005,
+        decay: 0.3,
+        sustain: 0.5,
+        release: 0.4,
+        baseFrequency: 180,
+        octaves: 2.5,
+      },
+      volume: -10,
+    });
+    this.sub = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.01, decay: 0.55, sustain: 0.6, release: 0.8 },
+      volume: -16,
+    });
+    this.mix = new Tone.Gain(1);
+    this.high.connect(this.mix);
+    this.sub.connect(this.mix);
+  }
+
+  private subHz(note: Tone.Unit.Frequency): number {
+    return Tone.Frequency(note).toFrequency() / 2;
+  }
+
+  connect(dest: Tone.InputNode) { this.mix.connect(dest); return this; }
+
+  triggerAttack(note: Tone.Unit.Frequency, time?: Tone.Unit.Time, velocity = 0.9) {
+    this.high.triggerAttack(note, time, velocity);
+    this.sub.triggerAttack(this.subHz(note), time, velocity * 0.6);
+    return this;
+  }
+
+  triggerRelease(note: Tone.Unit.Frequency, time?: Tone.Unit.Time) {
+    this.high.triggerRelease(note, time);
+    this.sub.releaseAll(time as Tone.Unit.Time | undefined);
+    return this;
+  }
+
+  triggerAttackRelease(
+    note: Tone.Unit.Frequency,
+    duration: Tone.Unit.Time,
+    time?: Tone.Unit.Time,
+    velocity = 0.9,
+  ) {
+    this.high.triggerAttackRelease(note, duration, time, velocity);
+    this.sub.triggerAttackRelease(this.subHz(note), duration, time, velocity * 0.6);
+    return this;
+  }
+
+  releaseAll() {
+    this.high.releaseAll();
+    this.sub.releaseAll();
+    return this;
+  }
+
+  dispose() {
+    this.high.dispose();
+    this.sub.dispose();
+    this.mix.dispose();
+    return this;
+  }
+}
+
 export type MelodicVoice =
   | Tone.PolySynth
   | Tone.Sampler
   | PolyPluck
-  | Mono808Voice;
+  | Mono808Voice
+  | PolyAmpGuitar
+  | SubFingerBass;
 
 // ---------- helpers ----------
 
@@ -400,19 +527,23 @@ export function buildPiano(preset: PianoPreset): MelodicVoice {
         volume: -8,
       });
     case "electric": {
+      // Rhodes-character electric piano: lower harmonicity ratio puts the
+      // modulator near the 3rd partial (bell tine), fast modulation decay
+      // for the characteristic "tine click", and a triangle modulator for
+      // smoother bell warmth vs a raw sine.
       return new Tone.PolySynth(Tone.FMSynth, {
-        harmonicity: 8,
-        modulationIndex: 5.2,
+        harmonicity: 3.5,
+        modulationIndex: 6.5,
         oscillator: { type: "sine" },
-        envelope: { attack: 0.002, decay: 1.2, sustain: 0.0, release: 1.4 },
-        modulation: { type: "sine" },
+        envelope: { attack: 0.001, decay: 1.6, sustain: 0.0, release: 2.0 },
+        modulation: { type: "triangle" },
         modulationEnvelope: {
-          attack: 0.002,
-          decay: 0.35,
-          sustain: 0.05,
-          release: 0.4,
+          attack: 0.001,
+          decay: 0.38,
+          sustain: 0.0,
+          release: 0.5,
         },
-        volume: -12,
+        volume: -10,
       });
     }
     case "synth":
@@ -436,34 +567,24 @@ export function buildPiano(preset: PianoPreset): MelodicVoice {
 export function buildGuitar(preset: GuitarPreset): MelodicVoice {
   switch (preset) {
     case "clean":
-      return new Tone.PolySynth(Tone.FMSynth, {
-        harmonicity: 1.0,
-        modulationIndex: 1.4,
-        oscillator: { type: "triangle" },
-        envelope: { attack: 0.004, decay: 0.7, sustain: 0.18, release: 0.9 },
-        modulation: { type: "triangle" },
-        modulationEnvelope: {
-          attack: 0.004,
-          decay: 0.6,
-          sustain: 0.0,
-          release: 0.5,
-        },
-        volume: -14,
-      });
+      // Triangle FMSynth + Chebyshev waveshaper for warm amp character.
+      return new PolyAmpGuitar();
     case "crunch":
+      // Sawtooth through a resonant low-pass with punchy attack; the
+      // slightly higher Q (3.5) and faster filter decay adds the amp grit.
       return new Tone.PolySynth(Tone.MonoSynth, {
         oscillator: { type: "sawtooth" },
-        filter: { Q: 2.5, frequency: 1600, type: "lowpass", rolloff: -24 },
-        envelope: { attack: 0.003, decay: 0.45, sustain: 0.55, release: 0.5 },
+        filter: { Q: 3.5, frequency: 1800, type: "lowpass", rolloff: -24 },
+        envelope: { attack: 0.002, decay: 0.4, sustain: 0.5, release: 0.45 },
         filterEnvelope: {
-          attack: 0.003,
-          decay: 0.25,
-          sustain: 0.35,
-          release: 0.4,
-          baseFrequency: 350,
-          octaves: 3,
+          attack: 0.002,
+          decay: 0.18,
+          sustain: 0.3,
+          release: 0.35,
+          baseFrequency: 400,
+          octaves: 3.5,
         },
-        volume: -16,
+        volume: -14,
       });
     case "acoustic":
       return new PolyPluck(
@@ -482,20 +603,9 @@ export function buildGuitar(preset: GuitarPreset): MelodicVoice {
 export function buildBass(preset: BassPreset): MelodicVoice {
   switch (preset) {
     case "finger":
-      return new Tone.PolySynth(Tone.MonoSynth, {
-        oscillator: { type: "triangle" },
-        filter: { Q: 1.8, frequency: 1400, type: "lowpass", rolloff: -24 },
-        envelope: { attack: 0.008, decay: 0.45, sustain: 0.55, release: 0.5 },
-        filterEnvelope: {
-          attack: 0.005,
-          decay: 0.3,
-          sustain: 0.5,
-          release: 0.4,
-          baseFrequency: 180,
-          octaves: 2.5,
-        },
-        volume: -8,
-      });
+      // Triangle body + sine sub an octave below — adds low-end depth
+      // that's audible on both large speakers and laptop speakers.
+      return new SubFingerBass();
     case "synth":
       return new Tone.PolySynth(Tone.MonoSynth, {
         oscillator: { type: "sawtooth" },
@@ -512,18 +622,22 @@ export function buildBass(preset: BassPreset): MelodicVoice {
         volume: -10,
       });
     case "sub":
+      // AMSynth with a low harmonicity (0.5) adds a very mild 2nd harmonic
+      // that gives the sub presence on laptop/phone speakers while keeping
+      // the fundamental dominant. The modulation depth is low (fast decay)
+      // so it adds body without introducing obvious ring.
       return new Tone.PolySynth(Tone.AMSynth, {
-        harmonicity: 2.0,
+        harmonicity: 0.5,
         oscillator: { type: "sine" },
         modulation: { type: "sine" },
-        envelope: { attack: 0.01, decay: 0.5, sustain: 0.7, release: 1.2 },
+        envelope: { attack: 0.012, decay: 0.5, sustain: 0.75, release: 1.4 },
         modulationEnvelope: {
           attack: 0.01,
-          decay: 0.3,
-          sustain: 0.2,
-          release: 0.4,
+          decay: 0.18,
+          sustain: 0.08,
+          release: 0.5,
         },
-        volume: -6,
+        volume: -5,
       });
   }
 }
@@ -552,38 +666,46 @@ function makeKick(preset: DrumsPreset): DrumVoice {
   const isTrap = preset === "trap";
 
   const body = new Tone.MembraneSynth({
-    pitchDecay: isTrap ? 0.07 : isElectronic ? 0.04 : 0.045,
-    octaves: isTrap ? 8 : isElectronic ? 6 : 5.5,
+    pitchDecay: isTrap ? 0.09 : isElectronic ? 0.05 : 0.045,
+    octaves: isTrap ? 9 : isElectronic ? 7 : 5.5,
     envelope: {
       attack: 0.001,
-      decay: isTrap ? 0.7 : isElectronic ? 0.4 : 0.5,
+      decay: isTrap ? 0.85 : isElectronic ? 0.48 : 0.5,
       sustain: 0,
-      release: isTrap ? 0.6 : 0.4,
+      release: isTrap ? 0.7 : 0.4,
     },
-    volume: isTrap ? -2 : -3,
+    volume: isTrap ? -1 : -2,
   });
 
+  // Louder click layer = sharper transient "knock" at note onset.
   const click = new Tone.MetalSynth({
-    envelope: { attack: 0.001, decay: 0.018, release: 0.01 },
+    envelope: { attack: 0.001, decay: 0.014, release: 0.008 },
     harmonicity: 5.1,
-    modulationIndex: 14,
-    resonance: isAcoustic ? 4500 : 5500,
+    modulationIndex: 16,
+    resonance: isAcoustic ? 4200 : 5000,
     octaves: 0.5,
-    volume: isAcoustic ? -22 : -28,
+    volume: isAcoustic ? -20 : -23,
   });
+
+  // Mild waveshaper saturation on electronic/trap body adds harmonic density
+  // so the kick "punches" rather than "pings".
+  const sat = !isAcoustic ? new Tone.Distortion({ distortion: 0.1, wet: 0.3 }) : null;
+  if (sat) body.chain(sat);
 
   return {
     trigger: (time, velocity) => {
       body.triggerAttackRelease("C2", "8n", time, velocity);
-      click.triggerAttackRelease("32n", time, velocity * 0.7);
+      click.triggerAttackRelease("32n", time, velocity * 0.85);
     },
     connect: (dest) => {
-      body.connect(dest);
+      if (sat) sat.connect(dest);
+      else body.connect(dest);
       click.connect(dest);
     },
     dispose: () => {
       body.dispose();
       click.dispose();
+      sat?.dispose();
     },
   };
 }
@@ -592,32 +714,33 @@ function makeSnare(preset: DrumsPreset): DrumVoice {
   const isAcoustic = preset === "acoustic";
   const isTrap = preset === "trap";
 
+  // Louder/snappier body hit gives more "crack" on the transient.
   const body = new Tone.MembraneSynth({
-    pitchDecay: 0.02,
-    octaves: 2,
-    envelope: { attack: 0.001, decay: 0.13, sustain: 0, release: 0.1 },
-    volume: -14,
+    pitchDecay: 0.018,
+    octaves: 2.5,
+    envelope: { attack: 0.001, decay: 0.11, sustain: 0, release: 0.08 },
+    volume: isAcoustic ? -11 : -12,
   });
   const noise = new Tone.NoiseSynth({
     noise: { type: isAcoustic ? "white" : "pink" },
     envelope: {
       attack: 0.001,
-      decay: isAcoustic ? 0.18 : isTrap ? 0.1 : 0.13,
+      decay: isAcoustic ? 0.2 : isTrap ? 0.09 : 0.14,
       sustain: 0,
-      release: 0.1,
+      release: 0.08,
     },
-    volume: -12,
+    volume: isAcoustic ? -10 : -12,
   });
   const filter = new Tone.Filter({
     type: "highpass",
-    frequency: isAcoustic ? 1200 : 1600,
-    Q: 0.7,
+    frequency: isAcoustic ? 1000 : 1500,
+    Q: 0.8,
   });
   noise.connect(filter);
 
   return {
     trigger: (time, velocity) => {
-      body.triggerAttackRelease("D3", "32n", time, velocity * 0.7);
+      body.triggerAttackRelease("D3", "32n", time, velocity * 0.8);
       noise.triggerAttackRelease("16n", time, velocity);
     },
     connect: (dest) => {
@@ -736,7 +859,74 @@ function makeCrash(): DrumVoice {
   };
 }
 
+// ---------- acoustic sampled kit ----------
+
+/**
+ * Berklee percussion samples bundled with the Tone.js demo CDN (MIT).
+ * All ~10 files together are < 1 MB so they load quickly on any connection.
+ */
+const BERKLEE = "https://tonejs.github.io/audio/berklee/";
+const AK = {
+  kick:  BERKLEE + "kick_drum_0.mp3",
+  snare: BERKLEE + "snare_0.mp3",
+  clap:  BERKLEE + "clap_1.mp3",
+  hat:   BERKLEE + "hihat_0.mp3",
+  ohat:  BERKLEE + "hihat_2.mp3",
+  tomLo: BERKLEE + "tom_0.mp3",
+  tomHi: BERKLEE + "high_tom_0.mp3",
+  crash: BERKLEE + "crash_0.mp3",
+  fx:    BERKLEE + "shaker_0.mp3",
+} as const;
+
+/**
+ * Wraps a CDN-loaded Tone.Player as a DrumVoice.  The synth `fallback` is
+ * triggered while the buffer is still loading so the kit never goes silent.
+ * Once loaded the sampled audio is used for every subsequent trigger.
+ */
+function makeSampledDrum(url: string, fallback: DrumVoice, volumeDb = 0): DrumVoice {
+  const player = new Tone.Player({ url, loop: false, volume: volumeDb });
+
+  return {
+    trigger: (time, velocity) => {
+      if (player.loaded) {
+        // Scale ±20 dB around nominal so velocity feels linear in amplitude.
+        player.volume.setValueAtTime(
+          volumeDb + 20 * Math.log10(Math.max(velocity, 0.01)),
+          time,
+        );
+        player.start(time);
+      } else {
+        fallback.trigger(time, velocity);
+      }
+    },
+    connect: (dest) => {
+      player.connect(dest);
+      fallback.connect(dest);
+    },
+    dispose: () => {
+      player.dispose();
+      fallback.dispose();
+    },
+  };
+}
+
+/** Build the acoustic kit from Berklee CDN samples with synth fallbacks. */
+function buildAcousticSampledKit(): DrumKit {
+  return {
+    kick:    makeSampledDrum(AK.kick,  makeKick("acoustic"),      -2),
+    snare:   makeSampledDrum(AK.snare, makeSnare("acoustic"),     -4),
+    clap:    makeSampledDrum(AK.clap,  makeClap(),                -6),
+    hat:     makeSampledDrum(AK.hat,   makeHat("acoustic", false),-8),
+    ohat:    makeSampledDrum(AK.ohat,  makeHat("acoustic", true), -6),
+    tomLow:  makeSampledDrum(AK.tomLo, makeTom("A2"),             -4),
+    tomHigh: makeSampledDrum(AK.tomHi, makeTom("D3"),             -4),
+    crash:   makeSampledDrum(AK.crash, makeCrash(),               -6),
+    fx:      makeSampledDrum(AK.fx,    makeLegacyFx(),            -8),
+  };
+}
+
 export function buildDrumKit(preset: DrumsPreset): DrumKit {
+  if (preset === "acoustic") return buildAcousticSampledKit();
   return {
     kick: makeKick(preset),
     snare: makeSnare(preset),

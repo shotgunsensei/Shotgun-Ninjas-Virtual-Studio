@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { audio } from "../../lib/audio/engine";
 import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents, midiNoteToName } from "../../lib/midi/midi";
-import { useStore } from "../../store";
+import { useStore, getStore } from "../../store";
 import { getSettings } from "../../lib/settings";
 import type { Track } from "../../types";
 
@@ -62,11 +62,16 @@ function noteLabel(midi: number) {
 
 export function Keyboard({ track }: { track: Track }) {
   const isRecording = useStore((s) => s.isRecording);
-  const project = useStore((s) => s.project);
+  const midiMappings = useStore((s) => s.project.midiMappings);
   const [held, setHeld] = useState<Set<number>>(new Set());
   const heldRef = useRef(held);
   heldRef.current = held;
   const [octave, setOctave] = useState(track.kind === "bass" ? 2 : 4);
+
+  // One-shot session toasts: fire once the first time the user plays via
+  // QWERTY or hardware MIDI so they know which input is active.
+  const shownQwertyToast = useRef(false);
+  const shownMidiToast = useRef(false);
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
@@ -81,6 +86,10 @@ export function Keyboard({ track }: { track: Track }) {
       audio.startNote(track.id, note, 0.85, "qwerty");
       if (isRecording) noteRecorder.noteOn(track.id, note, 0.85);
       setHeld((h) => new Set(h).add(midi));
+      if (!shownQwertyToast.current) {
+        shownQwertyToast.current = true;
+        getStore().setStatus("QWERTY keyboard active — A…J whites, W E T Y U O P [ ] \\ sharps", "info");
+      }
     };
     const onUp = (e: KeyboardEvent) => {
       const map = QWERTY_MAP[e.key.toLowerCase()];
@@ -106,7 +115,7 @@ export function Keyboard({ track }: { track: Track }) {
   useMidiEvents(
     (e) => {
       // if any user mapping owns this signature, defer to the central router
-      const owned = project.midiMappings.some((m) => m.signature === e.signature);
+      const owned = midiMappings.some((m) => m.signature === e.signature);
       if (owned) return;
       // MIDI passthrough toggle gates the implicit "play the selected
       // instrument" behavior. When off, only explicit learned mappings
@@ -118,6 +127,10 @@ export function Keyboard({ track }: { track: Track }) {
         audio.startNote(track.id, note, e.data2 / 127, "midi");
         if (isRecording) noteRecorder.noteOn(track.id, note, e.data2 / 127);
         setHeld((h) => new Set(h).add(e.data1));
+        if (!shownMidiToast.current) {
+          shownMidiToast.current = true;
+          getStore().setStatus("Hardware MIDI active — notes routing to selected track", "info");
+        }
       } else if (e.type === "noteoff") {
         const note = midiNoteToName(e.data1);
         audio.endNote(track.id, note);
@@ -129,7 +142,7 @@ export function Keyboard({ track }: { track: Track }) {
         });
       }
     },
-    [track.id, isRecording, project.midiMappings],
+    [track.id, isRecording, midiMappings],
   );
 
   // Render 2 octaves of keyboard

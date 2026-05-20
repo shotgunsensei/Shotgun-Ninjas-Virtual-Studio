@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Header } from "./components/Header";
 import { StudioFooter } from "./components/Footer";
@@ -153,11 +153,11 @@ function bootstrap() {
   return bootstrapPromise;
 }
 
-export function getBootstrapResult(): BootstrapResult {
+function getBootstrapResult(): BootstrapResult {
   return bootstrapResult;
 }
 
-export function clearBootstrapResult(key: "health" | "draftAvailable") {
+function clearBootstrapResult(key: "health" | "draftAvailable") {
   bootstrapResult = { ...bootstrapResult, [key]: null };
 }
 
@@ -231,11 +231,11 @@ function writeCollapse(key: string, v: boolean) {
 }
 
 function Studio() {
-  const project = useStore((s) => s.project);
-  const selectedTrackId = useStore((s) => s.selectedTrackId);
-  const selectedTrack = useMemo(
-    () => project.tracks.find((t) => t.id === selectedTrackId) ?? project.tracks[0],
-    [project.tracks, selectedTrackId],
+  // Narrow selector: returns a stable Track reference via Immer structural
+  // sharing — only re-renders Studio when the SELECTED track itself changes,
+  // not when a different track's fader/step moves.
+  const selectedTrack = useStore(
+    (s) => s.project.tracks.find((t) => t.id === s.selectedTrackId) ?? s.project.tracks[0],
   );
   const { play, pause, stop, record } = useTransport();
   const isPlaying = useStore((s) => s.isPlaying);
@@ -504,40 +504,35 @@ function Studio() {
   //      state, even for transient projects, so a crash or accidental
   //      tab close can be recovered via Recover Unsaved Project.
   const isTransient = useStore((s) => s.isTransientProject);
-  const projectRef = useRef(project);
-  projectRef.current = project;
+  // projectRef always holds the latest snapshot — kept fresh by the store
+  // subscription below so the render path never needs to subscribe to project.
+  const projectRef = useRef(getStore().state.project);
   const dirtyRef = useRef(false);
-  const lastSavedAtRef = useRef<number>(project.updatedAt);
+  const lastSavedAtRef = useRef<number>(getStore().state.project.updatedAt);
+  const draftTimerRef = useRef<number | null>(null);
   const [autosaveSec, setAutosaveSec] = useState(
     () => getSettings().autosaveIntervalSec,
   );
   useEffect(() => subscribeSettings((s) => setAutosaveSec(s.autosaveIntervalSec)), []);
 
-  // Mark dirty whenever project changes (after first render).
-  const isFirstProjectRef = useRef(true);
+  // Single store subscription that handles both dirty-marking and the
+  // debounced draft write. Runs outside React's render cycle so fader
+  // moves, step toggles, and note edits never cause Studio to re-render
+  // just to keep the autosave timer up to date.
   useEffect(() => {
-    if (isFirstProjectRef.current) {
-      isFirstProjectRef.current = false;
-      return;
-    }
-    dirtyRef.current = true;
-  }, [project]);
-
-  // Debounced draft write — short window so an in-flight crash still
-  // captures the most recent edit. Runs even for transient demos so
-  // the user never silently loses experimentation.
-  const draftTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
-    draftTimerRef.current = window.setTimeout(() => {
-      saveDraft(projectRef.current).catch(() => {
-        /* ignore quota / serialization errors */
-      });
-    }, 800);
-    return () => {
+    let isFirst = true;
+    return getStore().subscribe(() => {
+      const next = getStore().state.project;
+      if (next === projectRef.current) return;
+      projectRef.current = next;
+      if (isFirst) { isFirst = false; return; }
+      dirtyRef.current = true;
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
-    };
-  }, [project]);
+      draftTimerRef.current = window.setTimeout(() => {
+        saveDraft(next).catch(() => { /* ignore quota / serialization errors */ });
+      }, 800);
+    });
+  }, []);
 
   // Periodic real autosave on a user-configurable interval. 0 disables
   // (manual Save still works). Always writes when dirty, regardless of
@@ -624,7 +619,7 @@ function Studio() {
   // stop vocals on unmount safety
   useEffect(() => {
     return () => {
-      project.tracks.forEach((t) => {
+      getStore().state.project.tracks.forEach((t) => {
         if (t.kind === "vocals") audio.stopVocalMonitor(t.id);
       });
       if (vocalRecorder.isActive()) vocalRecorder.stop();

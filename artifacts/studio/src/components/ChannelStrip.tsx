@@ -57,13 +57,13 @@ function fxRackEnabledCount(track: Track): number {
 }
 
 export function ChannelStripsBar() {
-  const project = useStore((s) => s.project);
+  const tracks = useStore((s) => s.project.tracks);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
 
   return (
     <div className="border-t border-border bg-graphite">
       <div className="flex overflow-x-auto">
-        {project.tracks.map((t) => (
+        {tracks.map((t) => (
           <ChannelStrip
             key={t.id}
             track={t}

@@ -15,7 +15,15 @@ import { useSettings } from "../lib/settings";
 import { OfflineReadyIndicator } from "./PwaInstallControls";
 
 export function TransportBar() {
-  const project = useStore((s) => s.project);
+  const bpm = useStore((s) => s.project.bpm);
+  const masterVolume = useStore((s) => s.project.masterVolume);
+  const loopEnabled = useStore((s) => s.project.loopEnabled);
+  const loopStartBeat = useStore((s) => s.project.loopStartBeat);
+  const loopEndBeat = useStore((s) => s.project.loopEndBeat);
+  const metronome = useStore((s) => s.project.metronome);
+  const countIn = useStore((s) => s.project.countIn);
+  const countInBars = useStore((s) => s.project.countInBars);
+  const globalSwing = useStore((s) => s.project.globalGroove?.swing ?? 0);
   const isRecording = useStore((s) => s.isRecording);
   const isPlaying = useStore((s) => s.isPlaying);
   const countingIn = useStore((s) => s.countingIn);
@@ -23,29 +31,15 @@ export function TransportBar() {
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const { play, pause, stop, record } = useTransport();
   const metronomeVolume = useSettings((s) => s.metronomeVolume);
-  const globalSwing = project.globalGroove?.swing ?? 0;
 
-  // keep engine in sync with project bpm/master/loop/metronome
+  useEffect(() => { audio.setBpm(bpm); }, [bpm]);
+  useEffect(() => { audio.setMaster(masterVolume); }, [masterVolume]);
   useEffect(() => {
-    audio.setBpm(project.bpm);
-  }, [project.bpm]);
-  useEffect(() => {
-    audio.setMaster(project.masterVolume);
-  }, [project.masterVolume]);
-  useEffect(() => {
-    audio.setLoop(project.loopEnabled, project.loopStartBeat, project.loopEndBeat);
-  }, [project.loopEnabled, project.loopStartBeat, project.loopEndBeat]);
-  useEffect(() => {
-    audio.setMetronome(project.metronome);
-  }, [project.metronome]);
-  useEffect(() => {
-    audio.setMetronomeVolume(metronomeVolume);
-  }, [metronomeVolume]);
-  // Forward project-level swing into the engine transport so 8ths swing
-  // even when no per-track groove is configured.
-  useEffect(() => {
-    audio.setSwing(globalSwing);
-  }, [globalSwing]);
+    audio.setLoop(loopEnabled, loopStartBeat, loopEndBeat);
+  }, [loopEnabled, loopStartBeat, loopEndBeat]);
+  useEffect(() => { audio.setMetronome(metronome); }, [metronome]);
+  useEffect(() => { audio.setMetronomeVolume(metronomeVolume); }, [metronomeVolume]);
+  useEffect(() => { audio.setSwing(globalSwing); }, [globalSwing]);
 
   return (
     <div className="h-16 border-b border-border flex items-center px-4 gap-3 bg-graphite/60 backdrop-blur">
@@ -143,7 +137,7 @@ export function TransportBar() {
             type="number"
             min={40}
             max={240}
-            value={project.bpm}
+            value={bpm}
             onChange={(e) =>
               getStore().patchProject({ bpm: Math.max(40, Math.min(240, Number(e.target.value) || 0)) })
             }
@@ -171,14 +165,14 @@ export function TransportBar() {
         </div>
       </div>
 
-      <PositionReadout bpm={project.bpm} isPlaying={isPlaying} />
+      <PositionReadout isPlaying={isPlaying} />
 
       <div className="flex items-center gap-2">
         <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
           Metronome
         </label>
         <Switch
-          checked={project.metronome}
+          checked={metronome}
           onCheckedChange={(v) => getStore().patchProject({ metronome: v })}
         />
         <MidiLearnButton target={{ kind: "metronome-toggle" }} small />
@@ -189,7 +183,7 @@ export function TransportBar() {
           Count-in
         </label>
         <select
-          value={project.countIn ? `${project.countInBars ?? 1}` : "0"}
+          value={countIn ? `${countInBars ?? 1}` : "0"}
           onChange={(e) => {
             const v = e.target.value;
             if (v === "0") {
@@ -214,7 +208,7 @@ export function TransportBar() {
           Loop
         </label>
         <Switch
-          checked={project.loopEnabled}
+          checked={loopEnabled}
           onCheckedChange={(v) => getStore().patchProject({ loopEnabled: v })}
         />
       </div>
@@ -241,13 +235,13 @@ export function TransportBar() {
 
       <OfflineReadyIndicator />
       <MasterScope width={96} height={28} />
-      <MasterMeter bpm={project.bpm} pulsing={isPlaying} />
+      <MasterMeter bpm={bpm} pulsing={isPlaying} />
       <MasterClipBadge />
 
       <div className="flex items-center gap-2 min-w-[180px]">
         <Volume2 className="w-4 h-4 text-muted-foreground" />
         <Slider
-          value={[project.masterVolume * 100]}
+          value={[masterVolume * 100]}
           max={100}
           step={1}
           onValueChange={([v]) =>
@@ -255,7 +249,7 @@ export function TransportBar() {
           }
         />
         <span className="font-mono text-xs w-8 text-right">
-          {Math.round(project.masterVolume * 100)}
+          {Math.round(masterVolume * 100)}
         </span>
       </div>
     </div>
@@ -269,15 +263,11 @@ export function TransportBar() {
  */
 /**
  * Bar.beat.step transport readout polled from the engine while playback
- * is rolling. Frozen at the last value when stopped so the user can read
- * exactly where they left off.
+ * is rolling. Writes directly to a DOM span instead of calling setState
+ * so it never causes a React re-render during playback.
  */
-function PositionReadout({ bpm: _bpm, isPlaying }: { bpm: number; isPlaying: boolean }) {
-  const [pos, setPos] = useState<{ bar: number; beat: number; step: number }>({
-    bar: 1,
-    beat: 1,
-    step: 1,
-  });
+function PositionReadout({ isPlaying }: { isPlaying: boolean }) {
+  const spanRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!isPlaying) return;
     let raf = 0;
@@ -285,12 +275,13 @@ function PositionReadout({ bpm: _bpm, isPlaying }: { bpm: number; isPlaying: boo
     const tick = (ts: number) => {
       if (ts - last > 60) {
         last = ts;
-        const beats = audio.positionBeats();
-        // Beats are 0-indexed internally; display 1-indexed musical time.
-        const bar = Math.floor(beats / 4) + 1;
-        const beat = Math.floor(beats % 4) + 1;
-        const step = Math.floor((beats * 4) % 4) + 1;
-        setPos({ bar, beat, step });
+        if (spanRef.current) {
+          const beats = audio.positionBeats();
+          const bar = Math.floor(beats / 4) + 1;
+          const beat = Math.floor(beats % 4) + 1;
+          const step = Math.floor((beats * 4) % 4) + 1;
+          spanRef.current.textContent = `${bar}.${beat}.${step}`;
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -303,8 +294,8 @@ function PositionReadout({ bpm: _bpm, isPlaying }: { bpm: number; isPlaying: boo
         <span className="text-[9px] uppercase tracking-widest text-muted-foreground">
           Position
         </span>
-        <span className="font-mono text-sm tabular-nums text-primary">
-          {pos.bar}.{pos.beat}.{pos.step}
+        <span ref={spanRef} className="font-mono text-sm tabular-nums text-primary">
+          1.1.1
         </span>
       </div>
     </Tip>

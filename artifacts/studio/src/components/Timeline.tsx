@@ -63,11 +63,16 @@ function promptRename(current: string | undefined, kind: string): string | null 
 }
 
 export function Timeline() {
-  const project = useStore((s) => s.project);
+  const bars = useStore((s) => s.project.bars);
+  const sections = useStore((s) => s.project.sections);
+  const tracks = useStore((s) => s.project.tracks);
+  const loopEnabled = useStore((s) => s.project.loopEnabled);
+  const loopStartBeat = useStore((s) => s.project.loopStartBeat);
+  const loopEndBeat = useStore((s) => s.project.loopEndBeat);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const selectedClipId = useStore((s) => s.selectedClipId);
 
-  const totalBeats = project.bars * 4;
+  const totalBeats = bars * 4;
   const width = totalBeats * PX_PER_BEAT;
 
   // Live playhead via ref + style transform — avoids re-rendering the
@@ -128,20 +133,20 @@ export function Timeline() {
       <div className="relative" style={{ width, minWidth: "100%" }}>
         {/* sections strip */}
         <SectionsStrip
-          sections={project.sections ?? []}
-          bars={project.bars}
+          sections={sections ?? []}
+          bars={bars}
         />
 
         {/* ruler — also hosts loop region handles */}
         <div className="h-7 sticky top-7 z-10 bg-graphite/95 border-b border-border relative">
           <RulerLoopOverlay
-            loopEnabled={project.loopEnabled}
-            loopStartBeat={project.loopStartBeat}
-            loopEndBeat={project.loopEndBeat}
+            loopEnabled={loopEnabled}
+            loopStartBeat={loopStartBeat}
+            loopEndBeat={loopEndBeat}
             totalBeats={totalBeats}
           />
           <div className="flex h-full">
-            {Array.from({ length: project.bars }).map((_, bar) => (
+            {Array.from({ length: bars }).map((_, bar) => (
               <div
                 key={bar}
                 className="flex-none border-r border-border/60 flex items-center pl-2 font-mono text-[10px] text-muted-foreground"
@@ -155,7 +160,7 @@ export function Timeline() {
 
         {/* tracks */}
         <div>
-          {project.tracks.map((t) => (
+          {tracks.map((t) => (
             <TimelineRow
               key={t.id}
               track={t}
@@ -167,15 +172,15 @@ export function Timeline() {
         </div>
 
         {/* loop region overlay across track lanes */}
-        {project.loopEnabled && (
+        {loopEnabled && (
           <div
             className="absolute left-0 right-0 bg-neon/10 border-l border-r border-neon/40 pointer-events-none"
             data-testid="loop-region-overlay"
             style={{
               top: 56,
               bottom: 0,
-              left: project.loopStartBeat * PX_PER_BEAT,
-              width: (project.loopEndBeat - project.loopStartBeat) * PX_PER_BEAT,
+              left: loopStartBeat * PX_PER_BEAT,
+              width: (loopEndBeat - loopStartBeat) * PX_PER_BEAT,
             }}
           />
         )}
@@ -996,8 +1001,8 @@ function AudioClipView({
   // "missing sample" — surface visually so the user knows the audio is
   // gone (and offer a re-import in the sample browser).
   const isMissing = !!clip.blobKey && !clip.blob;
-  const project = useStore((s) => s.project);
-  const beatsPerSecond = project.bpm / 60;
+  const bpm = useStore((s) => s.project.bpm);
+  const beatsPerSecond = bpm / 60;
   const lengthBeats = clip.durationSec * beatsPerSecond;
   const { onMouseDown, dragDelta } = useClipDrag({
     trackId: track.id,

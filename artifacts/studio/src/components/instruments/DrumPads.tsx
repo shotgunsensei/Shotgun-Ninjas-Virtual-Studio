@@ -121,7 +121,7 @@ function replaceStepNote(
 
 export function DrumPads({ track }: { track: Track }) {
   const isRecording = useStore((s) => s.isRecording);
-  const project = useStore((s) => s.project);
+  const midiMappings = useStore((s) => s.project.midiMappings);
   const isPlaying = useStore((s) => s.isPlaying);
 
   const clip = track.noteClips[0];
@@ -251,13 +251,13 @@ export function DrumPads({ track }: { track: Track }) {
       if (!getSettings().midiPassthrough) return;
       const idx = e.data1 - 36;
       if (idx >= 0 && idx < DRUM_PIECES.length) {
-        const customMapped = project.midiMappings.find(
+        const customMapped = midiMappings.find(
           (m) => m.signature === e.signature && m.target.kind === "drum-pad",
         );
         if (!customMapped) hit(DRUM_PIECES[idx]);
       }
     },
-    [track.id, isRecording, project.midiMappings],
+    [track.id, isRecording, midiMappings],
   );
 
   const [showMixer, setShowMixer] = useState(false);
@@ -451,6 +451,25 @@ export function DrumPads({ track }: { track: Track }) {
           <ActionBtn onClick={ghostAction} data-action="ghosts">
             + Ghosts
           </ActionBtn>
+        </div>
+
+        {/* Beat-number header row — one label per beat, spanning the
+            correct number of step columns so it aligns with the grid below.
+            For multi-bar patterns we show a global beat index (1…N). */}
+        <div
+          className="grid items-end gap-x-0.5 pb-0.5 mb-0.5 border-b border-border/25"
+          style={{ gridTemplateColumns: padRowTemplate }}
+        >
+          <div /> {/* gutter spacer */}
+          {Array.from({ length: totalBeats }, (_, i) => (
+            <div
+              key={i}
+              className="text-center font-mono text-[8px] text-muted-foreground/50 leading-none select-none"
+              style={{ gridColumn: `span ${Math.round(stepsPerBeat)}` }}
+            >
+              {i + 1}
+            </div>
+          ))}
         </div>
 
         <div className="space-y-1">

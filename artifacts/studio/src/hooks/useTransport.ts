@@ -11,8 +11,35 @@ import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
  */
 
 export function useTransport() {
-  const project = useStore((s) => s.project);
   const audioUnlocked = useStore((s) => s.audioUnlocked);
+
+  // Fingerprint that changes only when clip structure or BPM changes —
+  // NOT on fader/mute/name edits. Prevents rescheduling audio on every
+  // slider move, which previously caused needless audio glitches.
+  const scheduleKey = useStore((s) => {
+    const p = s.project;
+    return (
+      p.bpm +
+      '|' +
+      p.tracks
+        .map(
+          (t) =>
+            t.id +
+            ':' +
+            t.noteClips
+              .map((c) => `${c.id}@${c.start}:${c.length}:${c.notes.length}`)
+              .join(',') +
+            '/' +
+            t.audioClips.map((c) => `${c.id}@${c.start}`).join(','),
+        )
+        .join(';')
+    );
+  });
+
+  // Separate mute/solo signal — cheap string comparison, no reschedule.
+  const muteKey = useStore((s) =>
+    s.project.tracks.map((t) => `${t.id}:${t.muted ? 1 : 0}:${t.solo ? 1 : 0}`).join('|'),
+  );
 
   const ensureUnlocked = useCallback(async () => {
     if (!audioUnlocked) {
@@ -155,23 +182,23 @@ export function useTransport() {
     }
   }, [ensureUnlocked]);
 
-  // Schedule existing clips on play. Re-schedule whenever the project clip set changes.
+  // Schedule existing clips on play. Re-schedule only when clip structure
+  // or BPM actually changes (scheduleKey), not on every fader/mute move.
   const scheduledRef = useRef<{ noteIds: number[]; audioPlayers: Array<Tone.Player>; audioIds: number[] }>({
     noteIds: [],
     audioPlayers: [],
     audioIds: [],
   });
   useEffect(() => {
-    // ensure all tracks have an engine voice
-    for (const t of project.tracks) audio.ensureTrack(t);
-    // reschedule
+    const tracks = getStore().state.project.tracks;
+    for (const t of tracks) audio.ensureTrack(t);
     audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
     scheduledRef.current.audioPlayers.forEach((p) => p.dispose());
 
     const noteIds: number[] = [];
     const audioPlayers: Tone.Player[] = [];
     const audioIds: number[] = [];
-    for (const t of project.tracks) {
+    for (const t of tracks) {
       for (const c of t.noteClips) {
         noteIds.push(...audio.scheduleClip(t, c));
       }
@@ -190,12 +217,12 @@ export function useTransport() {
       audio.cancelScheduled([...noteIds, ...audioIds]);
       audioPlayers.forEach((p) => p.dispose());
     };
-  }, [project.tracks, project.bpm]);
+  }, [scheduleKey]);
 
-  // Apply track settings to engine
+  // Apply mute/solo to engine only when those flags actually change.
   useEffect(() => {
-    audio.refreshAllMutes(project.tracks);
-  }, [project.tracks]);
+    audio.refreshAllMutes(getStore().state.project.tracks);
+  }, [muteKey]);
 
   return { play, pause, stop, record };
 }
