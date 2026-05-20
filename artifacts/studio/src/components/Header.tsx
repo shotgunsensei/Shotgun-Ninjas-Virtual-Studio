@@ -178,7 +178,10 @@ export function Header() {
   });
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [loopOnly, setLoopOnly] = useState(false);
+  type ExportRangeMode = "whole" | "loop" | "custom";
+  const [exportRangeMode, setExportRangeMode] = useState<ExportRangeMode>("whole");
+  const [customStartBar, setCustomStartBar] = useState(1);
+  const [customEndBar, setCustomEndBar] = useState(project.bars);
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
   const [importSummary, setImportSummary] =
     useState<ProjectImportSummary | null>(null);
@@ -203,6 +206,15 @@ export function Header() {
     cancelRef.current = { cancelled: false };
     try {
       const proj = getStore().state.project;
+      const renderOptions =
+        exportRangeMode === "loop"
+          ? { loopOnly: true }
+          : exportRangeMode === "custom"
+          ? {
+              customStartBeat: (customStartBar - 1) * 4,
+              customEndBeat: customEndBar * 4,
+            }
+          : {};
       const result = await renderProject(
         proj,
         format,
@@ -212,7 +224,7 @@ export function Header() {
           }
           setExportProgress(p);
         },
-        { loopOnly },
+        renderOptions,
       );
       if (cancelRef.current.cancelled) throw new Error("Export cancelled");
       // Detect clipping for status surface
@@ -750,16 +762,78 @@ export function Header() {
             <div className="space-y-3">
               <ClippingWarning />
 
-              {project.loopEnabled && (
-                <label className="flex items-center gap-2 text-xs font-mono">
+              <div className="space-y-1">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                  Export range
+                </div>
+                <label className="flex items-center gap-2 text-xs font-mono cursor-pointer">
                   <input
-                    type="checkbox"
-                    checked={loopOnly}
-                    onChange={(e) => setLoopOnly(e.target.checked)}
+                    type="radio"
+                    name="export-range"
+                    value="whole"
+                    checked={exportRangeMode === "whole"}
+                    onChange={() => setExportRangeMode("whole")}
                   />
-                  Export loop region only
+                  Whole song ({project.bars} bars)
                 </label>
-              )}
+                {project.loopEnabled && (
+                  <label className="flex items-center gap-2 text-xs font-mono cursor-pointer">
+                    <input
+                      type="radio"
+                      name="export-range"
+                      value="loop"
+                      checked={exportRangeMode === "loop"}
+                      onChange={() => setExportRangeMode("loop")}
+                    />
+                    Loop region (bars {Math.floor(project.loopStartBeat / 4) + 1}–{Math.ceil(project.loopEndBeat / 4)})
+                  </label>
+                )}
+                <label className="flex items-center gap-2 text-xs font-mono cursor-pointer">
+                  <input
+                    type="radio"
+                    name="export-range"
+                    value="custom"
+                    checked={exportRangeMode === "custom"}
+                    onChange={() => setExportRangeMode("custom")}
+                  />
+                  Custom range
+                </label>
+                {exportRangeMode === "custom" && (
+                  <div className="flex items-center gap-2 ml-5 mt-1">
+                    <span className="text-xs font-mono text-muted-foreground">Bar</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={project.bars}
+                      value={customStartBar}
+                      onChange={(e) => {
+                        const v = Math.max(1, Math.min(project.bars, Number(e.target.value)));
+                        setCustomStartBar(v);
+                        if (v >= customEndBar) setCustomEndBar(Math.min(project.bars, v + 1));
+                      }}
+                      className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
+                      data-testid="export-custom-start-bar"
+                    />
+                    <span className="text-xs font-mono text-muted-foreground">to</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={project.bars}
+                      value={customEndBar}
+                      onChange={(e) => {
+                        const v = Math.max(1, Math.min(project.bars, Number(e.target.value)));
+                        setCustomEndBar(v);
+                        if (v <= customStartBar) setCustomStartBar(Math.max(1, v - 1));
+                      }}
+                      className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
+                      data-testid="export-custom-end-bar"
+                    />
+                    <span className="text-xs font-mono text-muted-foreground">
+                      ({customEndBar - customStartBar + 1} bar{customEndBar - customStartBar + 1 !== 1 ? "s" : ""})
+                    </span>
+                  </div>
+                )}
+              </div>
 
               <ExportSamplesWarning />
 

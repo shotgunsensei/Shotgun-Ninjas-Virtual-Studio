@@ -60,6 +60,12 @@ export async function renderProjectToWav(
 export interface RenderOptions {
   /** When true, only the loop region [loopStartBeat..loopEndBeat) is rendered. */
   loopOnly?: boolean;
+  /**
+   * Custom render range in beats. When both are provided and customEndBeat >
+   * customStartBeat, this takes precedence over loopOnly.
+   */
+  customStartBeat?: number;
+  customEndBeat?: number;
 }
 
 export async function renderProject(
@@ -69,12 +75,26 @@ export async function renderProject(
   options: RenderOptions = {},
 ): Promise<ExportResult> {
   const beatsPerSec = project.bpm / 60;
-  const useLoop =
+  let startBeat: number;
+  let endBeat: number;
+  if (
+    options.customStartBeat !== undefined &&
+    options.customEndBeat !== undefined &&
+    options.customEndBeat > options.customStartBeat
+  ) {
+    startBeat = Math.max(0, options.customStartBeat);
+    endBeat = Math.min(project.bars * 4, options.customEndBeat);
+  } else if (
     options.loopOnly &&
     project.loopEnabled &&
-    project.loopEndBeat > project.loopStartBeat;
-  const startBeat = useLoop ? project.loopStartBeat : 0;
-  const endBeat = useLoop ? project.loopEndBeat : project.bars * 4;
+    project.loopEndBeat > project.loopStartBeat
+  ) {
+    startBeat = project.loopStartBeat;
+    endBeat = project.loopEndBeat;
+  } else {
+    startBeat = 0;
+    endBeat = project.bars * 4;
+  }
   const projectSec = Math.max(0, (endBeat - startBeat) / beatsPerSec);
   const renderSec = Math.max(0.5, projectSec + TAIL_SEC);
 
