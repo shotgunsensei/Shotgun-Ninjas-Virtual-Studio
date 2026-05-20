@@ -18,7 +18,7 @@ import { PwaUpdateToast } from "./components/PwaUpdateToast";
 import { BackgroundFx } from "./components/BackgroundFx";
 import { Logo } from "./components/Logo";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { applySideEffects, getSettings } from "./lib/settings";
+import { applySideEffects, getSettings, subscribeSettings } from "./lib/settings";
 import { APP_NAME } from "./lib/version";
 import { DropZone } from "./components/DropZone";
 import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
@@ -38,13 +38,41 @@ import { useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
 import { defaultProject, flushMixToEngine, getStore, resetStore, useStore } from "./store";
-import { getLastProjectId, loadProject, saveProject } from "./lib/storage/db";
+import {
+  getLastProjectId,
+  getLastSavedInfo,
+  loadDraft,
+  loadProject,
+  saveDraft,
+  saveProject,
+  clearDraft,
+  hydrateDraft,
+} from "./lib/storage/db";
+import { checkProjectHealth, type HealthReport } from "./lib/storage/health";
+import { HealthBanner } from "./components/HealthBanner";
+import { RecoveryBanner } from "./components/RecoveryBanner";
 import { useMidiEvents } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
 import { useSettings } from "./lib/settings";
 
 let bootstrapped = false;
 let bootstrapPromise: Promise<void> | null = null;
+
+/**
+ * Pending draft recovery info populated during bootstrap. The UI reads
+ * this to decide whether to render the RecoveryBanner. We don't
+ * auto-restore the draft so the user can decide whether to keep the
+ * unsaved work or discard it.
+ */
+interface BootstrapResult {
+  health: HealthReport | null;
+  draftAvailable: {
+    ts: number;
+    /** The draft is for the project that the user just loaded. */
+    forCurrentProject: boolean;
+  } | null;
+}
+let bootstrapResult: BootstrapResult = { health: null, draftAvailable: null };
 
 function bootstrap() {
   if (bootstrapPromise) return bootstrapPromise;
@@ -65,10 +93,6 @@ function bootstrap() {
     if (!project) {
       project = defaultProject();
       resetStore(project);
-      // Only auto-show the onboarding modal the very first time a user
-      // lands on the studio. If they've dismissed it before we respect
-      // that across reloads — the Help button in the header always
-      // re-opens it on demand.
       let shown = false;
       try {
         shown = localStorage.getItem("studio.onboardingShown") === "1";
@@ -85,9 +109,48 @@ function bootstrap() {
     } catch (err) {
       console.error("bootstrap engine init failed", err);
     }
+    // Project health: surface missing samples / orphaned data so the
+    // user can act on it before they edit on top of broken state.
+    try {
+      bootstrapResult.health = checkProjectHealth(project);
+    } catch (err) {
+      console.error("health check failed", err);
+    }
+    // Draft recovery: offer the user a chance to recover a draft
+    // snapshot if it's newer than the last durable save for this
+    // project. Drafts from a different project are kept (in case the
+    // user navigates back) but not surfaced here.
+    try {
+      const [draft, lastSaved] = await Promise.all([
+        loadDraft(),
+        getLastSavedInfo(),
+      ]);
+      if (
+        draft &&
+        draft.projectId === project.id &&
+        (!lastSaved ||
+          lastSaved.projectId !== project.id ||
+          draft.ts > lastSaved.ts + 250)
+      ) {
+        bootstrapResult.draftAvailable = {
+          ts: draft.ts,
+          forCurrentProject: true,
+        };
+      }
+    } catch (err) {
+      console.error("draft recovery check failed", err);
+    }
     bootstrapped = true;
   })();
   return bootstrapPromise;
+}
+
+export function getBootstrapResult(): BootstrapResult {
+  return bootstrapResult;
+}
+
+export function clearBootstrapResult(key: "health" | "draftAvailable") {
+  bootstrapResult = { ...bootstrapResult, [key]: null };
 }
 
 // Apply the persisted theme + UI preferences synchronously at module-
@@ -424,27 +487,131 @@ function Studio() {
     [play, pause, stop, record],
   );
 
-  // autosave debounced — skipped when the current project is a demo
-  // (transient) and when the user has disabled autosave in settings.
-  // The debounce interval is also user-configurable.
+  // ---- autosave + draft snapshot loop ----
+  // Two independent signals keep the user's work safe:
+  //   1. A configurable periodic "real" autosave that writes to the
+  //      durable project record. Interval comes from user settings
+  //      (off / 15s / 30s / 60s). Skipped for transient demo projects.
+  //   2. A short-debounced "draft" snapshot that always runs on dirty
+  //      state, even for transient projects, so a crash or accidental
+  //      tab close can be recovered via Recover Unsaved Project.
   const isTransient = useStore((s) => s.isTransientProject);
-  const autosaveEnabled = useSettings((s) => s.autosaveEnabled);
-  const autosaveIntervalMs = useSettings((s) => s.autosaveIntervalMs);
-  const saveTimerRef = useRef<number | null>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
+  const dirtyRef = useRef(false);
+  const lastSavedAtRef = useRef<number>(project.updatedAt);
+  const [autosaveSec, setAutosaveSec] = useState(
+    () => getSettings().autosaveIntervalSec,
+  );
+  useEffect(() => subscribeSettings((s) => setAutosaveSec(s.autosaveIntervalSec)), []);
+
+  // Mark dirty whenever project changes (after first render).
+  const isFirstProjectRef = useRef(true);
   useEffect(() => {
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    if (isTransient || !autosaveEnabled) return;
-    saveTimerRef.current = window.setTimeout(() => {
-      saveProject(projectRef.current).catch(() => {
-        /* ignore quota errors */
+    if (isFirstProjectRef.current) {
+      isFirstProjectRef.current = false;
+      return;
+    }
+    dirtyRef.current = true;
+  }, [project]);
+
+  // Debounced draft write — short window so an in-flight crash still
+  // captures the most recent edit. Runs even for transient demos so
+  // the user never silently loses experimentation.
+  const draftTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = window.setTimeout(() => {
+      saveDraft(projectRef.current).catch(() => {
+        /* ignore quota / serialization errors */
       });
-    }, autosaveIntervalMs);
+    }, 800);
     return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
     };
-  }, [project, isTransient, autosaveEnabled, autosaveIntervalMs]);
+  }, [project]);
+
+  // Periodic real autosave on a user-configurable interval. 0 disables
+  // (manual Save still works). Always writes when dirty, regardless of
+  // debounce — the user explicitly opted into this cadence.
+  useEffect(() => {
+    if (autosaveSec === 0) return;
+    if (isTransient) return;
+    const handle = window.setInterval(() => {
+      if (!dirtyRef.current) return;
+      const snap = projectRef.current;
+      saveProject(snap)
+        .then(() => {
+          lastSavedAtRef.current = Date.now();
+          dirtyRef.current = false;
+        })
+        .catch(() => {
+          /* ignore quota errors — next tick will retry */
+        });
+    }, autosaveSec * 1000);
+    return () => window.clearInterval(handle);
+  }, [autosaveSec, isTransient]);
+
+  // beforeunload: best-effort flush of the draft slot so a tab close
+  // mid-edit still leaves the most recent state recoverable. We can't
+  // await async work here, but saveDraft kicks off the IDB write
+  // immediately and most browsers will let it complete.
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      if (!dirtyRef.current) return;
+      try {
+        saveDraft(projectRef.current);
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  // ---- health + recovery banners (populated by bootstrap) ----
+  const [healthReport, setHealthReport] = useState<HealthReport | null>(
+    () => getBootstrapResult().health,
+  );
+  const [draftAvailable, setDraftAvailable] = useState<{ ts: number } | null>(
+    () => {
+      const r = getBootstrapResult().draftAvailable;
+      return r ? { ts: r.ts } : null;
+    },
+  );
+  const onRecoverDraft = async () => {
+    try {
+      const snap = await loadDraft();
+      if (!snap) {
+        setDraftAvailable(null);
+        clearBootstrapResult("draftAvailable");
+        return;
+      }
+      const recovered = await hydrateDraft(snap);
+      audio.stop();
+      resetStore(recovered);
+      for (const t of recovered.tracks) audio.ensureTrack(t);
+      flushMixToEngine(recovered);
+      setDraftAvailable(null);
+      clearBootstrapResult("draftAvailable");
+      setHealthReport(checkProjectHealth(recovered));
+      getStore().setStatus("Unsaved work restored", "info");
+    } catch (err) {
+      getStore().setStatus(
+        `Recovery failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+  const onDiscardDraft = async () => {
+    try {
+      await clearDraft();
+    } catch {
+      /* ignore */
+    }
+    setDraftAvailable(null);
+    clearBootstrapResult("draftAvailable");
+  };
 
   // stop vocals on unmount safety
   useEffect(() => {
@@ -461,6 +628,22 @@ function Studio() {
     <div className="h-full flex flex-col text-foreground overflow-hidden relative">
       <BackgroundFx />
       <Header />
+      {draftAvailable && (
+        <RecoveryBanner
+          draftTs={draftAvailable.ts}
+          onRecover={onRecoverDraft}
+          onDiscard={onDiscardDraft}
+        />
+      )}
+      {healthReport && healthReport.issues.length > 0 && (
+        <HealthBanner
+          report={healthReport}
+          onDismiss={() => {
+            setHealthReport(null);
+            clearBootstrapResult("health");
+          }}
+        />
+      )}
       <TransportBar />
       <div className="flex flex-1 overflow-hidden">
         {/* Left browser: track list shortcut. Collapsible. */}

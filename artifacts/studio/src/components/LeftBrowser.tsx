@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getStore, useStore } from "../store";
 import { DRUM_KIT_LIST } from "../lib/audio/sounds/kits";
 import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
-import { listProjects, loadProject } from "../lib/storage/db";
+import { listProjects, loadProject, relocateSampleBlob } from "../lib/storage/db";
 import { flushMixToEngine } from "../store";
 
 type TabId = "tracks" | "kits" | "presets" | "samples" | "projects";
@@ -187,25 +187,100 @@ function PresetsTab() {
 
 function SamplesTab() {
   const samples = useStore((s) => s.project.samples ?? []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingSampleIdRef = useRef<string | null>(null);
+
+  const startLocate = (sampleId: string) => {
+    pendingSampleIdRef.current = sampleId;
+    fileInputRef.current?.click();
+  };
+
+  const onLocateFile = async (file: File) => {
+    const sampleId = pendingSampleIdRef.current;
+    pendingSampleIdRef.current = null;
+    if (!sampleId) return;
+    const proj = getStore().state.project;
+    const target = (proj.samples ?? []).find((s) => s.id === sampleId);
+    if (!target) return;
+    try {
+      // Rewrite the blob behind the sample's existing blobKey so any
+      // clip that references the sample picks up the new audio on next
+      // load without a full project reload.
+      await relocateSampleBlob(target.blobKey, file);
+      const ac = new (window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const buf = await ac.decodeAudioData(await file.arrayBuffer());
+      const durationSec = buf.duration;
+      ac.close();
+      const nextSamples = (proj.samples ?? []).map((s) =>
+        s.id === sampleId ? { ...s, blob: file, durationSec } : s,
+      );
+      getStore().patchProject({ samples: nextSamples });
+      getStore().setStatus(`Sample "${target.name}" located`, "info");
+    } catch (err) {
+      getStore().setStatus(
+        `Locate failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
   return (
     <div className="p-2 space-y-1">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onLocateFile(f);
+          e.target.value = "";
+        }}
+      />
       {samples.length === 0 && (
         <div className="px-2 py-3 font-mono text-[10px] text-muted-foreground">
           No samples yet. Drop an audio file onto the timeline to import one.
         </div>
       )}
-      {samples.map((s) => (
-        <div
-          key={s.id}
-          className="px-2 py-1.5 rounded font-mono text-[11px] text-muted-foreground bg-background/40 border border-border"
-          title={s.name}
-        >
-          <div className="truncate text-foreground/90">{s.name}</div>
-          <div className="text-[9px] uppercase tracking-widest opacity-60">
-            {s.durationSec.toFixed(2)}s
+      {samples.map((s) => {
+        const missing = !!s.blobKey && !s.blob;
+        return (
+          <div
+            key={s.id}
+            className={`px-2 py-1.5 rounded font-mono text-[11px] border ${
+              missing
+                ? "bg-yellow-600/10 border-yellow-600/40 text-yellow-200"
+                : "bg-background/40 border-border text-muted-foreground"
+            }`}
+            title={s.name}
+          >
+            <div className="flex items-center gap-1">
+              <div className="truncate text-foreground/90 flex-1">{s.name}</div>
+              {missing && (
+                <span className="text-[8px] uppercase tracking-widest text-yellow-400 border border-yellow-600/50 rounded px-1">
+                  Missing
+                </span>
+              )}
+            </div>
+            <div className="flex items-center justify-between mt-0.5">
+              <div className="text-[9px] uppercase tracking-widest opacity-60">
+                {s.durationSec.toFixed(2)}s
+              </div>
+              {missing && (
+                <button
+                  type="button"
+                  onClick={() => startLocate(s.id)}
+                  className="text-[9px] uppercase tracking-widest text-yellow-300 hover:text-yellow-100 underline underline-offset-2"
+                  data-testid={`locate-sample-${s.id}`}
+                >
+                  Locate sample
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

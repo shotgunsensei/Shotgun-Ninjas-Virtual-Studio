@@ -334,4 +334,7 @@ export interface Project {
   /** v2: currently-applied mix preset id (purely informational; the
    *  actual values live on the tracks and `masterBus`). */
   mixPresetId?: MixPresetId;
+  /** Project schema version. Stamped by `migrateProject` on every load
+   *  so older files can be auto-upgraded. Missing = legacy v1. */
+  schemaVersion?: number;
 }

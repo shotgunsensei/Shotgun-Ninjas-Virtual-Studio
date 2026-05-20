@@ -14,6 +14,19 @@ import { applyTheme, type ThemeId } from "./themes";
 export type LatencyMode = "balanced" | "low" | "playback";
 export type WorkspaceView = "compose" | "mix" | "perform";
 
+/** Periodic real-autosave cadence options (in seconds; 0 = off). */
+export type AutosaveIntervalSec = 0 | 15 | 30 | 60;
+
+export const AUTOSAVE_OPTIONS: Array<{
+  value: AutosaveIntervalSec;
+  label: string;
+}> = [
+  { value: 0, label: "Off" },
+  { value: 15, label: "15s" },
+  { value: 30, label: "30s" },
+  { value: 60, label: "60s" },
+];
+
 export interface StudioSettings {
   // Audio
   defaultBpm: number;
@@ -32,6 +45,13 @@ export interface StudioSettings {
   // Project
   autosaveEnabled: boolean;
   autosaveIntervalMs: number;
+  /**
+   * Periodic real-autosave cadence in seconds for the Phase 3
+   * reliability loop. 0 disables periodic autosave (manual Save still
+   * works). Independent of autosaveIntervalMs, which controls the
+   * legacy debounce window.
+   */
+  autosaveIntervalSec: AutosaveIntervalSec;
   restoreLastProjectOnLaunch: boolean;
   confirmBeforeOverwrite: boolean;
 
@@ -59,6 +79,7 @@ export const DEFAULT_SETTINGS: StudioSettings = {
 
   autosaveEnabled: true,
   autosaveIntervalMs: 1500,
+  autosaveIntervalSec: 30,
   restoreLastProjectOnLaunch: true,
   confirmBeforeOverwrite: true,
 
@@ -96,6 +117,27 @@ function persist() {
 
 export function getSettings(): StudioSettings {
   return state;
+}
+
+/**
+ * Convenience helper used by the Phase 3 autosave loop to update the
+ * periodic interval without touching unrelated settings.
+ */
+export function setAutosaveInterval(value: AutosaveIntervalSec) {
+  setSettings({ autosaveIntervalSec: value });
+}
+
+/**
+ * Subscribe to any settings change. Alias kept for the Phase 3
+ * autosave + recovery code, which only needs a fire-and-forget listener
+ * with the latest snapshot.
+ */
+export function subscribeSettings(fn: (s: StudioSettings) => void): () => void {
+  const wrapper = () => fn(state);
+  listeners.add(wrapper);
+  return () => {
+    listeners.delete(wrapper);
+  };
 }
 
 export function setSettings(patch: Partial<StudioSettings>) {

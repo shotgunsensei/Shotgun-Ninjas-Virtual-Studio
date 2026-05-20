@@ -986,11 +986,16 @@ function AudioClipView({
     durationSec: number;
     offsetSec?: number;
     blob?: Blob;
+    blobKey?: string;
     name?: string;
     color?: string;
   };
   isSelected: boolean;
 }) {
+  // A clip that references a blob by key but didn't hydrate one is a
+  // "missing sample" — surface visually so the user knows the audio is
+  // gone (and offer a re-import in the sample browser).
+  const isMissing = !!clip.blobKey && !clip.blob;
   const project = useStore((s) => s.project);
   const beatsPerSecond = project.bpm / 60;
   const lengthBeats = clip.durationSec * beatsPerSecond;
@@ -1077,7 +1082,7 @@ function AudioClipView({
     };
   }, [clip.blob, offsetSec, durationSec, canvasWidth]);
 
-  const tint = clip.color;
+  const tint = isMissing ? "#f59e0b" : clip.color;
   const containerStyle: React.CSSProperties = tint
     ? {
         left,
@@ -1096,6 +1101,12 @@ function AudioClipView({
         <div
           onMouseDown={onMouseDown}
           data-testid="audio-clip"
+          data-missing={isMissing ? "true" : undefined}
+          title={
+            isMissing
+              ? "Audio data missing — re-import this clip from the Samples browser."
+              : undefined
+          }
           className={`absolute top-1.5 bottom-1.5 rounded-sm border overflow-hidden cursor-grab active:cursor-grabbing ${
             tint
               ? ""

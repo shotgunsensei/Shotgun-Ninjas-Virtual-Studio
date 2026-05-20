@@ -1,16 +1,30 @@
 import { openDB, type IDBPDatabase } from "idb";
 import type { Project, SampleLibraryItem } from "../../types";
+import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
 
 const DB_NAME = "shotgun-ninjas-studio";
-const DB_VERSION = 1;
+/** v1 — initial projects/blobs/meta stores.
+ *  v2 — phase 3: add draft slot in `meta` (no new object stores, but we
+ *       bump the version so the upgrade callback can scrub stale data). */
+const DB_VERSION = 2;
 const PROJECTS_STORE = "projects";
 const BLOBS_STORE = "blobs";
 const META_STORE = "meta";
 
+const META_LAST_PROJECT = "lastProject";
+const META_DRAFT = "draft";
+const META_LAST_SAVED = "lastSaved";
+
 interface Schema {
   projects: { key: string; value: SerializedProject };
   blobs: { key: string; value: Blob };
-  meta: { key: string; value: { lastProjectId?: string } };
+  meta: {
+    key: string;
+    value:
+      | { lastProjectId?: string }
+      | DraftSnapshot
+      | LastSavedInfo;
+  };
 }
 
 interface SerializedProject extends Omit<Project, "tracks" | "samples"> {
@@ -27,6 +41,19 @@ interface SerializedProject extends Omit<Project, "tracks" | "samples"> {
     }
   >;
   samples?: Array<Omit<SampleLibraryItem, "blob">>;
+}
+
+export interface DraftSnapshot {
+  project: SerializedProject;
+  ts: number;
+  /** Project id the draft belongs to — recovery only offers the draft
+   *  when the user lands back on the same project. */
+  projectId: string;
+}
+
+export interface LastSavedInfo {
+  projectId: string;
+  ts: number;
 }
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
@@ -50,14 +77,31 @@ function getDb() {
   return dbPromise;
 }
 
-export async function saveProject(project: Project): Promise<void> {
-  const db = await getDb();
-  const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE, META_STORE], "readwrite");
-
+/**
+ * Serialize a Project to the IDB-friendly shape and flush every blob
+ * referenced by the project into the BLOBS_STORE under a stable key.
+ * Used by both `saveProject` (writes the project record + meta) and
+ * `saveDraft` (writes only the draft slot, keeping the durable record
+ * untouched until the user actually saves).
+ */
+async function serializeAndFlushBlobs(
+  project: Project,
+  tx: ReturnType<IDBPDatabase<Schema>["transaction"]>,
+): Promise<SerializedProject> {
+  // idb's typed transaction narrows objectStore(...) based on the
+  // store-name tuple it was created with; pulling the store out once
+  // (via a cast) avoids re-narrowing on every blob write.
+  const blobs = (
+    tx as unknown as {
+      objectStore: (name: string) => {
+        put: (value: Blob, key: string) => Promise<unknown>;
+      };
+    }
+  ).objectStore(BLOBS_STORE);
   const serializedSamples = await Promise.all(
     (project.samples ?? []).map(async (s) => {
       if (s.blob) {
-        await tx.objectStore(BLOBS_STORE).put(s.blob, s.blobKey);
+        await blobs.put(s.blob, s.blobKey);
       }
       return {
         id: s.id,
@@ -68,9 +112,9 @@ export async function saveProject(project: Project): Promise<void> {
       };
     }),
   );
-
-  const serialized: SerializedProject = {
+  return {
     ...project,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     updatedAt: Date.now(),
     samples: serializedSamples,
     tracks: await Promise.all(
@@ -83,7 +127,7 @@ export async function saveProject(project: Project): Promise<void> {
               blobKey = `${project.id}:${t.id}:${c.id}`;
             }
             if (c.blob && blobKey) {
-              await tx.objectStore(BLOBS_STORE).put(c.blob, blobKey);
+              await blobs.put(c.blob, blobKey);
             }
             return {
               id: c.id,
@@ -98,9 +142,21 @@ export async function saveProject(project: Project): Promise<void> {
       })),
     ),
   };
+}
 
+export async function saveProject(project: Project): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE, META_STORE], "readwrite");
+  const serialized = await serializeAndFlushBlobs(project, tx);
   await tx.objectStore(PROJECTS_STORE).put(serialized, project.id);
-  await tx.objectStore(META_STORE).put({ lastProjectId: project.id }, "lastProject");
+  await tx
+    .objectStore(META_STORE)
+    .put({ lastProjectId: project.id }, META_LAST_PROJECT);
+  const savedInfo: LastSavedInfo = { projectId: project.id, ts: Date.now() };
+  await tx.objectStore(META_STORE).put(savedInfo, META_LAST_SAVED);
+  // Saving makes any pending draft obsolete — clear it so the recovery
+  // prompt won't re-offer stale data on next load.
+  await tx.objectStore(META_STORE).delete(META_DRAFT);
   await tx.done;
 }
 
@@ -108,24 +164,38 @@ export async function loadProject(id: string): Promise<Project | null> {
   const db = await getDb();
   const raw = (await db.get(PROJECTS_STORE, id)) as SerializedProject | undefined;
   if (!raw) return null;
+  return hydrateSerialized(raw, db);
+}
+
+async function hydrateSerialized(
+  raw: SerializedProject,
+  db: IDBPDatabase<Schema>,
+): Promise<Project> {
+  // Migrate first so the rest of the hydration sees a v{current}-shaped
+  // project; then re-attach blobs by key.
+  const migrated = migrateProject(raw).project;
   const tracks = await Promise.all(
-    raw.tracks.map(async (t) => ({
+    migrated.tracks.map(async (t) => ({
       ...t,
       audioClips: await Promise.all(
-        t.audioClips.map(async (c) => {
-          const blob = c.blobKey ? await db.get(BLOBS_STORE, c.blobKey) : undefined;
+        (t.audioClips ?? []).map(async (c) => {
+          const blob = c.blobKey
+            ? ((await db.get(BLOBS_STORE, c.blobKey)) as Blob | undefined)
+            : undefined;
           return { ...c, blob };
         }),
       ),
     })),
   );
   const samples = await Promise.all(
-    (raw.samples ?? []).map(async (s) => {
-      const blob = s.blobKey ? await db.get(BLOBS_STORE, s.blobKey) : undefined;
+    (migrated.samples ?? []).map(async (s) => {
+      const blob = s.blobKey
+        ? ((await db.get(BLOBS_STORE, s.blobKey)) as Blob | undefined)
+        : undefined;
       return { ...s, blob } as SampleLibraryItem;
     }),
   );
-  return { ...raw, tracks, samples } as Project;
+  return { ...migrated, tracks, samples };
 }
 
 export async function listProjects(): Promise<
@@ -158,7 +228,7 @@ export async function deleteProject(id: string): Promise<void> {
 
 export async function getLastProjectId(): Promise<string | null> {
   const db = await getDb();
-  const meta = (await db.get(META_STORE, "lastProject")) as
+  const meta = (await db.get(META_STORE, META_LAST_PROJECT)) as
     | { lastProjectId?: string }
     | undefined;
   return meta?.lastProjectId ?? null;
@@ -166,7 +236,67 @@ export async function getLastProjectId(): Promise<string | null> {
 
 export async function setLastProjectId(id: string): Promise<void> {
   const db = await getDb();
-  await db.put(META_STORE, { lastProjectId: id }, "lastProject");
+  await db.put(META_STORE, { lastProjectId: id }, META_LAST_PROJECT);
+}
+
+export async function getLastSavedInfo(): Promise<LastSavedInfo | null> {
+  const db = await getDb();
+  const info = (await db.get(META_STORE, META_LAST_SAVED)) as
+    | LastSavedInfo
+    | undefined;
+  return info ?? null;
+}
+
+// ---------- draft slot (autosaved unsaved work) ----------
+
+/**
+ * Write the current in-memory project to a dedicated "draft" slot in
+ * IDB. Separate from the durable project record so a crash before the
+ * user explicitly saves doesn't corrupt the last good save. The draft
+ * carries its own timestamp so recovery can decide whether it's newer
+ * than the last saved version.
+ */
+export async function saveDraft(project: Project): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction([BLOBS_STORE, META_STORE], "readwrite");
+  const serialized = await serializeAndFlushBlobs(project, tx);
+  const snapshot: DraftSnapshot = {
+    project: serialized,
+    ts: Date.now(),
+    projectId: project.id,
+  };
+  await tx.objectStore(META_STORE).put(snapshot, META_DRAFT);
+  await tx.done;
+}
+
+export async function loadDraft(): Promise<DraftSnapshot | null> {
+  const db = await getDb();
+  const snap = (await db.get(META_STORE, META_DRAFT)) as DraftSnapshot | undefined;
+  return snap ?? null;
+}
+
+export async function clearDraft(): Promise<void> {
+  const db = await getDb();
+  await db.delete(META_STORE, META_DRAFT);
+}
+
+/** Hydrate a draft snapshot's serialized project (re-attach blobs). */
+export async function hydrateDraft(snap: DraftSnapshot): Promise<Project> {
+  const db = await getDb();
+  return hydrateSerialized(snap.project, db);
+}
+
+/**
+ * Replace a missing sample blob (project-level sample library) with a
+ * user-supplied file. The new blob is written to IDB under the
+ * sample's existing blobKey so the next load resolves it cleanly.
+ */
+export async function relocateSampleBlob(
+  blobKey: string,
+  blob: Blob,
+): Promise<void> {
+  const db = await getDb();
+  await db.put(BLOBS_STORE, blob, blobKey);
 }
 
 /**
@@ -226,6 +356,7 @@ export async function duplicateProject(
     tracks,
     samples,
     updatedAt: Date.now(),
+    schemaVersion: CURRENT_SCHEMA_VERSION,
   };
   await saveProject(dup);
   return dup;
@@ -306,7 +437,12 @@ export async function projectToJson(project: Project): Promise<string> {
   const payload: ProjectJsonV1 = {
     format: "shotgun-ninjas-studio-project",
     version: 1,
-    project: { ...project, tracks, samples } as ProjectJsonV1["project"],
+    project: {
+      ...project,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      tracks,
+      samples,
+    } as ProjectJsonV1["project"],
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -349,11 +485,14 @@ export function parseProjectJson(text: string): Project {
     void _m;
     return { ...rest, blob, blobKey } as SampleLibraryItem;
   });
-  return {
+  // Funnel imported JSON through the migrator so old exports get the
+  // same defaults / schema stamp as IndexedDB loads.
+  const migrated = migrateProject({
     ...p,
     id: newId,
     tracks,
     samples,
     updatedAt: Date.now(),
-  } as Project;
+  }).project;
+  return migrated;
 }

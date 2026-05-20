@@ -21,12 +21,19 @@ import { ShortcutOverlay } from "./ShortcutOverlay";
 import { SettingsModal } from "./SettingsModal";
 import { AboutDialog } from "./AboutDialog";
 import { Tip } from "./Tip";
-import { useSettings, getSettings } from "../lib/settings";
+import {
+  useSettings,
+  getSettings,
+  subscribeSettings,
+  setAutosaveInterval,
+  AUTOSAVE_OPTIONS,
+  type AutosaveIntervalSec,
+} from "../lib/settings";
 import { PwaInstallControls } from "./PwaInstallControls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { useStore, getStore, resetStore, defaultProject } from "../store";
+import { useStore, getStore, resetStore, defaultProject, flushMixToEngine } from "../store";
 import { audio } from "../lib/audio/engine";
 import { DEMOS, loadDemo, remixDemo } from "../lib/demos";
 import {
@@ -46,6 +53,10 @@ import {
   duplicateProject,
   projectToJson,
   parseProjectJson,
+  getLastProjectId,
+  loadDraft,
+  hydrateDraft,
+  clearDraft,
 } from "../lib/storage/db";
 import {
   Dialog,
@@ -298,6 +309,101 @@ export function Header() {
     setOpenLoad(false);
     window.location.reload();
   };
+
+  /**
+   * Re-open whatever project the user had loaded before the last reload —
+   * useful after accidental refreshes or when bouncing back from a demo.
+   * Falls back to a toast when no last-session pointer exists yet.
+   */
+  const onRestoreLastSession = async () => {
+    try {
+      const lastId = await getLastProjectId();
+      if (!lastId) {
+        getStore().setStatus("No previous session to restore", "warn");
+        return;
+      }
+      const proj = await loadProject(lastId);
+      if (!proj) {
+        getStore().setStatus("Last session is no longer available", "warn");
+        return;
+      }
+      audio.stop();
+      resetStore(proj);
+      flushMixToEngine(proj);
+      setOpenLoad(false);
+      getStore().setStatus(`Restored "${proj.name}"`, "info");
+    } catch (err) {
+      getStore().setStatus(
+        `Restore failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  /**
+   * Pull the draft snapshot (autosaved on every dirty edit) and load
+   * it into the studio. The Recovery banner does the same thing on
+   * boot; this menu entry lets the user pull it later if they
+   * dismissed the banner.
+   */
+  const onRecoverUnsaved = async () => {
+    try {
+      const snap = await loadDraft();
+      if (!snap) {
+        getStore().setStatus("No unsaved draft to recover", "warn");
+        return;
+      }
+      const proj = await hydrateDraft(snap);
+      audio.stop();
+      resetStore(proj);
+      flushMixToEngine(proj);
+      setOpenLoad(false);
+      getStore().setStatus("Unsaved work restored", "info");
+    } catch (err) {
+      getStore().setStatus(
+        `Recovery failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  const onDiscardDraft = async () => {
+    try {
+      await clearDraft();
+      getStore().setStatus("Unsaved draft discarded", "info");
+      setDraftPresent(false);
+    } catch (err) {
+      getStore().setStatus(
+        `Discard failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  // Settings: autosave interval and live presence of a recoverable draft
+  // (so the menu can disable the Recover action when there's nothing to
+  // recover). Subscribed to settings so the Off/15/30/60 control stays
+  // in sync across header instances.
+  const [autosaveSec, setAutosaveSec] = useState<AutosaveIntervalSec>(
+    () => getSettings().autosaveIntervalSec,
+  );
+  useEffect(
+    () => subscribeSettings((s) => setAutosaveSec(s.autosaveIntervalSec)),
+    [],
+  );
+  const [draftPresent, setDraftPresent] = useState(false);
+  useEffect(() => {
+    if (!openLoad) return;
+    let cancelled = false;
+    loadDraft()
+      .then((d) => {
+        if (!cancelled) setDraftPresent(!!d);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [openLoad]);
 
   const onDelete = async (id: string) => {
     await deleteProject(id);
@@ -594,6 +700,65 @@ export function Header() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 max-h-[28rem] overflow-y-auto pr-1">
+            <section
+              data-testid="recovery-section"
+              className="border border-border rounded-md p-2 bg-background"
+            >
+              <div className="font-mono text-[10px] uppercase tracking-widest text-primary mb-2">
+                Recovery & autosave
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRestoreLastSession}
+                  data-testid="restore-last-session"
+                >
+                  Restore Last Session
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRecoverUnsaved}
+                  disabled={!draftPresent}
+                  data-testid="recover-unsaved"
+                >
+                  Recover Unsaved Project
+                </Button>
+                {draftPresent && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={onDiscardDraft}
+                    className="text-muted-foreground"
+                  >
+                    Discard draft
+                  </Button>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-xs font-mono">
+                <span className="text-muted-foreground">Autosave</span>
+                <select
+                  value={autosaveSec}
+                  onChange={(e) =>
+                    setAutosaveInterval(
+                      Number(e.target.value) as AutosaveIntervalSec,
+                    )
+                  }
+                  className="bg-background border border-border rounded px-1 py-0.5 font-mono text-xs"
+                  data-testid="autosave-interval"
+                >
+                  {AUTOSAVE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-muted-foreground/70 text-[10px]">
+                  Drafts are written ~1s after each change.
+                </span>
+              </label>
+            </section>
             <section data-testid="demo-list">
               <div className="font-mono text-[10px] uppercase tracking-widest text-primary mb-2">
                 Demos
