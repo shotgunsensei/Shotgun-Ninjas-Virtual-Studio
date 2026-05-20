@@ -54,6 +54,14 @@ import { RecoveryBanner } from "./components/RecoveryBanner";
 import { useMidiEvents } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
 import { useSettings } from "./lib/settings";
+import { useViewport } from "./hooks/use-mobile";
+import { MobileStudio } from "./components/MobileStudio";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
 
 let bootstrapped = false;
 let bootstrapPromise: Promise<void> | null = null;
@@ -624,6 +632,64 @@ function Studio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const viewport = useViewport();
+  const isTablet = viewport === "tablet";
+
+  // Tablet drawer state — at <1024px the side panels and mixer slide in
+  // over the timeline so the arrangement stays the focus. We never
+  // unmount the Header/TransportBar, so audio state and the user's
+  // collapse preferences keep working across resizes.
+  const [tabletDrawer, setTabletDrawer] = useState<
+    "left" | "right" | "mixer" | null
+  >(null);
+
+  // Render the simplified phone shell — Header still mounts (hidden) so
+  // its dialog state and event listeners (Save / Load / Export / etc.)
+  // remain available to the mobile menu.
+  if (viewport === "mobile") {
+    return (
+      <div className="h-full flex flex-col text-foreground overflow-hidden relative">
+        <BackgroundFx />
+        <div className="hidden" aria-hidden>
+          <Header />
+        </div>
+        <MobileStudio />
+        <HelpDialog />
+        <StatusToast />
+        <DropZone
+          onFiles={(files) => {
+            const f = files[0];
+            if (!f) return;
+            getStore().set({
+              pendingSample: {
+                blob: f,
+                defaultName: f.name.replace(/\.[^.]+$/, "") || "Imported",
+              },
+            });
+          }}
+        />
+        <PendingSampleHost />
+      </div>
+    );
+  }
+
+  const showInlineLeft = !isTablet && !leftCollapsed;
+  const showInlineRight = !isTablet && !rightCollapsed;
+  const showInlineMixer = !isTablet && !mixerCollapsed;
+
+  const onShowLeft = () => {
+    if (isTablet) setTabletDrawer("left");
+    else setLeftCollapsed(false);
+  };
+  const onShowRight = () => {
+    if (isTablet) setTabletDrawer("right");
+    else setRightCollapsed(false);
+  };
+  const onShowMixer = () => {
+    if (isTablet) setTabletDrawer("mixer");
+    else setMixerCollapsed(false);
+  };
+
   return (
     <div className="h-full flex flex-col text-foreground overflow-hidden relative">
       <BackgroundFx />
@@ -646,14 +712,8 @@ function Studio() {
       )}
       <TransportBar />
       <div className="flex flex-1 overflow-hidden">
-        {/* Left browser: track list shortcut. Collapsible. */}
-        {leftCollapsed ? (
-          <CollapsedRail
-            label="Tracks"
-            side="left"
-            onExpand={() => setLeftCollapsed(false)}
-          />
-        ) : (
+        {/* Left browser: inline on desktop, drawer trigger on tablet. */}
+        {showInlineLeft ? (
           <aside className="w-56 border-r border-border bg-graphite/70 backdrop-blur flex flex-col overflow-hidden">
             <PanelHeader
               title="Tracks"
@@ -662,6 +722,8 @@ function Studio() {
             />
             <LeftBrowser />
           </aside>
+        ) : (
+          <CollapsedRail label="Tracks" side="left" onExpand={onShowLeft} />
         )}
 
         {/* Center: arrangement timeline + collapsible mixer drawer */}
@@ -669,18 +731,7 @@ function Studio() {
           <div className="flex-1 overflow-hidden">
             <Timeline />
           </div>
-          {mixerCollapsed ? (
-            <button
-              type="button"
-              onClick={() => setMixerCollapsed(false)}
-              className="h-7 border-t border-border bg-graphite/80 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-accent/30"
-              aria-label="Show mixer"
-              title="Show mixer"
-            >
-              <ChevronUp className="w-3 h-3" />
-              Mixer
-            </button>
-          ) : (
+          {showInlineMixer ? (
             <div className="border-t border-border">
               <div className="h-6 flex items-center justify-between px-3 bg-graphite/80 border-b border-border">
                 <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -698,17 +749,22 @@ function Studio() {
               </div>
               <ChannelStripsBar />
             </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onShowMixer}
+              className="h-9 border-t border-border bg-graphite/80 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-accent/30"
+              aria-label="Show mixer"
+              title="Show mixer"
+            >
+              <ChevronUp className="w-3 h-3" />
+              Mixer
+            </button>
           )}
         </div>
 
         {/* Right inspector */}
-        {rightCollapsed ? (
-          <CollapsedRail
-            label="Inspector"
-            side="right"
-            onExpand={() => setRightCollapsed(false)}
-          />
-        ) : (
+        {showInlineRight ? (
           <aside className="w-80 border-l border-border bg-graphite/80 backdrop-blur flex flex-col overflow-hidden">
             <PanelHeader
               title={`Selected · ${selectedTrack?.name ?? "—"}`}
@@ -730,8 +786,76 @@ function Studio() {
               </Suspense>
             </div>
           </aside>
+        ) : (
+          <CollapsedRail label="Inspector" side="right" onExpand={onShowRight} />
         )}
       </div>
+
+      {/* Tablet drawers — overlay the timeline so the user gets the full
+          studio surface without permanently sacrificing arrangement width. */}
+      {isTablet && (
+        <>
+          <Drawer
+            open={tabletDrawer === "left"}
+            onOpenChange={(o) => !o && setTabletDrawer(null)}
+            direction="left"
+          >
+            <DrawerContent className="h-full w-[20rem] max-w-[85vw] left-0 right-auto rounded-none border-r bg-graphite flex flex-col">
+              <DrawerHeader className="text-left p-3 border-b border-border">
+                <DrawerTitle className="font-mono uppercase tracking-widest text-xs">
+                  Tracks
+                </DrawerTitle>
+              </DrawerHeader>
+              <div className="flex-1 overflow-hidden">
+                <LeftBrowser />
+              </div>
+            </DrawerContent>
+          </Drawer>
+          <Drawer
+            open={tabletDrawer === "right"}
+            onOpenChange={(o) => !o && setTabletDrawer(null)}
+            direction="right"
+          >
+            <DrawerContent className="h-full w-[24rem] max-w-[90vw] right-0 left-auto rounded-none border-l bg-graphite flex flex-col">
+              <DrawerHeader className="text-left p-3 border-b border-border">
+                <DrawerTitle className="font-mono uppercase tracking-widest text-xs">
+                  Selected · {selectedTrack?.name ?? "—"}
+                </DrawerTitle>
+              </DrawerHeader>
+              <div className="flex-1 overflow-y-auto touch-scroll p-3 space-y-3">
+                {selectedTrack && (
+                  <SelectedInstrument trackId={selectedTrack.id} />
+                )}
+                <Suspense
+                  fallback={
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                      Loading MIDI…
+                    </div>
+                  }
+                >
+                  <MidiPanel />
+                </Suspense>
+              </div>
+            </DrawerContent>
+          </Drawer>
+          <Drawer
+            open={tabletDrawer === "mixer"}
+            onOpenChange={(o) => !o && setTabletDrawer(null)}
+          >
+            <DrawerContent className="max-h-[80vh] bg-graphite">
+              <DrawerHeader className="text-left">
+                <DrawerTitle className="font-mono uppercase tracking-widest text-xs">
+                  Mixer
+                </DrawerTitle>
+              </DrawerHeader>
+              <div className="overflow-x-auto overflow-y-auto touch-scroll pb-4">
+                <ChannelStripsBar />
+              </div>
+            </DrawerContent>
+          </Drawer>
+        </>
+      )}
+
       <HelpDialog />
       <StatusToast />
       <PwaUpdateToast />

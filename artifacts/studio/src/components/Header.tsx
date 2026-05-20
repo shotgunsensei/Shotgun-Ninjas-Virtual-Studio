@@ -91,12 +91,31 @@ export function Header() {
   useEffect(() => {
     const onOpen = () => setShortcutsOpen(true);
     const onExport = () => setExportModalOpen(true);
+    const onSettings = () => setSettingsOpen(true);
+    const onAbout = () => setAboutOpen(true);
+    const onNewProj = () => { void onNew(); };
+    const onSaveProj = () => { void onSave(); };
+    const onSaveAsProj = () => { void onSaveAs(); };
+    const onOpenLoad = () => { void openLoadDialog(); };
     window.addEventListener("studio:open-shortcuts", onOpen);
     window.addEventListener("studio:open-export", onExport);
+    window.addEventListener("studio:open-settings", onSettings);
+    window.addEventListener("studio:open-about", onAbout);
+    window.addEventListener("studio:new-project", onNewProj);
+    window.addEventListener("studio:save", onSaveProj);
+    window.addEventListener("studio:save-as", onSaveAsProj);
+    window.addEventListener("studio:open-load", onOpenLoad);
     return () => {
       window.removeEventListener("studio:open-shortcuts", onOpen);
       window.removeEventListener("studio:open-export", onExport);
+      window.removeEventListener("studio:open-settings", onSettings);
+      window.removeEventListener("studio:open-about", onAbout);
+      window.removeEventListener("studio:new-project", onNewProj);
+      window.removeEventListener("studio:save", onSaveProj);
+      window.removeEventListener("studio:save-as", onSaveAsProj);
+      window.removeEventListener("studio:open-load", onOpenLoad);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleFullscreen = async () => {

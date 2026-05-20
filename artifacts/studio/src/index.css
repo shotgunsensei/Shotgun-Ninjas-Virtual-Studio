@@ -327,6 +327,42 @@ html.studio-reduce-motion .studio-clip-led {
   animation: studio-loading-fade 1.4s ease-in-out infinite;
 }
 
+/*
+ * Touch-first surfaces. Pads, step sequencer cells, on-screen keyboards,
+ * and the timeline should not double-tap-zoom, accidentally select text,
+ * or rubber-band the page while the user is performing.
+ */
+.touch-pad,
+[data-step],
+[data-pad-trigger] {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch-scroll {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.touch-scroll-x {
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Tighter min-height for touch-friendly hit targets (Apple/Google rec ≥44px). */
+@media (pointer: coarse) {
+  .touch-pad,
+  [data-pad-trigger] {
+    min-height: 44px;
+  }
+  [data-step] {
+    min-height: 28px;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

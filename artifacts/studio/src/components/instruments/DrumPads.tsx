@@ -364,8 +364,14 @@ export function DrumPads({ track }: { track: Track }) {
         {DRUM_PIECES.map((p) => (
           <div key={p} className="relative">
             <button
-              onMouseDown={() => hit(p)}
-              className="w-full aspect-square panel-inset rounded-md border-2 border-border hover:border-primary/60 active:bg-primary/30 active:glow-red transition-colors flex flex-col items-center justify-center"
+              onPointerDown={(e) => {
+                // Use pointer events so a single handler covers mouse +
+                // touch + stylus without firing twice on touch devices.
+                e.preventDefault();
+                hit(p);
+              }}
+              data-pad-trigger={p}
+              className="touch-pad w-full aspect-square panel-inset rounded-md border-2 border-border hover:border-primary/60 active:bg-primary/30 active:glow-red transition-colors flex flex-col items-center justify-center"
             >
               <span className="font-mono text-xs font-semibold">{LABELS[p]}</span>
               <span className="font-mono text-[9px] text-muted-foreground mt-1">
@@ -464,86 +470,27 @@ export function DrumPads({ track }: { track: Track }) {
                   {LABELS[piece]}
                 </button>
               </div>
-              {stepBeats.map((beat, i) => {
-                const ev = clip ? findStepNote(clip.notes, piece, beat) : undefined;
-                const on = !!ev;
-                const isBeat = Math.abs((i % stepsPerBeat)) < 0.001;
-                const isAtPlayhead = isPlaying && i === playheadStep;
-                const startsBeat =
-                  i > 0 && Math.abs(i % stepsPerBeat) < 0.001;
-                const accent = !!ev?.accent;
-                const prob = ev?.probability ?? 1;
-                const ret = ev?.retrigger ?? 1;
-                const flam = !!ev?.flam;
-                const tier = ev ? velocityTier(ev.velocity) : "normal";
-                const fillCls = !on
-                  ? isBeat
-                    ? "bg-graphite/80 border-border"
-                    : "bg-graphite/40 border-border/60 hover:bg-graphite/60"
-                  : accent
-                    ? "bg-primary border-primary glow-red ring-1 ring-primary/80"
-                    : tier === "hard"
-                      ? "bg-primary border-primary glow-red"
-                      : tier === "soft"
-                        ? "bg-primary/40 border-primary/60"
-                        : "bg-primary/70 border-primary";
-                return (
-                  <div key={i} className="relative">
-                    {startsBeat && (
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute -left-[2px] top-0 bottom-0 w-px bg-border/60"
-                      />
-                    )}
-                    <button
-                      onClick={(e) => onCellClick(e, piece, beat)}
-                      onContextMenu={(e) => onCellContext(e, piece, beat)}
-                      className={`block w-full h-4 rounded-[2px] border transition-colors relative ${fillCls} ${
-                        isAtPlayhead ? "ring-1 ring-neon" : ""
-                      }`}
-                      aria-label={`${LABELS[piece]} step ${i + 1}`}
-                      data-step
-                      data-piece={piece}
-                      data-step-index={i}
-                      data-on={on ? "1" : "0"}
-                      data-accent={accent ? "1" : "0"}
-                    >
-                      {on && prob < 1 && (
-                        <span
-                          aria-hidden
-                          data-marker="prob"
-                          className="absolute left-0 top-0 text-[7px] leading-none text-foreground/90 px-[1px]"
-                        >
-                          ?
-                        </span>
-                      )}
-                      {on && ret > 1 && (
-                        <span
-                          aria-hidden
-                          data-marker="retrigger"
-                          className="absolute right-0 top-0 text-[7px] leading-none text-foreground px-[1px] font-bold"
-                        >
-                          {ret > 4 ? "≣" : ret > 2 ? "≡" : "∥"}
-                        </span>
-                      )}
-                      {on && flam && (
-                        <span
-                          aria-hidden
-                          data-marker="flam"
-                          className="absolute left-0 bottom-0 w-1 h-1 rounded-full bg-foreground/80"
-                        />
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
+              {stepBeats.map((beat, i) => (
+                <StepCell
+                  key={i}
+                  index={i}
+                  piece={piece}
+                  beat={beat}
+                  clip={clip}
+                  stepsPerBeat={stepsPerBeat}
+                  isPlaying={isPlaying}
+                  playheadStep={playheadStep}
+                  onClick={onCellClick}
+                  onContext={onCellContext}
+                />
+              ))}
             </div>
           ))}
         </div>
 
         <p className="text-[9px] text-muted-foreground font-mono">
-          Click toggles · Shift-click cycles velocity · Right-click opens step
-          editor.
+          Click toggles · Shift-click cycles velocity · Right-click / long-press
+          opens step editor.
         </p>
       </div>
 
@@ -567,6 +514,140 @@ export function DrumPads({ track }: { track: Track }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Single step cell. Extracted so we can attach a touch long-press handler
+ * (which opens the step editor) without sprinkling timer refs through the
+ * parent component for every cell in the grid.
+ */
+function StepCell({
+  index: i,
+  piece,
+  beat,
+  clip,
+  stepsPerBeat,
+  isPlaying,
+  playheadStep,
+  onClick,
+  onContext,
+}: {
+  index: number;
+  piece: DrumPiece;
+  beat: number;
+  clip: NoteClip | undefined;
+  stepsPerBeat: number;
+  isPlaying: boolean;
+  playheadStep: number;
+  onClick: (e: React.MouseEvent, piece: DrumPiece, beat: number) => void;
+  onContext: (e: React.MouseEvent, piece: DrumPiece, beat: number) => void;
+}) {
+  const longPressRef = useRef<number | null>(null);
+  const longPressedRef = useRef(false);
+
+  const ev = clip ? findStepNote(clip.notes, piece, beat) : undefined;
+  const on = !!ev;
+  const isBeat = Math.abs(i % stepsPerBeat) < 0.001;
+  const isAtPlayhead = isPlaying && i === playheadStep;
+  const startsBeat = i > 0 && Math.abs(i % stepsPerBeat) < 0.001;
+  const accent = !!ev?.accent;
+  const prob = ev?.probability ?? 1;
+  const ret = ev?.retrigger ?? 1;
+  const flam = !!ev?.flam;
+  const tier = ev ? velocityTier(ev.velocity) : "normal";
+  const fillCls = !on
+    ? isBeat
+      ? "bg-graphite/80 border-border"
+      : "bg-graphite/40 border-border/60 hover:bg-graphite/60"
+    : accent
+      ? "bg-primary border-primary glow-red ring-1 ring-primary/80"
+      : tier === "hard"
+        ? "bg-primary border-primary glow-red"
+        : tier === "soft"
+          ? "bg-primary/40 border-primary/60"
+          : "bg-primary/70 border-primary";
+
+  const startLongPress = (e: React.PointerEvent) => {
+    if (e.pointerType !== "touch") return;
+    longPressedRef.current = false;
+    if (longPressRef.current !== null) window.clearTimeout(longPressRef.current);
+    longPressRef.current = window.setTimeout(() => {
+      longPressedRef.current = true;
+      onContext(
+        { preventDefault: () => undefined, stopPropagation: () => undefined } as unknown as React.MouseEvent,
+        piece,
+        beat,
+      );
+    }, 450);
+  };
+  const cancelLongPress = () => {
+    if (longPressRef.current !== null) {
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+
+  return (
+    <div className="relative">
+      {startsBeat && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -left-[2px] top-0 bottom-0 w-px bg-border/60"
+        />
+      )}
+      <button
+        onClick={(e) => {
+          if (longPressedRef.current) {
+            // Long-press already opened the step editor; suppress the
+            // synthesized click so we don't also toggle the step off.
+            longPressedRef.current = false;
+            return;
+          }
+          onClick(e, piece, beat);
+        }}
+        onContextMenu={(e) => onContext(e, piece, beat)}
+        onPointerDown={startLongPress}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onPointerCancel={cancelLongPress}
+        className={`block w-full h-4 rounded-[2px] border transition-colors relative ${fillCls} ${
+          isAtPlayhead ? "ring-1 ring-neon" : ""
+        }`}
+        aria-label={`${LABELS[piece]} step ${i + 1}`}
+        data-step
+        data-piece={piece}
+        data-step-index={i}
+        data-on={on ? "1" : "0"}
+        data-accent={accent ? "1" : "0"}
+      >
+        {on && prob < 1 && (
+          <span
+            aria-hidden
+            data-marker="prob"
+            className="absolute left-0 top-0 text-[7px] leading-none text-foreground/90 px-[1px]"
+          >
+            ?
+          </span>
+        )}
+        {on && ret > 1 && (
+          <span
+            aria-hidden
+            data-marker="retrigger"
+            className="absolute right-0 top-0 text-[7px] leading-none text-foreground px-[1px] font-bold"
+          >
+            {ret > 4 ? "≣" : ret > 2 ? "≡" : "∥"}
+          </span>
+        )}
+        {on && flam && (
+          <span
+            aria-hidden
+            data-marker="flam"
+            className="absolute left-0 bottom-0 w-1 h-1 rounded-full bg-foreground/80"
+          />
+        )}
+      </button>
     </div>
   );
 }
