@@ -491,7 +491,7 @@ export function safeFilename(name: string): string {
 }
 
 /**
- * Standard filename for studio bounces:
+ * Standard filename for studio audio bounces:
  *   shotgun-ninjas-studio_<project-name>_<bpm>_<YYYY-MM-DD>.<ext>
  */
 export function studioExportFilename(
@@ -499,12 +499,28 @@ export function studioExportFilename(
   bpm: number,
   extension: string,
 ): string {
+  const safe = safeFilename(projectName);
+  return `shotgun-ninjas-studio_${safe}_${Math.round(bpm)}_${dateStamp()}.${extension}`;
+}
+
+/**
+ * Filename convention for re-importable project files:
+ *   shotgun-ninjas-studio_<project-name>_YYYY-MM-DD.snproj.json
+ *
+ * The `.snproj.json` suffix keeps the file recognisable as JSON while
+ * also flagging it as a Shotgun Ninjas Studio project to the OS.
+ */
+export function studioProjectFilename(projectName: string): string {
+  const safe = safeFilename(projectName);
+  return `shotgun-ninjas-studio_${safe}_${dateStamp()}.snproj.json`;
+}
+
+function dateStamp(): string {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
-  const safe = safeFilename(projectName);
-  return `shotgun-ninjas-studio_${safe}_${Math.round(bpm)}_${y}-${m}-${day}.${extension}`;
+  return `${y}-${m}-${day}`;
 }
 
 /**

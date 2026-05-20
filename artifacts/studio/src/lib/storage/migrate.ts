@@ -1,4 +1,4 @@
-import type { Project, Track } from "../../types";
+import type { Project, ProjectMetadata, Track } from "../../types";
 import { DEFAULT_MASTER_BUS } from "../audio/master";
 
 /**
@@ -11,8 +11,10 @@ import { DEFAULT_MASTER_BUS } from "../audio/master";
  *   v1 — legacy projects from Phase 1/2 (no schemaVersion field).
  *   v2 — Phase 3: schemaVersion stamped, v2 mixer defaults guaranteed,
  *        sample library normalised, sections/midiMappings defaulted.
+ *   v3 — Phase 3 sharing polish: createdAt + optional `metadata`
+ *        (creator/description/tags/mood/genre) populated.
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 /** Known FX module ids — anything else is dropped (with a warning) by
  *  `checkProjectHealth`. Kept in sync with `FxModuleId`. */
@@ -36,6 +38,25 @@ const ZERO_SENDS = {
   tapeDelay: 0,
   darkSlapback: 0,
 } as const;
+
+function normalizeMetadata(raw: unknown): ProjectMetadata | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const m = raw as Record<string, unknown>;
+  const out: ProjectMetadata = {};
+  if (typeof m.creator === "string" && m.creator.trim()) out.creator = m.creator.trim();
+  if (typeof m.description === "string" && m.description.trim())
+    out.description = m.description.trim();
+  if (Array.isArray(m.tags)) {
+    const tags = m.tags
+      .filter((t): t is string => typeof t === "string")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    if (tags.length) out.tags = tags;
+  }
+  if (typeof m.mood === "string" && m.mood.trim()) out.mood = m.mood.trim();
+  if (typeof m.genre === "string" && m.genre.trim()) out.genre = m.genre.trim();
+  return Object.keys(out).length ? out : undefined;
+}
 
 function migrateTrack(t: unknown): Track {
   const raw = (t ?? {}) as Partial<Track> & Record<string, unknown>;
@@ -110,6 +131,13 @@ export function migrateProject(input: unknown): MigrationResult {
     masterBus: raw.masterBus ?? { ...DEFAULT_MASTER_BUS },
     mixPresetId: raw.mixPresetId,
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    createdAt:
+      typeof raw.createdAt === "number"
+        ? raw.createdAt
+        : typeof raw.updatedAt === "number"
+          ? raw.updatedAt
+          : Date.now(),
+    metadata: normalizeMetadata(raw.metadata),
   };
 
   return {

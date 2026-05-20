@@ -306,6 +306,25 @@ export interface SampleLibraryItem {
   blob?: Blob;
 }
 
+/**
+ * Optional human-readable project metadata. Stamped on export, editable
+ * via the Project Info dialog. None of these fields affect playback —
+ * they're purely descriptive so shared `.snproj.json` files carry their
+ * own context.
+ */
+export interface ProjectMetadata {
+  /** Free-form creator / artist name. */
+  creator?: string;
+  /** Short description shown in the import summary. */
+  description?: string;
+  /** Free-form tag list. Trimmed, lowercased on save. */
+  tags?: string[];
+  /** Mood label (e.g. "chill", "aggressive"). */
+  mood?: string;
+  /** Genre label (e.g. "trap", "lofi"). */
+  genre?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -337,4 +356,10 @@ export interface Project {
   /** Project schema version. Stamped by `migrateProject` on every load
    *  so older files can be auto-upgraded. Missing = legacy v1. */
   schemaVersion?: number;
+  /** Wall-clock time the project was first created. Defaulted to
+   *  `updatedAt` for legacy projects on migration. */
+  createdAt?: number;
+  /** Human-readable metadata (creator, description, tags, mood, genre).
+   *  All fields are optional and editable from the Project Info dialog. */
+  metadata?: ProjectMetadata;
 }

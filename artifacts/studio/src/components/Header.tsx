@@ -14,7 +14,21 @@ import {
   Keyboard as KeyboardIcon,
   Settings as SettingsIcon,
   Info,
+  Share2,
+  Tag,
 } from "lucide-react";
+import { ProjectInfoDialog } from "./ProjectInfoDialog";
+import { ImportSummaryDialog } from "./ImportSummaryDialog";
+import {
+  canUseFileSystemAccess,
+  canWebShare,
+  canWebShareFiles,
+  openProjectWithPicker,
+  saveBlobWithPicker,
+  shareAppLink,
+  shareFile,
+} from "../lib/share";
+import type { ProjectImportSummary } from "../lib/storage/db";
 import { Logo } from "./Logo";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { ShortcutOverlay } from "./ShortcutOverlay";
@@ -40,6 +54,7 @@ import {
   renderProject,
   downloadBlob,
   studioExportFilename,
+  studioProjectFilename,
   detectClipping,
   type ExportFormat,
   type RenderProgress,
@@ -53,10 +68,13 @@ import {
   duplicateProject,
   projectToJson,
   parseProjectJson,
+  projectHasUnembeddableSamples,
+  summarizeProjectJson,
   getLastProjectId,
   loadDraft,
   hydrateDraft,
   clearDraft,
+  type ProjectExportMode,
 } from "../lib/storage/db";
 import {
   Dialog,
@@ -161,8 +179,19 @@ export function Header() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [loopOnly, setLoopOnly] = useState(false);
+  const [projectInfoOpen, setProjectInfoOpen] = useState(false);
+  const [importSummary, setImportSummary] =
+    useState<ProjectImportSummary | null>(null);
+  const [lastWav, setLastWav] = useState<{ blob: Blob; filename: string } | null>(
+    null,
+  );
   const cancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const jsonImportRef = useRef<HTMLInputElement>(null);
+
+  const fsSaveSupported = canUseFileSystemAccess("save");
+  const fsOpenSupported = canUseFileSystemAccess("open");
+  const webShareSupported = canWebShare();
+  const webShareFilesSupported = canWebShareFiles();
 
   const startExport = async (format: ExportFormat) => {
     if (exporting) return;
@@ -203,11 +232,30 @@ export function Header() {
       } catch {
         // ignore peak detection failures
       }
-      downloadBlob(
-        result.blob,
-        studioExportFilename(proj.name, proj.bpm, result.extension),
-      );
-      getStore().setStatus(`Exported ${format.toUpperCase()}`, "info");
+      const filename = studioExportFilename(proj.name, proj.bpm, result.extension);
+      let saved = false;
+      if (fsSaveSupported && format === "wav") {
+        try {
+          const chosen = await saveBlobWithPicker(result.blob, filename, "wav");
+          if (chosen) {
+            saved = true;
+            getStore().setStatus(`Saved ${chosen}`, "info");
+          } else {
+            // user cancelled the picker — fall back to a normal download
+            // so the export isn't lost.
+          }
+        } catch (err) {
+          getStore().setStatus(
+            `Save dialog failed, downloading instead: ${(err as Error).message}`,
+            "warn",
+          );
+        }
+      }
+      if (!saved) {
+        downloadBlob(result.blob, filename);
+        getStore().setStatus(`Exported ${format.toUpperCase()}`, "info");
+      }
+      if (format === "wav") setLastWav({ blob: result.blob, filename });
     } catch (err) {
       const msg = (err as Error).message || "Export failed";
       if (msg === "Export cancelled") {
@@ -221,13 +269,36 @@ export function Header() {
     }
   };
 
-  const onJsonExport = async () => {
+  const onJsonExport = async (mode: ProjectExportMode) => {
     try {
       const proj = getStore().state.project;
-      const text = await projectToJson(proj);
+      const text = await projectToJson(proj, mode);
       const blob = new Blob([text], { type: "application/json" });
-      downloadBlob(blob, studioExportFilename(proj.name, proj.bpm, "json"));
-      getStore().setStatus("Project JSON exported", "info");
+      const filename = studioProjectFilename(proj.name);
+      let saved = false;
+      if (fsSaveSupported) {
+        try {
+          const chosen = await saveBlobWithPicker(blob, filename, "project");
+          if (chosen) {
+            saved = true;
+            getStore().setStatus(`Saved ${chosen}`, "info");
+          }
+        } catch (err) {
+          getStore().setStatus(
+            `Save dialog failed, downloading instead: ${(err as Error).message}`,
+            "warn",
+          );
+        }
+      }
+      if (!saved) {
+        downloadBlob(blob, filename);
+        getStore().setStatus(
+          mode === "project-with-samples"
+            ? "Project + samples exported"
+            : "Project exported",
+          "info",
+        );
+      }
     } catch (err) {
       getStore().setStatus(
         `JSON export failed: ${(err as Error).message}`,
@@ -239,14 +310,95 @@ export function Header() {
   const onJsonImport = async (file: File) => {
     try {
       const text = await file.text();
-      const proj = parseProjectJson(text);
-      await saveProject(proj);
-      await setLastProjectId(proj.id);
-      resetStore(proj);
-      window.location.reload();
+      const summary = summarizeProjectJson(text);
+      setImportSummary(summary);
     } catch (err) {
       getStore().setStatus(
         `JSON import failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importSummary) return;
+    const proj = importSummary.project;
+    try {
+      audio.stop();
+      await saveProject(proj);
+      await setLastProjectId(proj.id);
+      resetStore(proj);
+      setImportSummary(null);
+      window.location.reload();
+    } catch (err) {
+      getStore().setStatus(
+        `Import failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  const onOpenFromDisk = async () => {
+    try {
+      const file = await openProjectWithPicker();
+      if (!file) return;
+      await onJsonImport(file);
+    } catch (err) {
+      getStore().setStatus(
+        `Open failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
+
+  const onShareLink = async () => {
+    const result = await shareAppLink();
+    if (result === "shared") {
+      getStore().setStatus("Thanks for sharing the studio.", "info");
+    } else if (result === "copied") {
+      getStore().setStatus("Studio link copied to clipboard.", "info");
+    } else if (result === "unsupported") {
+      getStore().setStatus("Sharing isn't available in this browser.", "warn");
+    }
+  };
+
+  const onShareLastWav = async () => {
+    if (!lastWav) return;
+    const result = await shareFile(lastWav.blob, lastWav.filename, {
+      text: "Made this in Shotgun Ninjas Virtual Studio, a free browser DAW.",
+    });
+    if (result === "shared") {
+      getStore().setStatus("Shared WAV", "info");
+    } else if (result === "unsupported") {
+      downloadBlob(lastWav.blob, lastWav.filename);
+      getStore().setStatus(
+        "File sharing isn't available — downloaded instead.",
+        "warn",
+      );
+    }
+  };
+
+  const onShareProjectJson = async (mode: ProjectExportMode) => {
+    try {
+      const proj = getStore().state.project;
+      const text = await projectToJson(proj, mode);
+      const blob = new Blob([text], { type: "application/json" });
+      const filename = studioProjectFilename(proj.name);
+      const result = await shareFile(blob, filename, {
+        text: "Project file made in Shotgun Ninjas Virtual Studio.",
+      });
+      if (result === "shared") {
+        getStore().setStatus("Shared project", "info");
+      } else if (result === "unsupported") {
+        downloadBlob(blob, filename);
+        getStore().setStatus(
+          "File sharing isn't available — downloaded instead.",
+          "warn",
+        );
+      }
+    } catch (err) {
+      getStore().setStatus(
+        `Share failed: ${(err as Error).message}`,
         "error",
       );
     }
@@ -518,6 +670,18 @@ export function Header() {
             <SettingsIcon className="w-3.5 h-3.5" />
           </Button>
         </Tip>
+        <Tip label="Project info — title, creator, tags">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setProjectInfoOpen(true)}
+            className="font-mono text-xs"
+            aria-label="Project info"
+            data-testid="open-project-info"
+          >
+            <Tag className="w-3.5 h-3.5" />
+          </Button>
+        </Tip>
         <Tip label="About, changelog & feedback">
           <Button
             variant="outline"
@@ -597,68 +761,131 @@ export function Header() {
                 </label>
               )}
 
-              <button
-                type="button"
-                onClick={() => startExport("wav")}
-                className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
-              >
-                <div className="font-mono text-sm">Export WAV</div>
-                <div className="text-xs text-muted-foreground">
-                  Uncompressed PCM, 44.1 kHz, 16-bit stereo.
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => startExport("mp3")}
-                className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
-              >
-                <div className="font-mono text-sm">Export MP3</div>
-                <div className="text-xs text-muted-foreground">
-                  192 kbps stereo. Smaller, easy to share.
-                </div>
-              </button>
-              <div className="grid grid-cols-2 gap-2">
+              <ExportSamplesWarning />
+
+              <div className="grid grid-cols-1 gap-2">
                 <button
                   type="button"
+                  data-testid="export-project-only"
                   onClick={() => {
-                    onJsonExport();
+                    onJsonExport("project-only");
                     setExportModalOpen(false);
                   }}
                   className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                 >
                   <div className="font-mono text-sm flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5" /> Project JSON
+                    <FileText className="w-3.5 h-3.5" /> Export project only
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Re-importable project file.
+                    Lightweight .snproj.json — no embedded audio.
                   </div>
                 </button>
                 <button
                   type="button"
+                  data-testid="export-project-with-samples"
                   onClick={() => {
+                    onJsonExport("project-with-samples");
                     setExportModalOpen(false);
-                    jsonImportRef.current?.click();
                   }}
                   className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                 >
                   <div className="font-mono text-sm flex items-center gap-1">
-                    <Upload className="w-3.5 h-3.5" /> Import JSON
+                    <FileText className="w-3.5 h-3.5" /> Export project + samples
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Restore a project from JSON.
+                    Self-contained .snproj.json with embedded sample audio.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  data-testid="export-wav"
+                  onClick={() => startExport("wav")}
+                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm">Export audio (WAV)</div>
+                  <div className="text-xs text-muted-foreground">
+                    Uncompressed PCM, 44.1 kHz, 16-bit stereo.
+                    {fsSaveSupported && " Pick a save location."}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startExport("mp3")}
+                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm">Export MP3</div>
+                  <div className="text-xs text-muted-foreground">
+                    192 kbps stereo. Smaller, easy to share.
                   </div>
                 </button>
               </div>
-              <button
-                type="button"
-                disabled
-                className="w-full text-left border border-border rounded-md p-3 bg-background/40 opacity-60 cursor-not-allowed"
-              >
-                <div className="font-mono text-sm">Export Stems</div>
-                <div className="text-xs text-muted-foreground">
-                  Coming soon — per-track WAV exports.
-                </div>
-              </button>
+
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border">
+                <button
+                  type="button"
+                  data-testid="import-from-disk"
+                  onClick={() => {
+                    setExportModalOpen(false);
+                    if (fsOpenSupported) {
+                      onOpenFromDisk();
+                    } else {
+                      jsonImportRef.current?.click();
+                    }
+                  }}
+                  className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1">
+                    <Upload className="w-3.5 h-3.5" /> Open project file
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Restore a .snproj.json from disk.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  data-testid="share-project"
+                  onClick={() => {
+                    if (webShareFilesSupported) {
+                      onShareProjectJson("project-with-samples");
+                    } else {
+                      onShareLink();
+                    }
+                    setExportModalOpen(false);
+                  }}
+                  className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1">
+                    <Share2 className="w-3.5 h-3.5" />
+                    {webShareFilesSupported ? "Share project" : "Share studio link"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {webShareFilesSupported
+                      ? "Send the .snproj.json via your system share sheet."
+                      : "Send a link to the studio via your share sheet or clipboard."}
+                  </div>
+                </button>
+              </div>
+
+              {lastWav && webShareFilesSupported && (
+                <button
+                  type="button"
+                  data-testid="share-last-wav"
+                  onClick={() => {
+                    onShareLastWav();
+                    setExportModalOpen(false);
+                  }}
+                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1">
+                    <Share2 className="w-3.5 h-3.5" /> Share last WAV
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {lastWav.filename}
+                  </div>
+                </button>
+              )}
+
+              <CopyableShareBlurb />
             </div>
           )}
 
@@ -891,7 +1118,74 @@ export function Header() {
       <ShortcutOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <ProjectInfoDialog
+        open={projectInfoOpen}
+        onOpenChange={setProjectInfoOpen}
+      />
+      <ImportSummaryDialog
+        summary={importSummary}
+        onCancel={() => setImportSummary(null)}
+        onConfirm={confirmImport}
+      />
     </header>
+  );
+}
+
+/**
+ * Surfaces a warning in the Export dialog when the project references
+ * samples that have lost their underlying blob — these won't make it
+ * into the exported file and will need to be relinked on import.
+ */
+function ExportSamplesWarning() {
+  const project = useStore((s) => s.project);
+  const { hasMissing, missingNames } = projectHasUnembeddableSamples(project);
+  if (!hasMissing) return null;
+  return (
+    <div className="flex items-start gap-2 border border-amber-500/40 bg-amber-500/10 rounded-md p-2 text-xs font-mono">
+      <AlertTriangle className="w-4 h-4 text-amber-500 flex-none mt-0.5" />
+      <div>
+        <div className="uppercase tracking-wider text-amber-200">
+          {missingNames.length} sample{missingNames.length === 1 ? "" : "s"} can't be embedded
+        </div>
+        <div className="text-muted-foreground mt-1 break-words">
+          {missingNames.slice(0, 4).join(", ")}
+          {missingNames.length > 4 && "…"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Small copy-to-clipboard share blurb shown at the bottom of the
+ * Export dialog. Intentionally no login / paywall copy.
+ */
+function CopyableShareBlurb() {
+  const text = "Made this in Shotgun Ninjas Virtual Studio, a free browser DAW.";
+  const onCopy = async () => {
+    try {
+      const url =
+        typeof window !== "undefined"
+          ? window.location.origin + window.location.pathname
+          : "";
+      await navigator.clipboard.writeText(`${text} ${url}`.trim());
+      getStore().setStatus("Share text copied to clipboard.", "info");
+    } catch {
+      getStore().setStatus("Clipboard unavailable.", "warn");
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      data-testid="copy-share-blurb"
+      className="w-full text-left border border-dashed border-border rounded-md p-2 bg-background hover:border-primary/60 transition-colors"
+    >
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+        <Copy className="w-3 h-3" /> Copy share text
+      </div>
+      <div className="text-xs text-foreground/80 mt-1 italic">"{text}"</div>
+    </button>
   );
 }
 

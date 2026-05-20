@@ -1,6 +1,7 @@
 import { openDB, type IDBPDatabase } from "idb";
 import type { Project, SampleLibraryItem } from "../../types";
 import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
+import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
 
 const DB_NAME = "shotgun-ninjas-studio";
 /** v1 — initial projects/blobs/meta stores.
@@ -364,9 +365,29 @@ export async function duplicateProject(
 
 // ---------- JSON export / import ----------
 
+/**
+ * Brand + provenance block stamped on every export so a `.snproj.json`
+ * file always tells you which app produced it.
+ */
+export interface ProjectJsonBrand {
+  createdWith: string;
+  appName: string;
+  appUrl: string;
+  appVersion: string;
+  /** Project schema version (mirrors `project.schemaVersion`). */
+  schemaVersion: number;
+  exportedAt: number;
+  /** "project-only" omits embedded blobs; "project-with-samples"
+   *  embeds base64 sample blobs alongside the references. */
+  exportMode: "project-only" | "project-with-samples";
+}
+
 interface ProjectJsonV1 {
   format: "shotgun-ninjas-studio-project";
-  version: 1;
+  /** v1 = legacy (no brand block).
+   *  v2 = adds `brand`, optional embedded blobs gated on exportMode. */
+  version: 1 | 2;
+  brand?: ProjectJsonBrand;
   project: Omit<Project, "tracks" | "samples"> & {
     tracks: Array<
       Omit<Project["tracks"][number], "audioClips"> & {
@@ -384,6 +405,25 @@ interface ProjectJsonV1 {
     >;
     samples?: Array<Omit<SampleLibraryItem, "blob"> & { mimeType?: string; base64?: string }>;
   };
+}
+
+export type ProjectExportMode = "project-only" | "project-with-samples";
+
+/** Summary of an incoming JSON file used to populate the Import Summary
+ *  modal so the user can review before replacing the active project. */
+export interface ProjectImportSummary {
+  project: Project;
+  brand?: ProjectJsonBrand;
+  trackCount: number;
+  noteClipCount: number;
+  audioClipCount: number;
+  sampleCount: number;
+  /** Samples referenced by the project that have no embedded blob — the
+   *  user will need to re-import these manually after the project
+   *  loads. */
+  missingSampleNames: string[];
+  /** True when `brand.appVersion` is older than the running app. */
+  isOlderAppVersion: boolean;
 }
 
 async function blobToBase64(blob: Blob): Promise<{ base64: string; mimeType: string }> {
@@ -406,13 +446,30 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
-export async function projectToJson(project: Project): Promise<string> {
+/**
+ * Serialize a project to a `.snproj.json` payload.
+ *
+ *   "project-with-samples" — embeds every audio-clip and sample-library
+ *      blob as base64 so the file is fully portable.
+ *   "project-only" — keeps the project structure but strips embedded
+ *      audio so the file stays small (collaborators will need to relink
+ *      missing samples on the other side).
+ */
+export async function projectToJson(
+  project: Project,
+  mode: ProjectExportMode = "project-with-samples",
+): Promise<string> {
+  const embed = mode === "project-with-samples";
   const tracks = await Promise.all(
     project.tracks.map(async (t) => ({
       ...t,
       audioClips: await Promise.all(
         t.audioClips.map(async (c) => {
-          if (!c.blob) return { ...c, blob: undefined };
+          if (!c.blob || !embed) {
+            const { blob: _b, ...rest } = c;
+            void _b;
+            return rest;
+          }
           const { base64, mimeType } = await blobToBase64(c.blob);
           const { blob: _ignored, ...rest } = c;
           void _ignored;
@@ -423,7 +480,7 @@ export async function projectToJson(project: Project): Promise<string> {
   );
   const samples = await Promise.all(
     (project.samples ?? []).map(async (s) => {
-      if (!s.blob) {
+      if (!s.blob || !embed) {
         const { blob: _b, ...rest } = s;
         void _b;
         return rest;
@@ -434,12 +491,25 @@ export async function projectToJson(project: Project): Promise<string> {
       return { ...rest, base64, mimeType };
     }),
   );
+  const now = Date.now();
+  const brand: ProjectJsonBrand = {
+    createdWith: CREATED_WITH,
+    appName: APP_NAME,
+    appUrl: APP_URL,
+    appVersion: APP_VERSION,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    exportedAt: now,
+    exportMode: mode,
+  };
   const payload: ProjectJsonV1 = {
     format: "shotgun-ninjas-studio-project",
-    version: 1,
+    version: 2,
+    brand,
     project: {
       ...project,
       schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: project.createdAt ?? project.updatedAt ?? now,
+      updatedAt: now,
       tracks,
       samples,
     } as ProjectJsonV1["project"],
@@ -447,17 +517,95 @@ export async function projectToJson(project: Project): Promise<string> {
   return JSON.stringify(payload, null, 2);
 }
 
-export function parseProjectJson(text: string): Project {
-  const data = JSON.parse(text) as ProjectJsonV1;
+/**
+ * True when any sample blob would be dropped if the project was
+ * exported in "project-only" mode but the user has embedded samples in
+ * mind. Used by the Export dialog to surface a warning.
+ */
+export function projectHasUnembeddableSamples(project: Project): {
+  hasMissing: boolean;
+  missingNames: string[];
+} {
+  const missing: string[] = [];
+  for (const s of project.samples ?? []) {
+    if (!s.blob) missing.push(s.name);
+  }
+  for (const t of project.tracks) {
+    for (const c of t.audioClips) {
+      if (!c.blob && !c.blobKey) missing.push(`${t.name} clip`);
+    }
+  }
+  return { hasMissing: missing.length > 0, missingNames: missing };
+}
+
+function parseEnvelope(text: string): ProjectJsonV1 {
+  let data: ProjectJsonV1;
+  try {
+    data = JSON.parse(text) as ProjectJsonV1;
+  } catch (err) {
+    throw new Error(`File is not valid JSON: ${(err as Error).message}`);
+  }
   if (
     !data ||
     typeof data !== "object" ||
     data.format !== "shotgun-ninjas-studio-project" ||
-    data.version !== 1 ||
-    !data.project
+    (data.version !== 1 && data.version !== 2) ||
+    !data.project ||
+    !Array.isArray((data.project as { tracks?: unknown[] }).tracks)
   ) {
     throw new Error("Not a valid Shotgun Ninjas Studio project file");
   }
+  return data;
+}
+
+/**
+ * Parse a `.snproj.json` payload and build an import summary without
+ * touching the active store. Surface this to the user via the Import
+ * Summary modal so they can confirm before replacing their project.
+ */
+export function summarizeProjectJson(text: string): ProjectImportSummary {
+  const data = parseEnvelope(text);
+  const project = parseProjectJson(text);
+  let noteClipCount = 0;
+  let audioClipCount = 0;
+  const missingSampleNames: string[] = [];
+  for (const t of project.tracks) {
+    noteClipCount += t.noteClips.length;
+    audioClipCount += t.audioClips.length;
+    for (const c of t.audioClips) {
+      if (!c.blob) missingSampleNames.push(`${t.name} clip`);
+    }
+  }
+  for (const s of project.samples ?? []) {
+    if (!s.blob) missingSampleNames.push(s.name);
+  }
+  const isOlderAppVersion =
+    !!data.brand && compareVersions(data.brand.appVersion, APP_VERSION) < 0;
+  return {
+    project,
+    brand: data.brand,
+    trackCount: project.tracks.length,
+    noteClipCount,
+    audioClipCount,
+    sampleCount: (project.samples ?? []).length,
+    missingSampleNames,
+    isOlderAppVersion,
+  };
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split(/[.-]/).map((n) => Number.parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+export function parseProjectJson(text: string): Project {
+  const data = parseEnvelope(text);
   const newId = `${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
