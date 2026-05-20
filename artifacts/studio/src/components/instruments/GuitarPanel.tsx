@@ -3,6 +3,7 @@ import { audio } from "../../lib/audio/engine";
 import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents, midiNoteToName } from "../../lib/midi/midi";
 import { useStore } from "../../store";
+import { getSettings } from "../../lib/settings";
 import type { Track } from "../../types";
 
 type ChordDef = {
@@ -75,6 +76,7 @@ export function GuitarPanel({ track }: { track: Track }) {
     (e) => {
       const owned = project.midiMappings.some((m) => m.signature === e.signature);
       if (owned) return;
+      if (!getSettings().midiPassthrough) return;
       if (e.type === "noteon") {
         if (e.data1 >= 36 && e.data1 <= 43) {
           const c = CHORDS[e.data1 - 36];

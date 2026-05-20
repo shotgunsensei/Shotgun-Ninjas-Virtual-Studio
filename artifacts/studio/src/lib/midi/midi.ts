@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getSettings, setSettings } from "../settings";
 
 export type MidiStatus =
   | "unsupported"
@@ -20,8 +21,18 @@ export interface MidiEvent {
 
 type Listener = (e: MidiEvent) => void;
 
+function detectInitialStatus(): MidiStatus {
+  // Pure feature detection — does NOT request permission and does NOT
+  // touch the Web MIDI API beyond a property check. This lets the
+  // Settings UI render the "not supported" fallback proactively, before
+  // the user clicks Enable MIDI.
+  if (typeof navigator === "undefined") return "unsupported";
+  if (!("requestMIDIAccess" in navigator)) return "unsupported";
+  return "no-access-yet";
+}
+
 class MidiBus {
-  status: MidiStatus = "no-access-yet";
+  status: MidiStatus = detectInitialStatus();
   error?: string;
   inputs: { id: string; name: string }[] = [];
   selectedId: string | null = null;
@@ -58,6 +69,13 @@ class MidiBus {
       this.status = "ready";
       this.refreshInputs();
       access.onstatechange = () => this.refreshInputs();
+      // Restore previously selected input from settings so users don't
+      // have to re-pick their controller every session.
+      const savedId = getSettings().midiInputId;
+      if (savedId && this.inputs.find((i) => i.id === savedId)) {
+        this.selectedId = savedId;
+        this.bind(savedId);
+      }
       this.notify();
     } catch (err) {
       this.status = "denied";
@@ -84,6 +102,13 @@ class MidiBus {
   selectInput(id: string | null) {
     this.selectedId = id;
     this.bind(id);
+    // Persist so the same controller comes back next time the user
+    // clicks Enable MIDI.
+    try {
+      setSettings({ midiInputId: id });
+    } catch {
+      /* settings unavailable */
+    }
     this.notify();
   }
 

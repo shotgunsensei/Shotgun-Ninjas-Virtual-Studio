@@ -3,6 +3,7 @@ import { audio } from "../../lib/audio/engine";
 import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents, midiNoteToName } from "../../lib/midi/midi";
 import { useStore } from "../../store";
+import { getSettings } from "../../lib/settings";
 import type { Track } from "../../types";
 
 /**
@@ -107,6 +108,11 @@ export function Keyboard({ track }: { track: Track }) {
       // if any user mapping owns this signature, defer to the central router
       const owned = project.midiMappings.some((m) => m.signature === e.signature);
       if (owned) return;
+      // MIDI passthrough toggle gates the implicit "play the selected
+      // instrument" behavior. When off, only explicit learned mappings
+      // respond — useful for users who want their controller bound only
+      // to specific knobs/pads.
+      if (!getSettings().midiPassthrough) return;
       if (e.type === "noteon") {
         const note = midiNoteToName(e.data1);
         audio.startNote(track.id, note, e.data2 / 127, "midi");

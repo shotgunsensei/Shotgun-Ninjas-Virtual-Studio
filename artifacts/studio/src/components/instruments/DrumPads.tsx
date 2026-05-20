@@ -3,6 +3,7 @@ import { audio, type DrumPiece, DRUM_PIECES } from "../../lib/audio/engine";
 import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents } from "../../lib/midi/midi";
 import { useStore, getStore, makeId } from "../../store";
+import { getSettings } from "../../lib/settings";
 import { MidiLearnButton } from "../MidiLearnButton";
 import type {
   Track,
@@ -247,6 +248,7 @@ export function DrumPads({ track }: { track: Track }) {
   useMidiEvents(
     (e) => {
       if (e.type !== "noteon") return;
+      if (!getSettings().midiPassthrough) return;
       const idx = e.data1 - 36;
       if (idx >= 0 && idx < DRUM_PIECES.length) {
         const customMapped = project.midiMappings.find(

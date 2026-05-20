@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +14,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, KeyRound } from "lucide-react";
+import { RotateCcw, KeyRound, Trash2 } from "lucide-react";
 import {
   DEFAULT_SETTINGS,
   resetSettings,
@@ -24,6 +23,8 @@ import {
 } from "../lib/settings";
 import { THEMES } from "../lib/themes";
 import { SHORTCUTS } from "./ShortcutOverlay";
+import { useMidi } from "../lib/midi/midi";
+import { getStore, useStore } from "../store";
 
 /**
  * Project-wide settings modal. Backed by `lib/settings.ts` and split
@@ -273,31 +274,13 @@ export function SettingsModal({
           </TabsContent>
 
           <TabsContent value="midi" className="space-y-3 pt-3">
-            <ToggleRow
-              label="Enable MIDI"
-              hint="Request browser MIDI access for hardware controllers."
-              value={s.midiEnabled}
-              onChange={(v) => setSettings({ midiEnabled: v })}
-            />
-            <MidiInputRow />
+            <MidiSection />
             <ToggleRow
               label="MIDI passthrough"
-              hint="Forward incoming notes to the selected track's instrument."
+              hint="Forward incoming notes to the selected track's instrument. When off, only learned mappings respond."
               value={s.midiPassthrough}
               onChange={(v) => setSettings({ midiPassthrough: v })}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSettings({ midiInputId: null })}
-              className="font-mono text-xs"
-            >
-              Reset MIDI mappings
-            </Button>
-            <p className="text-[10px] text-muted-foreground">
-              Mappings live in the MIDI panel today and persist with your
-              project. Global MIDI Learn arrives in a separate update.
-            </p>
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -436,67 +419,178 @@ function Row({
   );
 }
 
-function MidiInputRow() {
-  const selected = useSettings((s) => s.midiInputId);
-  const enabled = useSettings((s) => s.midiEnabled);
-  const [inputs, setInputs] = useState<Array<{ id: string; name: string }>>(
-    [],
-  );
-  useEffect(() => {
-    if (!enabled) {
-      setInputs([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const nav = navigator as unknown as {
-        requestMIDIAccess?: () => Promise<{
-          inputs: Map<string, { id: string; name?: string }>;
-        }>;
-      };
-      if (!nav.requestMIDIAccess) return;
-      try {
-        const access = await nav.requestMIDIAccess();
-        if (cancelled) return;
-        const list: Array<{ id: string; name: string }> = [];
-        access.inputs.forEach((i) => {
-          list.push({ id: i.id, name: i.name ?? i.id });
-        });
-        setInputs(list);
-      } catch {
-        /* permission denied */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
+/**
+ * MIDI section for the Settings modal. Strict opt-in: no permission is
+ * requested and no Web MIDI API calls are made until the user clicks
+ * "Enable MIDI". Renders a clear fallback message on browsers that
+ * don't expose Web MIDI at all.
+ */
+function MidiSection() {
+  const midi = useMidi();
+  const mappings = useStore((s) => s.project.midiMappings);
+  const learnId = useStore((s) => s.midiLearnTargetId);
+
+  if (midi.status === "unsupported") {
+    return (
+      <div className="border border-border rounded-md p-3 bg-background/40 space-y-1">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          MIDI controller
+        </div>
+        <p className="text-xs leading-snug">
+          MIDI control is not supported in this browser. The studio still
+          works normally with mouse, touch, and keyboard.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <Row
-      label="MIDI input"
-      hint={
-        enabled
-          ? inputs.length === 0
-            ? "No controllers detected."
-            : "Choose which connected device to listen to."
-          : "Enable MIDI first to pick an input."
-      }
-    >
-      <select
-        value={selected ?? ""}
-        disabled={!enabled || inputs.length === 0}
-        onChange={(e) =>
-          setSettings({ midiInputId: e.target.value || null })
-        }
-        className="bg-background border border-border rounded-md h-7 px-2 font-mono text-xs disabled:opacity-50"
-      >
-        <option value="">(auto)</option>
-        {inputs.map((i) => (
-          <option key={i.id} value={i.id}>
-            {i.name}
-          </option>
-        ))}
-      </select>
-    </Row>
+    <div className="space-y-3">
+      <div className="border border-border rounded-md p-3 bg-background/40 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            MIDI controller
+          </div>
+          <span
+            className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+              midi.status === "ready"
+                ? "bg-neon/20 text-neon"
+                : midi.status === "denied" || midi.status === "error"
+                  ? "bg-destructive/30 text-destructive-foreground"
+                  : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {midi.status}
+          </span>
+        </div>
+
+        {midi.status === "no-access-yet" && (
+          <>
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Strictly opt-in. Click below to grant browser MIDI access and
+              connect a hardware controller.
+            </p>
+            <Button size="sm" onClick={midi.requestAccess}>
+              Enable MIDI
+            </Button>
+          </>
+        )}
+
+        {midi.status === "denied" && (
+          <p className="text-[11px] text-destructive leading-snug">
+            Permission denied. Reload the page and grant MIDI access to use
+            a controller.
+          </p>
+        )}
+
+        {midi.status === "ready" && (
+          <Row
+            label="MIDI input"
+            hint={
+              midi.inputs.length === 0
+                ? "No controllers detected. Plug one in and it will appear."
+                : "Choose which connected device to listen to."
+            }
+          >
+            <select
+              value={midi.selectedId ?? ""}
+              disabled={midi.inputs.length === 0}
+              onChange={(e) => midi.selectInput(e.target.value || null)}
+              className="bg-background border border-border rounded-md h-7 px-2 font-mono text-xs disabled:opacity-50"
+            >
+              <option value="">(none)</option>
+              {midi.inputs.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
+            </select>
+          </Row>
+        )}
+      </div>
+
+      <div className="border border-border rounded-md p-3 bg-background/40 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            MIDI Learn mappings
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              className="font-mono text-[10px] h-6"
+              disabled={mappings.length === 0}
+              onClick={() => {
+                const blob = new Blob(
+                  [JSON.stringify(mappings, null, 2)],
+                  { type: "application/json" },
+                );
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "midi-mappings.json";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                getStore().setStatus("MIDI mappings exported", "info");
+              }}
+            >
+              Export
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="font-mono text-[10px] h-6"
+              disabled={mappings.length === 0 && !learnId}
+              onClick={() => {
+                if (!window.confirm("Clear all MIDI mappings for this project?"))
+                  return;
+                if (learnId) getStore().cancelMidiLearn();
+                for (const m of [...mappings]) getStore().removeMapping(m.id);
+                getStore().setStatus("All MIDI mappings reset", "info");
+              }}
+            >
+              Reset all
+            </Button>
+          </div>
+        </div>
+        {mappings.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            None yet. Click any brain icon next to a control (transport,
+            metronome, channel volume, drum pad) and then move a knob or
+            press a key on your controller to bind it.
+          </p>
+        ) : (
+          <ul className="space-y-1 max-h-40 overflow-y-auto">
+            {mappings.map((m) => (
+              <li
+                key={m.id}
+                className="flex items-center justify-between gap-2 panel-inset rounded px-2 py-1"
+              >
+                <div className="text-[11px] font-mono truncate">
+                  <span className="text-foreground/90">{m.label}</span>{" "}
+                  <span className="text-muted-foreground">
+                    {m.signature || "(learning…)"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => getStore().removeMapping(m.id)}
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={`Remove mapping for ${m.label}`}
+                  title="Remove mapping"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[10px] text-muted-foreground leading-snug">
+          Mappings persist with your project. Sysex is never requested.
+        </p>
+      </div>
+    </div>
   );
 }
