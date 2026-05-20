@@ -147,10 +147,18 @@ function useMasterClipped(): boolean {
   const [clipped, setClipped] = useState(false);
   useEffect(() => {
     let raf = 0;
+    // Poll the master clip latch at ~10 Hz — it's a binary indicator
+    // for the user, so animation-frame frequency is overkill.
+    const MIN_INTERVAL_MS = 100;
+    let lastTick = 0;
     const tick = () => {
+      raf = requestAnimationFrame(tick);
+      if (document.hidden) return;
+      const now = performance.now();
+      if (now - lastTick < MIN_INTERVAL_MS) return;
+      lastTick = now;
       const c = audio.getMasterClipped();
       setClipped((prev) => (prev !== c ? c : prev));
-      raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);

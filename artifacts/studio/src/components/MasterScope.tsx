@@ -68,7 +68,9 @@ export function MasterScope({
     };
 
     const tick = () => {
-      draw();
+      // Skip canvas redraws when the tab is hidden. The transport keeps
+      // running so the analyser still has fresh data when we resume.
+      if (!document.hidden) draw();
       raf = requestAnimationFrame(tick);
     };
     if (prefersReduced) {

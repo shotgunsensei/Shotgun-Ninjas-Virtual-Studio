@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Flag, MoreVertical, Plus, X } from "lucide-react";
 import { useStore, getStore, canDropClipOnTrack } from "../store";
 import { audio } from "../lib/audio/engine";
@@ -70,16 +70,26 @@ export function Timeline() {
   const totalBeats = project.bars * 4;
   const width = totalBeats * PX_PER_BEAT;
 
-  const [playheadBeat, setPlayheadBeat] = useState(0);
+  // Live playhead via ref + style transform — avoids re-rendering the
+  // whole Timeline tree every animation frame. The DOM mutation is cheap
+  // and visually identical to the previous setState approach.
+  const playheadRef = useRef<HTMLDivElement>(null);
   const isPlaying = useStore((s) => s.isPlaying);
 
   useEffect(() => {
+    if (!isPlaying || !playheadRef.current) return;
     let raf = 0;
     const tick = () => {
-      setPlayheadBeat(audio.positionBeats() % (totalBeats || 1));
+      // Pause render work while the tab is hidden — transport keeps
+      // playing audio but there's no reason to mutate DOM the user can't
+      // see.
+      if (!document.hidden && playheadRef.current) {
+        const pos = audio.positionBeats() % (totalBeats || 1);
+        playheadRef.current.style.transform = `translateX(${pos * PX_PER_BEAT}px)`;
+      }
       raf = requestAnimationFrame(tick);
     };
-    if (isPlaying) raf = requestAnimationFrame(tick);
+    raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [isPlaying, totalBeats]);
 
@@ -172,8 +182,9 @@ export function Timeline() {
 
         {/* playhead */}
         <div
-          className="absolute top-0 bottom-0 w-px bg-primary glow-red pointer-events-none"
-          style={{ left: playheadBeat * PX_PER_BEAT }}
+          ref={playheadRef}
+          className="absolute top-0 bottom-0 left-0 w-px bg-primary glow-red pointer-events-none"
+          style={{ transform: "translateX(0)" }}
         />
       </div>
     </div>
@@ -460,7 +471,11 @@ function SectionFlag({ section, bars }: { section: Section; bars: number }) {
   );
 }
 
-function TimelineRow({
+// Memoized so unrelated store changes (transport flags, selection on
+// other rows, etc.) don't re-render every track row in the timeline.
+// Track reference identity is preserved by patchTrack — rows that
+// didn't change skip re-render entirely.
+const TimelineRow = memo(function TimelineRow({
   track,
   selected,
   selectedClipId,
@@ -514,7 +529,7 @@ function TimelineRow({
         )}
     </div>
   );
-}
+});
 
 function VocalPlaceholder({
   armed,

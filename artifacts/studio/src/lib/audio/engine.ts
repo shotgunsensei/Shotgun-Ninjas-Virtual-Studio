@@ -970,7 +970,18 @@ class AudioEngine {
     // Merge project-wide groove (global defaults) under track overrides.
     const groove = getGroove(track.groove, this.globalGroove);
     for (const ev of clip.notes) {
-      if (ev.time < 0 || ev.time >= clip.length) continue;
+      // Defensive: drop events outside the clip window so a shrunk
+      // pattern can't keep firing notes from its old tail. In dev we
+      // warn — production users get the silent skip.
+      if (ev.time < 0 || ev.time >= clip.length) {
+        if (import.meta.env?.DEV && ev.time >= clip.length) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[engine] dropping note at beat ${ev.time} past clip.length ${clip.length} on track ${track.id}`,
+          );
+        }
+        continue;
+      }
       const t = startBeats + ev.time;
       const id = Tone.getTransport().schedule((time) => {
         const bpm = Tone.getTransport().bpm.value;

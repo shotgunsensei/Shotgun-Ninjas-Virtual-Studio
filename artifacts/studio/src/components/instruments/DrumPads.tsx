@@ -926,9 +926,20 @@ function usePlayheadStep(
   useEffect(() => {
     if (!isPlaying || totalBeats <= 0 || stepBeats <= 0) return;
     let raf = 0;
+    let lastStep = -1;
     const tick = () => {
-      const pos = audio.positionBeats() % totalBeats;
-      setStep(Math.floor(pos / stepBeats));
+      // Skip rendering work when the tab is hidden — transport keeps
+      // running, but we don't want to schedule unnecessary React work.
+      if (!document.hidden) {
+        const pos = audio.positionBeats() % totalBeats;
+        const next = Math.floor(pos / stepBeats);
+        // Only push a re-render when the lit cell actually changes,
+        // not every animation frame.
+        if (next !== lastStep) {
+          lastStep = next;
+          setStep(next);
+        }
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

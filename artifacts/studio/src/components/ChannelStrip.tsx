@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { memo, useCallback } from "react";
 import * as Icons from "lucide-react";
 import { Volume2, Trash2, Copy, Mic, Sliders } from "lucide-react";
 import { StereoMeter } from "./Meter";
@@ -76,7 +76,17 @@ export function ChannelStripsBar() {
   );
 }
 
-function ChannelStrip({ track, selected }: { track: Track; selected: boolean }) {
+// Memoized — when the user nudges one slider, the patched Track object
+// gets a new identity but the other tracks in `project.tracks` keep
+// theirs. memo() then skips re-render for every strip that didn't
+// change, saving a lot of DOM work in projects with many tracks.
+const ChannelStrip = memo(function ChannelStrip({
+  track,
+  selected,
+}: {
+  track: Track;
+  selected: boolean;
+}) {
   const armOther = (armed: boolean) => {
     if (armed) {
       const tracks = getStore().state.project.tracks.map((x) => ({
@@ -318,7 +328,7 @@ function ChannelStrip({ track, selected }: { track: Track; selected: boolean }) 
       </div>
     </div>
   );
-}
+});
 
 function TrackMeter({ trackId }: { trackId: string }) {
   const getMeter = useCallback(() => audio.getTrackMeter(trackId), [trackId]);

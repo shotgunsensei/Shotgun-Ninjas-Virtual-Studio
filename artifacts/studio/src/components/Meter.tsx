@@ -35,7 +35,18 @@ export function StereoMeter({
 
   useEffect(() => {
     let raf = 0;
+    // Throttle meter updates to ~30 Hz. Meters look fluid at that rate
+    // and we avoid scheduling 60 setState calls per second per strip.
+    const MIN_INTERVAL_MS = 1000 / 30;
+    let lastTick = 0;
     const tick = () => {
+      raf = requestAnimationFrame(tick);
+      // Skip everything while the tab is hidden — there's nothing to
+      // show, and the data wouldn't render anyway.
+      if (document.hidden) return;
+      const now = performance.now();
+      if (now - lastTick < MIN_INTERVAL_MS) return;
+      lastTick = now;
       let dbL: number | null = null;
       let dbR: number | null = null;
       if (getLevels) {
@@ -77,7 +88,6 @@ export function StereoMeter({
           });
         }
       }
-      raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);

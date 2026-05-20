@@ -114,8 +114,10 @@ export function PianoRoll({ track }: { track: Track }) {
     if (!isPlaying || !playheadRef.current) return;
     let raf = 0;
     const tick = () => {
-      const pos = audio.positionBeats() % totalBeats;
-      if (playheadRef.current) {
+      // Skip the DOM write while the tab is hidden — transport position
+      // is still advancing and will be picked up on resume.
+      if (!document.hidden && playheadRef.current) {
+        const pos = audio.positionBeats() % totalBeats;
         playheadRef.current.style.transform = `translateX(${pos * PX_PER_BEAT}px)`;
       }
       raf = requestAnimationFrame(tick);
