@@ -22,6 +22,7 @@ import { SettingsModal } from "./SettingsModal";
 import { AboutDialog } from "./AboutDialog";
 import { Tip } from "./Tip";
 import { useSettings, getSettings } from "../lib/settings";
+import { PwaInstallControls } from "./PwaInstallControls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -357,6 +358,7 @@ export function Header() {
         >
           <Download className="w-3.5 h-3.5 mr-1" /> Export
         </Button>
+        <PwaInstallControls />
         <Tip label="Help & onboarding">
           <Button
             variant="outline"

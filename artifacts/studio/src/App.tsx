@@ -14,6 +14,7 @@ const MidiPanel = lazy(() =>
 );
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
+import { PwaUpdateToast } from "./components/PwaUpdateToast";
 import { BackgroundFx } from "./components/BackgroundFx";
 import { Logo } from "./components/Logo";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -550,6 +551,7 @@ function Studio() {
       </div>
       <HelpDialog />
       <StatusToast />
+      <PwaUpdateToast />
       <DropZone
         onFiles={(files) => {
           const f = files[0];

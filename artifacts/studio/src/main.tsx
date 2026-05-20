@@ -2,6 +2,9 @@ import { createRoot } from "react-dom/client";
 import { Suspense } from "react";
 import App from "./App";
 import "./index.css";
+import { initPwa } from "./lib/pwa";
+
+initPwa();
 
 function Loading() {
   return (

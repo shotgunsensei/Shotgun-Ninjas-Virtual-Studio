@@ -12,6 +12,7 @@ import { useTransport } from "../hooks/useTransport";
 import { MidiLearnButton } from "./MidiLearnButton";
 import { Tip } from "./Tip";
 import { useSettings } from "../lib/settings";
+import { OfflineReadyIndicator } from "./PwaInstallControls";
 
 export function TransportBar() {
   const project = useStore((s) => s.project);
@@ -238,6 +239,7 @@ export function TransportBar() {
         </button>
       )}
 
+      <OfflineReadyIndicator />
       <MasterScope width={96} height={28} />
       <MasterMeter bpm={project.bpm} pulsing={isPlaying} />
       <MasterClipBadge />
