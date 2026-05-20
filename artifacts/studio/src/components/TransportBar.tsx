@@ -13,6 +13,7 @@ import { MidiLearnButton } from "./MidiLearnButton";
 import { Tip } from "./Tip";
 import { useSettings } from "../lib/settings";
 import { OfflineReadyIndicator } from "./PwaInstallControls";
+import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
 
 export function TransportBar() {
   const bpm = useStore((s) => s.project.bpm);
@@ -80,6 +81,7 @@ export function TransportBar() {
         <MidiLearnButton target={{ kind: "transport-play" }} small />
         <MidiLearnButton target={{ kind: "transport-stop" }} small />
         <MidiLearnButton target={{ kind: "transport-record" }} small />
+        <MidiActivityIndicator />
         <Button
           size="icon"
           variant="outline"
@@ -345,6 +347,53 @@ function MasterClipBadge() {
         <AlertTriangle className="w-3 h-3" />
         Clip
       </button>
+    </Tip>
+  );
+}
+
+/**
+ * Glowing dot in the transport bar that pulses on every incoming MIDI noteon
+ * or CC and shows the last note name / CC number for ~1 s.
+ * Hidden entirely when MIDI status is not 'ready'.
+ */
+function MidiActivityIndicator() {
+  const { status } = useMidi();
+  const [active, setActive] = useState(false);
+  const [label, setLabel] = useState<string>("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useMidiEvents((e) => {
+    if (e.type !== "noteon" && e.type !== "cc") return;
+    const text = e.type === "noteon" ? midiNoteToName(e.data1) : `CC${e.data1}`;
+    setLabel(text);
+    setActive(true);
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      setActive(false);
+    }, 1000);
+  });
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+  }, []);
+
+  if (status !== "ready") return null;
+
+  return (
+    <Tip label="MIDI activity — last incoming note or CC">
+      <div className="flex items-center gap-1 px-1.5 h-7 rounded-md border border-border bg-background/50 select-none">
+        <span
+          className={`inline-block w-2 h-2 rounded-full transition-colors duration-75 ${
+            active
+              ? "bg-primary shadow-[0_0_6px_2px_hsl(var(--primary)/0.7)]"
+              : "bg-muted-foreground/30"
+          }`}
+          aria-hidden
+        />
+        <span className="font-mono text-[10px] w-7 tabular-nums text-primary leading-none">
+          {active ? label : "MIDI"}
+        </span>
+      </div>
     </Tip>
   );
 }
