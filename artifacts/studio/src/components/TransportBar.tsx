@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { Play, Pause, Square, Circle, Volume2, AlertOctagon } from "lucide-react";
 import { StereoMeter } from "./Meter";
+import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -202,6 +203,7 @@ export function TransportBar() {
         </button>
       )}
 
+      <MasterScope width={96} height={28} />
       <MasterMeter bpm={project.bpm} pulsing={isPlaying} />
 
       <div className="flex items-center gap-2 min-w-[180px]">

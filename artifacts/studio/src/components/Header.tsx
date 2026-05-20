@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Save,
   FolderOpen,
@@ -9,8 +9,13 @@ import {
   FileText,
   Upload,
   AlertTriangle,
+  Maximize2,
+  Minimize2,
+  Keyboard as KeyboardIcon,
 } from "lucide-react";
 import { Logo } from "./Logo";
+import { ThemeSwitcher } from "./ThemeSwitcher";
+import { ShortcutOverlay } from "./ShortcutOverlay";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -45,6 +50,53 @@ import {
 export function Header() {
   const project = useStore((s) => s.project);
   const [openLoad, setOpenLoad] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(
+    typeof document !== "undefined" && !!document.fullscreenElement,
+  );
+
+  // mirror the browser's fullscreen state so the icon flips correctly
+  // whether the user toggled via the button, the F shortcut, or Esc.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // open the shortcut overlay when the user fires the global event from
+  // App.tsx's keyboard handler (so the listener can live next to the
+  // other shortcut wiring without prop-drilling state)
+  useEffect(() => {
+    const onOpen = () => setShortcutsOpen(true);
+    const onExport = () => setExportModalOpen(true);
+    window.addEventListener("studio:open-shortcuts", onOpen);
+    window.addEventListener("studio:open-export", onExport);
+    return () => {
+      window.removeEventListener("studio:open-shortcuts", onOpen);
+      window.removeEventListener("studio:open-export", onExport);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        getStore().setStatus(
+          "Fullscreen isn't supported in this browser.",
+          "warn",
+        );
+      }
+    } catch (err) {
+      getStore().setStatus(
+        `Fullscreen failed: ${(err as Error).message}`,
+        "warn",
+      );
+    }
+  };
+
   const [projects, setProjects] = useState<
     Array<{ id: string; name: string; updatedAt: number }>
   >([]);
@@ -273,6 +325,31 @@ export function Header() {
         >
           <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShortcutsOpen(true)}
+          className="font-mono text-xs"
+          title="Keyboard shortcuts (?)"
+          aria-label="Keyboard shortcuts"
+        >
+          <KeyboardIcon className="w-3.5 h-3.5" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleFullscreen}
+          className="font-mono text-xs"
+          title={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
+          aria-label="Toggle fullscreen"
+        >
+          {isFullscreen ? (
+            <Minimize2 className="w-3.5 h-3.5" />
+          ) : (
+            <Maximize2 className="w-3.5 h-3.5" />
+          )}
+        </Button>
+        <ThemeSwitcher />
         <input
           ref={jsonImportRef}
           type="file"
@@ -484,6 +561,8 @@ export function Header() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ShortcutOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
   );
 }

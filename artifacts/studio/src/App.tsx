@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Header } from "./components/Header";
 import { TransportBar } from "./components/TransportBar";
 import { Timeline } from "./components/Timeline";
@@ -9,6 +10,9 @@ import { StatusToast } from "./components/StatusToast";
 import { BackgroundFx } from "./components/BackgroundFx";
 import { DropZone } from "./components/DropZone";
 import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
+import { StudioErrorBoundary } from "./components/ErrorBoundary";
+import { LeftBrowser } from "./components/LeftBrowser";
+import { applyTheme, getStoredThemeId } from "./lib/themes";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
@@ -43,7 +47,17 @@ function bootstrap() {
     if (!project) {
       project = defaultProject();
       resetStore(project);
-      getStore().set({ showOnboarding: true });
+      // Only auto-show the onboarding modal the very first time a user
+      // lands on the studio. If they've dismissed it before we respect
+      // that across reloads — the Help button in the header always
+      // re-opens it on demand.
+      let shown = false;
+      try {
+        shown = localStorage.getItem("studio.onboardingShown") === "1";
+      } catch {
+        /* ignore */
+      }
+      if (!shown) getStore().set({ showOnboarding: true });
     } else {
       resetStore(project);
     }
@@ -56,6 +70,16 @@ function bootstrap() {
     bootstrapped = true;
   })();
   return bootstrapPromise;
+}
+
+// Apply the persisted theme synchronously at module-eval time so the
+// very first render doesn't flash the default palette.
+if (typeof document !== "undefined") {
+  try {
+    applyTheme(getStoredThemeId());
+  } catch {
+    /* SSR-safe no-op */
+  }
 }
 
 export default function App() {
@@ -82,7 +106,29 @@ export default function App() {
       </div>
     );
   }
-  return <Studio />;
+  return (
+    <StudioErrorBoundary onPanic={() => audio.panicStopAll()}>
+      <Studio />
+    </StudioErrorBoundary>
+  );
+}
+
+const COLLAPSE_KEYS = {
+  left: "studio.collapse.left",
+  right: "studio.collapse.right",
+  mixer: "studio.collapse.mixer",
+} as const;
+
+function readCollapse(key: string): boolean {
+  if (typeof localStorage === "undefined") return false;
+  return localStorage.getItem(key) === "1";
+}
+function writeCollapse(key: string, v: boolean) {
+  try {
+    localStorage.setItem(key, v ? "1" : "0");
+  } catch {
+    /* quota */
+  }
 }
 
 function Studio() {
@@ -94,25 +140,163 @@ function Studio() {
   );
   const { play, pause, stop, record } = useTransport();
   const isPlaying = useStore((s) => s.isPlaying);
+  const selectedClipId = useStore((s) => s.selectedClipId);
 
-  // global keyboard shortcuts (excluding text inputs)
+  const [leftCollapsed, setLeftCollapsed] = useState(() =>
+    readCollapse(COLLAPSE_KEYS.left),
+  );
+  const [rightCollapsed, setRightCollapsed] = useState(() =>
+    readCollapse(COLLAPSE_KEYS.right),
+  );
+  const [mixerCollapsed, setMixerCollapsed] = useState(() =>
+    readCollapse(COLLAPSE_KEYS.mixer),
+  );
+  useEffect(() => writeCollapse(COLLAPSE_KEYS.left, leftCollapsed), [leftCollapsed]);
+  useEffect(() => writeCollapse(COLLAPSE_KEYS.right, rightCollapsed), [rightCollapsed]);
+  useEffect(() => writeCollapse(COLLAPSE_KEYS.mixer, mixerCollapsed), [mixerCollapsed]);
+
+  // Clipboard for clip copy/paste (in-memory, simple JSON snapshot)
+  const clipboardRef = useRef<{
+    kind: "note" | "audio";
+    trackId: string;
+    clipId: string;
+  } | null>(null);
+
+  // Single document-level shortcut handler. Skip the handler entirely when
+  // focus is on an editable element so typing in inputs, textareas, and
+  // contenteditable surfaces keeps working naturally.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const t = e.target as HTMLElement | null;
+      const editable =
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement ||
+        (t && t.isContentEditable);
+      if (editable) return;
+
+      const meta = e.metaKey || e.ctrlKey;
+      const key = e.key;
+
       if (e.code === "Space") {
         e.preventDefault();
         if (isPlaying) pause();
         else play();
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        return;
+      }
+      if (key === "Enter") {
+        e.preventDefault();
+        stop();
+        return;
+      }
+      if (key === "Escape") {
+        // Esc is the documented "panic stop" — hard-cuts in-flight audio
+        // and any stuck voices in addition to stopping the transport.
+        audio.panicStopAll();
+        stop();
+        return;
+      }
+
+      // Save: spec contract — plain `S` (and Cmd/Ctrl+S) saves the project
+      // when focus is not in an editable field. The QWERTY instrument keybed
+      // attaches its own keydown listener and will still trigger the note;
+      // that is an accepted trade-off for the spec'd shortcut.
+      if (key === "s" || key === "S") {
+        e.preventDefault();
+        saveProject(getStore().state.project)
+          .then(() => getStore().setStatus("Project saved", "info"))
+          .catch((err) =>
+            getStore().setStatus(`Save failed: ${err.message}`, "error"),
+          );
+        return;
+      }
+      if (meta && (key === "c" || key === "C")) {
+        const sel = getStore().state.selectedClipId;
+        if (!sel) return;
+        for (const tr of getStore().state.project.tracks) {
+          if (tr.noteClips.some((c) => c.id === sel)) {
+            clipboardRef.current = { kind: "note", trackId: tr.id, clipId: sel };
+            getStore().setStatus("Clip copied", "info");
+            return;
+          }
+          if (tr.audioClips.some((c) => c.id === sel)) {
+            clipboardRef.current = { kind: "audio", trackId: tr.id, clipId: sel };
+            getStore().setStatus("Clip copied", "info");
+            return;
+          }
+        }
+        return;
+      }
+      if (meta && (key === "v" || key === "V")) {
+        const cb = clipboardRef.current;
+        if (!cb) return;
+        getStore().duplicateClipById(cb.trackId, cb.clipId);
+        getStore().setStatus("Clip pasted", "info");
+        return;
+      }
+
+      // Single-key shortcuts
+      if (key === "?" || (e.shiftKey && key === "/")) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("studio:open-shortcuts"));
+        return;
+      }
+      if (key === "r" || key === "R") {
         e.preventDefault();
         record();
-      } else if (e.key === "Escape") {
-        stop();
+        return;
+      }
+      if (key === "m" || key === "M") {
+        e.preventDefault();
+        const cur = getStore().state.project.metronome;
+        getStore().patchProject({ metronome: !cur });
+        return;
+      }
+      if (key === "b" || key === "B") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("studio:open-export"));
+        return;
+      }
+      if (key === "f" || key === "F") {
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => undefined);
+        } else {
+          document.documentElement.requestFullscreen?.().catch(() =>
+            getStore().setStatus("Fullscreen blocked by the browser.", "warn"),
+          );
+        }
+        return;
+      }
+      if (key === "Delete" || key === "Backspace") {
+        const sel = getStore().state.selectedClipId;
+        if (!sel) return;
+        const tracks = getStore().state.project.tracks;
+        for (const tr of tracks) {
+          if (
+            tr.noteClips.some((c) => c.id === sel) ||
+            tr.audioClips.some((c) => c.id === sel)
+          ) {
+            getStore().removeClip(tr.id, sel);
+            return;
+          }
+        }
+        return;
+      }
+      // 1..8 focus tracks
+      if (/^[1-8]$/.test(key)) {
+        const idx = parseInt(key, 10) - 1;
+        const tracks = getStore().state.project.tracks;
+        const target = tracks[idx];
+        if (target) {
+          getStore().set({ selectedTrackId: target.id });
+        }
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isPlaying, play, pause, record, stop]);
+  }, [isPlaying, play, pause, record, stop, selectedClipId]);
 
   // First-note + sample-loading toasts: surface a one-time confirmation
   // when audio actually starts producing sound (helps users self-diagnose
@@ -245,21 +429,83 @@ function Studio() {
       <Header />
       <TransportBar />
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Timeline />
-          <ChannelStripsBar />
-        </div>
-        <div className="w-80 border-l border-border bg-graphite/80 backdrop-blur flex flex-col overflow-hidden">
-          <div className="p-3 border-b border-border">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-              Selected · {selectedTrack?.name ?? "—"}
+        {/* Left browser: track list shortcut. Collapsible. */}
+        {leftCollapsed ? (
+          <CollapsedRail
+            label="Tracks"
+            side="left"
+            onExpand={() => setLeftCollapsed(false)}
+          />
+        ) : (
+          <aside className="w-56 border-r border-border bg-graphite/70 backdrop-blur flex flex-col overflow-hidden">
+            <PanelHeader
+              title="Tracks"
+              onCollapse={() => setLeftCollapsed(true)}
+              collapseIcon="left"
+            />
+            <LeftBrowser />
+          </aside>
+        )}
+
+        {/* Center: arrangement timeline + collapsible mixer drawer */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div className="flex-1 overflow-hidden">
+            <Timeline />
+          </div>
+          {mixerCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setMixerCollapsed(false)}
+              className="h-7 border-t border-border bg-graphite/80 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-accent/30"
+              aria-label="Show mixer"
+              title="Show mixer"
+            >
+              <ChevronUp className="w-3 h-3" />
+              Mixer
+            </button>
+          ) : (
+            <div className="border-t border-border">
+              <div className="h-6 flex items-center justify-between px-3 bg-graphite/80 border-b border-border">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Mixer
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMixerCollapsed(true)}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Hide mixer"
+                  title="Hide mixer"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <ChannelStripsBar />
             </div>
-            {selectedTrack && <SelectedInstrument trackId={selectedTrack.id} />}
-          </div>
-          <div className="p-3 flex-1 overflow-hidden">
-            <MidiPanel />
-          </div>
+          )}
         </div>
+
+        {/* Right inspector */}
+        {rightCollapsed ? (
+          <CollapsedRail
+            label="Inspector"
+            side="right"
+            onExpand={() => setRightCollapsed(false)}
+          />
+        ) : (
+          <aside className="w-80 border-l border-border bg-graphite/80 backdrop-blur flex flex-col overflow-hidden">
+            <PanelHeader
+              title={`Selected · ${selectedTrack?.name ?? "—"}`}
+              onCollapse={() => setRightCollapsed(true)}
+              collapseIcon="right"
+            />
+            <div className="p-3 border-b border-border overflow-y-auto">
+              {selectedTrack && <SelectedInstrument trackId={selectedTrack.id} />}
+            </div>
+            <div className="p-3 flex-1 overflow-hidden">
+              <MidiPanel />
+            </div>
+          </aside>
+        )}
       </div>
       <HelpDialog />
       <StatusToast />
@@ -277,6 +523,64 @@ function Studio() {
       />
       <PendingSampleHost />
     </div>
+  );
+}
+
+function PanelHeader({
+  title,
+  onCollapse,
+  collapseIcon,
+}: {
+  title: string;
+  onCollapse: () => void;
+  collapseIcon: "left" | "right";
+}) {
+  const Icon = collapseIcon === "left" ? ChevronLeft : ChevronRight;
+  return (
+    <div className="h-7 flex items-center justify-between px-3 border-b border-border bg-graphite/80">
+      <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground truncate">
+        {title}
+      </span>
+      <button
+        type="button"
+        onClick={onCollapse}
+        className="text-muted-foreground hover:text-foreground"
+        aria-label={`Hide ${title}`}
+        title={`Hide ${title}`}
+      >
+        <Icon className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function CollapsedRail({
+  label,
+  side,
+  onExpand,
+}: {
+  label: string;
+  side: "left" | "right";
+  onExpand: () => void;
+}) {
+  const Icon = side === "left" ? ChevronRight : ChevronLeft;
+  const border = side === "left" ? "border-r" : "border-l";
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      className={`w-6 ${border} border-border bg-graphite/70 hover:bg-accent/30 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-foreground`}
+      aria-label={`Show ${label}`}
+      title={`Show ${label}`}
+    >
+      <Icon className="w-3.5 h-3.5" />
+      <span
+        className="font-mono text-[10px] uppercase tracking-widest"
+        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+      >
+        {label}
+      </span>
+    </button>
   );
 }
 

@@ -163,6 +163,23 @@ class AudioEngine {
   }
 
   /**
+   * Lazily-created Tone.Analyser hanging off the master input. Used by
+   * the MasterScope component for an oscilloscope view. Created on first
+   * call so we don't pay the cost when no scope is mounted.
+   */
+  private masterAnalyser: Tone.Analyser | null = null;
+  getMasterAnalyser(): Tone.Analyser {
+    if (!this.masterAnalyser) {
+      const a = new Tone.Analyser("waveform", 256);
+      // tap the post-master signal so the scope reflects what the user
+      // actually hears (post FX, post limiter)
+      this.masterChain.input.connect(a);
+      this.masterAnalyser = a;
+    }
+    return this.masterAnalyser;
+  }
+
+  /**
    * Cheap-to-poll peak/RMS levels for the master bus. Reuses an
    * internal object so it's safe to call every animation frame.
    */

@@ -12,13 +12,19 @@ export function HelpDialog() {
   const showOnboarding = useStore((s) => s.showOnboarding);
   const open = showHelp || showOnboarding;
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) =>
-        getStore().set(showOnboarding ? { showOnboarding: o } : { showHelp: o })
+  const dismiss = (o: boolean) => {
+    if (!o && showOnboarding) {
+      try {
+        localStorage.setItem("studio.onboardingShown", "1");
+      } catch {
+        /* quota */
       }
-    >
+    }
+    getStore().set(showOnboarding ? { showOnboarding: o } : { showHelp: o });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={dismiss}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
@@ -63,9 +69,14 @@ export function HelpDialog() {
         </div>
         <div className="flex justify-end pt-2">
           <button
-            onClick={() =>
-              getStore().set({ showHelp: false, showOnboarding: false })
-            }
+            onClick={() => {
+              try {
+                localStorage.setItem("studio.onboardingShown", "1");
+              } catch {
+                /* quota */
+              }
+              getStore().set({ showHelp: false, showOnboarding: false });
+            }}
             className="px-4 h-9 rounded-md bg-primary text-primary-foreground font-mono text-xs uppercase tracking-widest glow-red"
           >
             Let's go
