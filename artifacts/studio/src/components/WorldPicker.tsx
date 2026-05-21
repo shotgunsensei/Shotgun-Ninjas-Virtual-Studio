@@ -661,11 +661,6 @@ function CustomWorldEditor({
               {isEditing ? "Save Changes" : "Create World"}
             </Button>
           </div>
-              >
-                {name || "My World"}
-              </span>
-            </div>
-          </div>
 
           {/* Name */}
           <div className="space-y-1.5">

@@ -21,6 +21,17 @@ function targetMatches(a: MidiTarget, b: MidiTarget): boolean {
   return true;
 }
 
+/** Converts a raw MIDI signature like "cc:74" or "note:36" into a short
+ *  human-readable label that fits inside the indicator button, e.g. "CC74" or "N36". */
+function formatSignature(sig: string): string {
+  if (!sig) return "";
+  const [type, num] = sig.split(":");
+  if (!num) return sig.toUpperCase().slice(0, 5);
+  if (type === "cc") return `CC${num}`;
+  if (type === "note") return `N${num}`;
+  return `${type.toUpperCase()}${num}`.slice(0, 5);
+}
+
 export function MidiLearnButton({ target, small = false }: Props) {
   const project = useStore((s) => s.project);
   const learnId = useStore((s) => s.midiLearnTargetId);
@@ -45,24 +56,45 @@ export function MidiLearnButton({ target, small = false }: Props) {
     );
   };
 
-  const sizeClass = small ? "h-7 w-7" : "h-8 w-8";
-  const colorClass = mine
-    ? "bg-neon/20 border-neon/60 text-neon"
-    : learning
-      ? "bg-primary/30 border-primary text-primary animate-pulse"
-      : "border-border text-muted-foreground hover:text-foreground";
+  const heightClass = small ? "h-7" : "h-8";
+
+  if (mine) {
+    const label = formatSignature(mine.signature);
+    return (
+      <button
+        onClick={onClick}
+        title={`MIDI: ${mine.signature} — click to remove mapping`}
+        className={`group relative inline-flex items-center justify-center gap-0.5 rounded-md border px-1 ${heightClass} bg-neon/15 border-neon/50 text-neon hover:bg-red-500/20 hover:border-red-400/60 hover:text-red-300 transition-colors`}
+        style={{ minWidth: small ? "1.75rem" : "2rem" }}
+      >
+        <span className="font-mono text-[8px] leading-none tracking-tight group-hover:hidden">
+          {label}
+        </span>
+        <span className="font-mono text-[8px] leading-none tracking-tight hidden group-hover:inline">
+          ×
+        </span>
+      </button>
+    );
+  }
+
+  if (learning) {
+    return (
+      <button
+        onClick={onClick}
+        title="Press a key or move a control..."
+        className={`relative inline-flex items-center justify-center rounded-md border ${heightClass} px-1 bg-primary/30 border-primary text-primary animate-pulse`}
+        style={{ minWidth: small ? "1.75rem" : "2rem" }}
+      >
+        <Brain className="w-3 h-3" />
+      </button>
+    );
+  }
 
   return (
     <button
       onClick={onClick}
-      title={
-        mine
-          ? `MIDI: ${mine.signature} (click to clear)`
-          : learning
-            ? "Press a key or move a control..."
-            : "MIDI Learn"
-      }
-      className={`relative inline-flex items-center justify-center rounded-md border ${sizeClass} ${colorClass}`}
+      title="MIDI Learn"
+      className={`relative inline-flex items-center justify-center rounded-md border ${heightClass} ${small ? "w-7" : "w-8"} border-border text-muted-foreground hover:text-foreground`}
     >
       <Brain className="w-3.5 h-3.5" />
     </button>
