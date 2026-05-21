@@ -64,6 +64,11 @@ export interface PluginManifest<TInstance = unknown> {
    * Must be idempotent (safe to call more than once).
    */
   dispose?: (instance: TInstance) => void;
+  /**
+   * Set when this plugin was loaded from an external WAM URL at runtime.
+   * Undefined for all built-in plugins.
+   */
+  wamUrl?: string;
 }
 
 /**

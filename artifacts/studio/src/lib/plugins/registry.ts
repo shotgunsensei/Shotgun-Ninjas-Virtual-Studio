@@ -29,6 +29,14 @@ class PluginRegistry {
   }
 
   /**
+   * Register or replace a plugin manifest. Unlike register(), this always
+   * overwrites an existing entry — intended for runtime WAM plugin reloads.
+   */
+  forceRegister(manifest: PluginManifest): void {
+    this.manifests.set(manifest.id, manifest);
+  }
+
+  /**
    * Unregister a plugin by id. Safe to call even if the id doesn't exist.
    */
   unregister(id: string): void {
