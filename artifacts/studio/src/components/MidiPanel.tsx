@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,6 +9,7 @@ export function MidiPanel() {
   const midi = useMidi();
   const project = useStore((s) => s.project);
   const monitor = useStore((s) => s.midiMonitor);
+  const presets = useStore((s) => s.midiMappingPresets);
 
   const liveValues = useMemo(() => {
     const map: Record<string, { value: number; ts: number }> = {};
@@ -55,6 +56,53 @@ export function MidiPanel() {
     }, 500);
     return () => clearTimeout(timer);
   }, [liveValues, project.midiMappings]);
+
+  // ---- preset save state ----
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetNameInput, setPresetNameInput] = useState("");
+  const presetInputRef = useRef<HTMLInputElement>(null);
+
+  const handleStartSave = () => {
+    setPresetNameInput("");
+    setSavingPreset(true);
+    setTimeout(() => presetInputRef.current?.focus(), 0);
+  };
+
+  const handleConfirmSave = () => {
+    const name = presetNameInput.trim();
+    if (!name) return;
+    getStore().saveMidiMappingPreset(name);
+    setSavingPreset(false);
+    setPresetNameInput("");
+  };
+
+  const handleCancelSave = () => {
+    setSavingPreset(false);
+    setPresetNameInput("");
+  };
+
+  // ---- preset rename state ----
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const handleStartRename = (id: string, currentName: string) => {
+    setRenamingId(id);
+    setRenameInput(currentName);
+    setTimeout(() => renameInputRef.current?.focus(), 0);
+  };
+
+  const handleConfirmRename = () => {
+    if (!renamingId) return;
+    getStore().renameMidiMappingPreset(renamingId, renameInput);
+    setRenamingId(null);
+    setRenameInput("");
+  };
+
+  const handleCancelRename = () => {
+    setRenamingId(null);
+    setRenameInput("");
+  };
 
   return (
     <div className="panel p-3 flex flex-col h-full overflow-hidden">
@@ -116,6 +164,7 @@ export function MidiPanel() {
         </div>
       )}
 
+      {/* ---- Mappings section ---- */}
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mt-1 mb-1">
         Mappings
       </div>
@@ -175,6 +224,133 @@ export function MidiPanel() {
         })}
       </div>
 
+      {/* ---- Preset Banks section ---- */}
+      <div className="flex items-center justify-between mt-3 mb-1">
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+          Preset Banks
+        </span>
+        {!savingPreset && (
+          <button
+            onClick={handleStartSave}
+            disabled={project.midiMappings.length === 0}
+            className="text-muted-foreground hover:text-neon disabled:opacity-30 disabled:cursor-not-allowed"
+            title={
+              project.midiMappings.length === 0
+                ? "Add mappings first"
+                : "Save current mappings as a preset"
+            }
+            aria-label="Save preset"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {savingPreset && (
+        <div className="flex items-center gap-1 mb-1">
+          <input
+            ref={presetInputRef}
+            type="text"
+            value={presetNameInput}
+            onChange={(e) => setPresetNameInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleConfirmSave();
+              if (e.key === "Escape") handleCancelSave();
+            }}
+            placeholder="Preset name…"
+            className="flex-1 bg-background border border-border rounded px-2 py-0.5 text-[11px] font-mono outline-none focus:border-neon/50"
+          />
+          <button
+            onClick={handleConfirmSave}
+            disabled={!presetNameInput.trim()}
+            className="text-neon hover:text-neon/80 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Confirm save"
+          >
+            <Check className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleCancelSave}
+            className="text-muted-foreground hover:text-destructive"
+            aria-label="Cancel"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-1 max-h-32 overflow-y-auto">
+        {presets.length === 0 && (
+          <p className="text-[11px] text-muted-foreground font-mono">
+            No presets yet. Save the current mappings with +.
+          </p>
+        )}
+        {presets.map((preset) => (
+          <div
+            key={preset.id}
+            className="flex items-center gap-1 panel-inset rounded px-2 py-1"
+          >
+            {renamingId === preset.id ? (
+              <>
+                <input
+                  ref={renameInputRef}
+                  type="text"
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleConfirmRename();
+                    if (e.key === "Escape") handleCancelRename();
+                  }}
+                  className="flex-1 bg-background border border-border rounded px-1.5 py-0.5 text-[11px] font-mono outline-none focus:border-neon/50"
+                />
+                <button
+                  onClick={handleConfirmRename}
+                  disabled={!renameInput.trim()}
+                  className="text-neon hover:text-neon/80 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+                  aria-label="Confirm rename"
+                >
+                  <Check className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={handleCancelRename}
+                  className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                  aria-label="Cancel rename"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => getStore().loadMidiMappingPreset(preset.id)}
+                  className="flex-1 text-left text-[11px] font-mono truncate text-foreground/90 hover:text-neon transition-colors"
+                  title={`Load "${preset.name}" (${preset.mappings.length} mappings)`}
+                >
+                  {preset.name}
+                  <span className="text-muted-foreground ml-1">
+                    ({preset.mappings.length})
+                  </span>
+                </button>
+                <button
+                  onClick={() => handleStartRename(preset.id, preset.name)}
+                  className="text-muted-foreground hover:text-foreground flex-shrink-0"
+                  aria-label="Rename preset"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => getStore().deleteMidiMappingPreset(preset.id)}
+                  className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                  aria-label="Delete preset"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* ---- Monitor section ---- */}
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mt-3 mb-1">
         Monitor
       </div>

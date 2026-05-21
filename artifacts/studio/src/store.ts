@@ -14,6 +14,7 @@ import type {
   InstrumentKind,
   MasterBusSettings,
   MidiMapping,
+  MidiMappingPreset,
   MidiTarget,
   MixPresetId,
   ModulationRouting,
@@ -31,6 +32,26 @@ import { AUTOMATION_PARAM_DEFAULTS, SEND_BUS_LABELS } from "./types";
 
 import type { ChopSliceSetting } from "./lib/audio/chopEngine";
 export type { ChopSliceSetting };
+
+const MIDI_PRESETS_KEY = "sn.midiMappingPresets";
+
+function loadMidiPresetsFromStorage(): MidiMappingPreset[] {
+  try {
+    const raw = localStorage.getItem(MIDI_PRESETS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as MidiMappingPreset[];
+  } catch {
+    return [];
+  }
+}
+
+function saveMidiPresetsToStorage(presets: MidiMappingPreset[]) {
+  try {
+    localStorage.setItem(MIDI_PRESETS_KEY, JSON.stringify(presets));
+  } catch {
+    // storage quota exceeded or private mode — fail silently
+  }
+}
 
 /** A single clipping event recorded during the session. */
 export interface ClipHistoryEntry {
@@ -123,6 +144,8 @@ class Store {
     exportRangeMode: "whole" | "loop" | "custom";
     exportStartBar: number;
     exportEndBar: number;
+    /** Named MIDI mapping preset banks, persisted to localStorage. */
+    midiMappingPresets: MidiMappingPreset[];
   };
 
   constructor(project: Project) {
@@ -153,6 +176,7 @@ class Store {
       exportRangeMode: "whole",
       exportStartBar: 1,
       exportEndBar: project.bars,
+      midiMappingPresets: loadMidiPresetsFromStorage(),
     };
   }
 
@@ -795,6 +819,50 @@ class Store {
   removeMapping(id: string) {
     const mappings = this.state.project.midiMappings.filter((m) => m.id !== id);
     this.patchProject({ midiMappings: mappings });
+  }
+
+  // ---- midi mapping preset ops ----
+
+  /** Save the current midiMappings as a named preset bank. */
+  saveMidiMappingPreset(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const preset: MidiMappingPreset = {
+      id: newId(),
+      name: trimmed,
+      mappings: this.state.project.midiMappings.map((m) => ({ ...m })),
+      createdAt: Date.now(),
+    };
+    const presets = [...this.state.midiMappingPresets, preset];
+    this.set({ midiMappingPresets: presets });
+    saveMidiPresetsToStorage(presets);
+    this.setStatus(`Preset "${trimmed}" saved`, "info");
+  }
+
+  /** Recall a preset bank by id, replacing the current midiMappings. */
+  loadMidiMappingPreset(id: string) {
+    const preset = this.state.midiMappingPresets.find((p) => p.id === id);
+    if (!preset) return;
+    this.patchProject({ midiMappings: preset.mappings.map((m) => ({ ...m })) });
+    this.setStatus(`Preset "${preset.name}" loaded`, "info");
+  }
+
+  /** Rename a saved preset bank. */
+  renameMidiMappingPreset(id: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const presets = this.state.midiMappingPresets.map((p) =>
+      p.id === id ? { ...p, name: trimmed } : p,
+    );
+    this.set({ midiMappingPresets: presets });
+    saveMidiPresetsToStorage(presets);
+  }
+
+  /** Delete a saved preset bank. */
+  deleteMidiMappingPreset(id: string) {
+    const presets = this.state.midiMappingPresets.filter((p) => p.id !== id);
+    this.set({ midiMappingPresets: presets });
+    saveMidiPresetsToStorage(presets);
   }
 
   pushMidiMonitor(entry: { type: string; channel: number; data1: number; data2: number; device: string }) {

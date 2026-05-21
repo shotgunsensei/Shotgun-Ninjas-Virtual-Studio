@@ -447,6 +447,14 @@ export interface MidiMapping {
   label: string;
 }
 
+/** A named snapshot of the current midiMappings array, saved by the user. */
+export interface MidiMappingPreset {
+  id: string;
+  name: string;
+  mappings: MidiMapping[];
+  createdAt: number;
+}
+
 /**
  * Sample library entry — an imported or recorded audio sample that can be
  * reused across the project (placed on a vocal/audio track, or assigned
