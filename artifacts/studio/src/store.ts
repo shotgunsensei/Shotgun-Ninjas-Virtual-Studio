@@ -5,6 +5,10 @@ import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
 import { wireTrackAutomationTargets } from "./lib/plugins/automation";
 import type {
   AnyPreset,
+  AutomationBreakpoint,
+  AutomationInterpolation,
+  AutomationLane,
+  AutomationParamId,
   FxModuleId,
   FxModuleSettings,
   InstrumentKind,
@@ -12,6 +16,9 @@ import type {
   MidiMapping,
   MidiTarget,
   MixPresetId,
+  ModulationRouting,
+  ModulationSource,
+  ModulationSourceType,
   NoteClip,
   NoteEvent,
   Project,
@@ -20,7 +27,7 @@ import type {
   Track,
   TrackEq,
 } from "./types";
-import { SEND_BUS_LABELS } from "./types";
+import { AUTOMATION_PARAM_DEFAULTS, SEND_BUS_LABELS } from "./types";
 
 import type { ChopSliceSetting } from "./lib/audio/chopEngine";
 export type { ChopSliceSetting };
@@ -740,6 +747,142 @@ class Store {
     ].slice(0, 20);
     this.set({ midiMonitor: next });
   }
+
+  // ---- Phase 11: Audio clip reverse toggle ----
+
+  /** Toggle the reversed flag on an audio clip and reschedule if transport is active. */
+  toggleAudioClipReverse(trackId: string, clipId: string) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const audioClips = t.audioClips.map((c) =>
+      c.id === clipId ? { ...c, reversed: !c.reversed } : c,
+    );
+    this.patchTrack(trackId, { audioClips });
+  }
+
+  // ---- Phase 11: Automation Lane CRUD ----
+
+  /** Add a new automation lane for the given param on a track. Ignored if a lane for that param already exists. */
+  addAutomationLane(trackId: string, param: AutomationParamId) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const existing = t.automationLanes ?? [];
+    if (existing.some((l) => l.param === param)) return;
+    const lane: AutomationLane = {
+      id: newId(),
+      param,
+      breakpoints: [],
+      interpolation: "linear",
+    };
+    const next = [...existing, lane];
+    this.patchTrack(trackId, { automationLanes: next });
+    audio.setTrackAutomation(trackId, next);
+  }
+
+  /** Update an automation lane's settings (interpolation mode, etc.). */
+  updateAutomationLane(trackId: string, laneId: string, patch: Partial<Pick<AutomationLane, "interpolation">>) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const next = (t.automationLanes ?? []).map((l) =>
+      l.id === laneId ? { ...l, ...patch } : l,
+    );
+    this.patchTrack(trackId, { automationLanes: next });
+    audio.setTrackAutomation(trackId, next);
+  }
+
+  /** Remove an automation lane from a track. */
+  removeAutomationLane(trackId: string, laneId: string) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const next = (t.automationLanes ?? []).filter((l) => l.id !== laneId);
+    this.patchTrack(trackId, { automationLanes: next });
+    audio.setTrackAutomation(trackId, next);
+  }
+
+  /** Replace all breakpoints on an automation lane. Called by the canvas editor on every drag. */
+  setAutomationBreakpoints(trackId: string, laneId: string, breakpoints: AutomationBreakpoint[]) {
+    const t = this.state.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const next = (t.automationLanes ?? []).map((l) =>
+      l.id === laneId ? { ...l, breakpoints } : l,
+    );
+    this.patchTrack(trackId, { automationLanes: next });
+    audio.setTrackAutomation(trackId, next);
+  }
+
+  // ---- Phase 11: Modulation Source CRUD ----
+
+  /** Add a new modulation source of the given type. Returns the new source id. */
+  addModulationSource(type: ModulationSourceType): string {
+    const id = newId();
+    const defaults = makeDefaultModSource(type, id);
+    const sources = [...(this.state.project.modulationSources ?? []), defaults];
+    this.patchProject({ modulationSources: sources });
+    audio.setProjectModulation(sources, this.state.project.modulationRoutings ?? []);
+    return id;
+  }
+
+  /** Update a modulation source's settings. */
+  updateModulationSource(sourceId: string, patch: Partial<ModulationSource>) {
+    const sources = (this.state.project.modulationSources ?? []).map((s) =>
+      s.id === sourceId ? { ...s, ...patch } : s,
+    );
+    this.patchProject({ modulationSources: sources });
+    audio.setProjectModulation(sources, this.state.project.modulationRoutings ?? []);
+  }
+
+  /** Remove a modulation source and all its routings. */
+  removeModulationSource(sourceId: string) {
+    const sources = (this.state.project.modulationSources ?? []).filter((s) => s.id !== sourceId);
+    const routings = (this.state.project.modulationRoutings ?? []).filter((r) => r.sourceId !== sourceId);
+    this.patchProject({ modulationSources: sources, modulationRoutings: routings });
+    audio.setProjectModulation(sources, routings);
+  }
+
+  // ---- Phase 11: Modulation Routing CRUD ----
+
+  /** Add a new modulation routing. Returns the new routing id. */
+  addModulationRouting(routing: Omit<ModulationRouting, "id">): string {
+    const id = newId();
+    const r: ModulationRouting = { id, ...routing };
+    const routings = [...(this.state.project.modulationRoutings ?? []), r];
+    this.patchProject({ modulationRoutings: routings });
+    audio.setProjectModulation(this.state.project.modulationSources ?? [], routings);
+    return id;
+  }
+
+  /** Update a routing's depth or other settings. */
+  updateModulationRouting(routingId: string, patch: Partial<Omit<ModulationRouting, "id">>) {
+    const routings = (this.state.project.modulationRoutings ?? []).map((r) =>
+      r.id === routingId ? { ...r, ...patch } : r,
+    );
+    this.patchProject({ modulationRoutings: routings });
+    audio.setProjectModulation(this.state.project.modulationSources ?? [], routings);
+  }
+
+  /** Remove a modulation routing. */
+  removeModulationRouting(routingId: string) {
+    const routings = (this.state.project.modulationRoutings ?? []).filter((r) => r.id !== routingId);
+    this.patchProject({ modulationRoutings: routings });
+    audio.setProjectModulation(this.state.project.modulationSources ?? [], routings);
+  }
+}
+
+/** Factory for creating a default ModulationSource of the given type. */
+function makeDefaultModSource(type: ModulationSourceType, id: string): ModulationSource {
+  const base = { id, type, label: `${type.charAt(0).toUpperCase()}${type.slice(1)}` };
+  switch (type) {
+    case "lfo":
+      return { ...base, lfo: { shape: "sine", rate: 0.5, depth: 0.8, phase: 0 } };
+    case "envelopeFollower":
+      return { ...base, envelopeFollower: { attack: 0.01, release: 0.1, sourceTrackId: "" } };
+    case "randomDrift":
+      return { ...base, randomDrift: { rate: 0.3, smoothing: 0.85 } };
+    case "stepMod":
+      return { ...base, stepMod: { steps: [1, 0, 0.75, 0, 1, 0, 0.5, 0], rate: 0.5, glide: 0 } };
+    case "sidechainEnv":
+      return { ...base, sidechainEnv: { sourceTrackId: "", attack: 0.01, release: 0.2, depth: 0.8 } };
+  }
 }
 
 export function canDropClipOnTrack(
@@ -810,6 +953,24 @@ export function resetStore(project: Project) {
   // persisted humanization is active immediately, not on next user edit.
   audio.setGlobalGroove(project.globalGroove);
   flushMixToEngine(project);
+  flushAutomationToEngine(project);
+}
+
+/**
+ * Push every track's automation lanes and the project's modulation sources
+ * and routings to the engine. Called after loading a project so that
+ * any saved automation data is active immediately on playback.
+ */
+export function flushAutomationToEngine(project: Project) {
+  for (const t of project.tracks) {
+    if (t.automationLanes && t.automationLanes.length > 0) {
+      audio.setTrackAutomation(t.id, t.automationLanes);
+    }
+  }
+  audio.setProjectModulation(
+    project.modulationSources ?? [],
+    project.modulationRoutings ?? [],
+  );
 }
 
 /**
@@ -913,6 +1074,8 @@ export function makeTrack(
       icon: KIND_ICON[kind],
       sourceLabel: KIND_SOURCE[kind],
     },
+    // v4 Phase 11 defaults
+    automationLanes: [],
   };
 }
 
@@ -989,6 +1152,43 @@ function seedDemoProject(): Project {
   });
   guitar.noteClips = [{ id: makeId(), start: 0, length: 16, notes: guitarNotes }];
 
+  // ---- Phase 11 demo: filter cutoff automation on piano + LFO → reverbSend ----
+  const demoLfoId = newId();
+  const demoRoutingId = newId();
+  piano.automationLanes = [
+    {
+      id: newId(),
+      param: "filterCutoff",
+      interpolation: "smooth",
+      breakpoints: [
+        { beat: 0, value: 0.3 },
+        { beat: 4, value: 0.85 },
+        { beat: 8, value: 0.5 },
+        { beat: 12, value: 0.95 },
+        { beat: 16, value: 0.3 },
+      ],
+    },
+  ];
+
+  const demoModSources = [
+    {
+      id: demoLfoId,
+      type: "lfo" as const,
+      label: "Piano Shimmer",
+      lfo: { shape: "sine" as const, rate: 0.25, depth: 0.6, phase: 0 },
+    },
+  ];
+
+  const demoModRoutings = [
+    {
+      id: demoRoutingId,
+      sourceId: demoLfoId,
+      trackId: piano.id,
+      param: "reverbSend" as const,
+      depth: 0.4,
+    },
+  ];
+
   return {
     id: newId(),
     name: "Cyber Dojo Demo",
@@ -1002,6 +1202,8 @@ function seedDemoProject(): Project {
     masterVolume: 0.8,
     tracks: [piano, guitar, drums, bass, vocals],
     midiMappings: [],
+    modulationSources: demoModSources,
+    modulationRoutings: demoModRoutings,
     updatedAt: Date.now(),
   };
 }

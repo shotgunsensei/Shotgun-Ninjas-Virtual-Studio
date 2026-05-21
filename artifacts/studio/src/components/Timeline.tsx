@@ -3,6 +3,7 @@ import { Flag, MoreVertical, Plus, X } from "lucide-react";
 import { useStore, getStore, canDropClipOnTrack } from "../store";
 import { audio } from "../lib/audio/engine";
 import type { Section, Track } from "../types";
+import { AutomationLaneStrip, AddAutomationLaneRow } from "./AutomationLane";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -493,45 +494,69 @@ const TimelineRow = memo(function TimelineRow({
 }) {
   const dropTargetTrackId = useStore((s) => s.dropTargetTrackId);
   const isDropTarget = dropTargetTrackId === track.id;
+  const lanes = track.automationLanes ?? [];
+  const hasLanes = lanes.length > 0;
+
   return (
     <div
-      data-track-row="true"
-      data-track-id={track.id}
-      data-track-kind={track.kind}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) {
-          getStore().set({ selectedTrackId: track.id });
-          getStore().selectClip(null);
-        }
-      }}
-      className={`relative h-16 border-b border-border/60 cursor-pointer ${
-        selected ? "bg-primary/5" : ""
-      } ${
-        isDropTarget ? "bg-neon/15 ring-1 ring-inset ring-neon/70" : ""
-      } grid-bg`}
+      className="border-b border-border/60"
       style={{ width: totalBeats * PX_PER_BEAT }}
     >
-      {track.noteClips.map((c) => (
-        <NoteClipView
-          key={c.id}
-          track={track}
-          clip={c}
-          isSelected={selectedClipId === c.id}
-        />
-      ))}
-      {track.audioClips.map((c) => (
-        <AudioClipView
-          key={c.id}
-          track={track}
-          clip={c}
-          isSelected={selectedClipId === c.id}
-        />
-      ))}
-      {track.kind === "vocals" &&
-        track.audioClips.length === 0 &&
-        track.noteClips.length === 0 && (
-          <VocalPlaceholder armed={track.armed} totalBeats={totalBeats} />
+      {/* Main clip row */}
+      <div
+        data-track-row="true"
+        data-track-id={track.id}
+        data-track-kind={track.kind}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) {
+            getStore().set({ selectedTrackId: track.id });
+            getStore().selectClip(null);
+          }
+        }}
+        className={`relative h-16 cursor-pointer ${
+          selected ? "bg-primary/5" : ""
+        } ${
+          isDropTarget ? "bg-neon/15 ring-1 ring-inset ring-neon/70" : ""
+        } grid-bg`}
+      >
+        {track.noteClips.map((c) => (
+          <NoteClipView
+            key={c.id}
+            track={track}
+            clip={c}
+            isSelected={selectedClipId === c.id}
+          />
+        ))}
+        {track.audioClips.map((c) => (
+          <AudioClipView
+            key={c.id}
+            track={track}
+            clip={c}
+            isSelected={selectedClipId === c.id}
+          />
+        ))}
+        {track.kind === "vocals" &&
+          track.audioClips.length === 0 &&
+          track.noteClips.length === 0 && (
+            <VocalPlaceholder armed={track.armed} totalBeats={totalBeats} />
+          )}
+        {/* Automation badge */}
+        {hasLanes && (
+          <div className="absolute bottom-1 left-1 px-1 rounded-sm bg-neon/20 border border-neon/40 font-mono text-[8px] text-neon pointer-events-none">
+            A
+          </div>
         )}
+      </div>
+      {/* Automation lanes */}
+      {lanes.map((lane) => (
+        <AutomationLaneStrip
+          key={lane.id}
+          track={track}
+          lane={lane}
+          totalBeats={totalBeats}
+        />
+      ))}
+      <AddAutomationLaneRow track={track} />
     </div>
   );
 });
@@ -1137,6 +1162,23 @@ function AudioClipView({
             clipName={clip.name}
           />
           <ClipDeleteButton trackId={track.id} clipId={clip.id} />
+          {/* Reverse toggle */}
+          <button
+            type="button"
+            className={`absolute top-0.5 right-12 w-5 h-4 text-[8px] font-mono rounded flex items-center justify-center border ${
+              (clip as import("../types").AudioClip).reversed
+                ? "bg-neon/30 border-neon/60 text-neon"
+                : "bg-background/40 border-border/40 text-muted-foreground hover:text-foreground"
+            }`}
+            title="Reverse clip playback"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              getStore().toggleAudioClipReverse(track.id, clip.id);
+            }}
+          >
+            ⇄
+          </button>
           <ClipResizeHandle edge="left" onMouseDown={leftResize.onMouseDown} />
           <ClipResizeHandle edge="right" onMouseDown={rightResize.onMouseDown} />
           <canvas

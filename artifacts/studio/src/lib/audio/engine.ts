@@ -1,6 +1,9 @@
 import * as Tone from "tone";
 import type {
   AnyPreset,
+  AutomationInterpolation,
+  AutomationLane,
+  AutomationParamId,
   DrumKitId,
   DrumPieceSettings,
   FxModuleId,
@@ -8,6 +11,8 @@ import type {
   GrooveSettings,
   InstrumentKind,
   MasterBusSettings,
+  ModulationRouting,
+  ModulationSource,
   NoteClip,
   SendBusId,
   SoundParams,
@@ -99,6 +104,21 @@ class AudioEngine {
   private metronomeAccent: Tone.MembraneSynth;
 
   private voices = new Map<string, TrackVoice>();
+
+  // ---- Phase 11: Automation & Modulation ----
+  private automationSchedulerId: number | null = null;
+  private trackAutomationData = new Map<string, AutomationLane[]>();
+  private modulationSources: ModulationSource[] = [];
+  private modulationRoutings: ModulationRouting[] = [];
+  private modOutputs = new Map<string, number>(); // sourceId -> 0..1
+  private lfoPhases = new Map<string, number>(); // sourceId -> radians
+  private driftState = new Map<string, { value: number; target: number }>();
+  // sourceId -> current step index (for step mod)
+  private stepModState = new Map<string, number>();
+  /** Whether any automation/modulation is active (used to avoid scheduling when nothing is registered). */
+  private get automationActive(): boolean {
+    return this.trackAutomationData.size > 0 || this.modulationSources.length > 0;
+  }
   /** Project-wide default groove merged under per-track overrides at
    *  schedule time. `undefined` means "no global humanization". */
   private globalGroove?: Partial<GrooveSettings>;
@@ -755,6 +775,186 @@ class AudioEngine {
     // no-op on the engine cache; see scheduleClip for read site.
   }
 
+  // ---- Phase 11: Automation & Modulation ----
+
+  /** Update the automation lanes for a single track. Pass an empty array to clear. */
+  setTrackAutomation(trackId: string, lanes: AutomationLane[]) {
+    if (lanes.length === 0) {
+      this.trackAutomationData.delete(trackId);
+    } else {
+      this.trackAutomationData.set(trackId, lanes);
+    }
+    this.ensureAutomationScheduler();
+  }
+
+  /** Remove all automation data for a track (called on track deletion). */
+  removeTrackAutomation(trackId: string) {
+    this.trackAutomationData.delete(trackId);
+  }
+
+  /** Replace the project-level modulation sources and routings. */
+  setProjectModulation(sources: ModulationSource[], routings: ModulationRouting[]) {
+    this.modulationSources = sources;
+    this.modulationRoutings = routings;
+    // Clean up internal state for removed sources
+    const live = new Set(sources.map((s) => s.id));
+    for (const id of this.modOutputs.keys()) {
+      if (!live.has(id)) {
+        this.modOutputs.delete(id);
+        this.lfoPhases.delete(id);
+        this.driftState.delete(id);
+        this.stepModState.delete(id);
+      }
+    }
+    this.ensureAutomationScheduler();
+  }
+
+  /** Get the live output value (0..1) for a modulation source. Used by the MOD panel UI. */
+  getModSourceOutput(sourceId: string): number {
+    return this.modOutputs.get(sourceId) ?? 0.5;
+  }
+
+  private ensureAutomationScheduler() {
+    if (this.automationSchedulerId !== null) return;
+    if (!this.automationActive) return;
+    this.automationSchedulerId = Tone.getTransport().scheduleRepeat(
+      (time) => this.automationTick(time),
+      0.02, // 20 ms resolution
+    );
+  }
+
+  private stopAutomationScheduler() {
+    if (this.automationSchedulerId !== null) {
+      try {
+        Tone.getTransport().clear(this.automationSchedulerId);
+      } catch {
+        // ignore
+      }
+      this.automationSchedulerId = null;
+    }
+  }
+
+  private automationTick(_time: number) {
+    if (!this.automationActive) return;
+    const beat = this.positionBeats();
+    const DT = 0.02; // seconds per tick
+
+    // Advance all modulation sources
+    for (const src of this.modulationSources) {
+      switch (src.type) {
+        case "lfo": {
+          const s = src.lfo ?? { shape: "sine", rate: 1, depth: 1, phase: 0 };
+          let phase = this.lfoPhases.get(src.id) ?? (s.phase * Math.PI / 180);
+          phase = (phase + 2 * Math.PI * s.rate * DT) % (2 * Math.PI);
+          this.lfoPhases.set(src.id, phase);
+          let raw = 0;
+          switch (s.shape) {
+            case "sine": raw = Math.sin(phase); break;
+            case "triangle": {
+              const p = (phase % (2 * Math.PI)) / (2 * Math.PI);
+              raw = 1 - 4 * Math.abs(p - 0.5);
+              break;
+            }
+            case "square": raw = Math.sin(phase) >= 0 ? 1 : -1; break;
+            case "sawtooth": raw = ((phase % (2 * Math.PI)) / Math.PI) - 1; break;
+          }
+          this.modOutputs.set(src.id, Math.max(0, Math.min(1, (raw * s.depth + 1) / 2)));
+          break;
+        }
+        case "randomDrift": {
+          const s = src.randomDrift ?? { rate: 0.5, smoothing: 0.9 };
+          let state = this.driftState.get(src.id);
+          if (!state) {
+            state = { value: 0.5, target: Math.random() };
+            this.driftState.set(src.id, state);
+          }
+          const speed = DT * s.rate * 5 * Math.max(0.05, 1 - s.smoothing);
+          state.value += (state.target - state.value) * speed;
+          if (Math.abs(state.value - state.target) < 0.02) {
+            state.target = Math.random();
+          }
+          this.modOutputs.set(src.id, Math.max(0, Math.min(1, state.value)));
+          break;
+        }
+        case "stepMod": {
+          const s = src.stepMod ?? { steps: [1, 0, 0.5, 0], rate: 1, glide: 0 };
+          const steps = s.steps.length > 0 ? s.steps : [0.5];
+          const beatsPerStep = Math.max(0.0625, s.rate);
+          const idx = Math.floor(beat / beatsPerStep) % steps.length;
+          const target = Math.max(0, Math.min(1, steps[idx] ?? 0));
+          if (s.glide > 0) {
+            const cur = this.modOutputs.get(src.id) ?? target;
+            const glideSpeed = DT * Math.max(0.1, 1 - s.glide) * 8;
+            this.modOutputs.set(src.id, Math.max(0, Math.min(1, cur + (target - cur) * glideSpeed)));
+          } else {
+            this.modOutputs.set(src.id, target);
+          }
+          break;
+        }
+        case "envelopeFollower":
+        case "sidechainEnv":
+          if (!this.modOutputs.has(src.id)) this.modOutputs.set(src.id, 0);
+          break;
+      }
+    }
+
+    // Apply automation + modulation to each track
+    for (const [trackId, lanes] of this.trackAutomationData) {
+      const voice = this.voices.get(trackId);
+      if (!voice) continue;
+      for (const lane of lanes) {
+        if (lane.breakpoints.length === 0) continue;
+        // Skip if the user has a manual override active for this param
+        if (this.paramOverrides.has(`${trackId}:${lane.param}`)) continue;
+        let value = evalBreakpoints(lane.breakpoints, beat, lane.interpolation);
+        // Add modulation offsets
+        for (const r of this.modulationRoutings) {
+          if (r.trackId !== trackId || r.param !== lane.param) continue;
+          const modOut = this.modOutputs.get(r.sourceId) ?? 0.5;
+          value = Math.max(0, Math.min(1, value + r.depth * (modOut - 0.5)));
+        }
+        this.applyAutomationParam(voice, lane.param, value);
+      }
+    }
+  }
+
+  private applyAutomationParam(v: TrackVoice, param: AutomationParamId, value: number) {
+    try {
+      const now = Tone.now();
+      switch (param) {
+        case "volume": {
+          const db = value <= 0.005 ? -60 : 20 * Math.log10(value);
+          v.channel.volume.setValueAtTime(db, now);
+          break;
+        }
+        case "pan":
+          v.channel.pan.setValueAtTime(Math.max(-1, Math.min(1, value * 2 - 1)), now);
+          break;
+        case "filterCutoff":
+          v.filter.frequency.setValueAtTime(200 + Math.pow(value, 2) * 17800, now);
+          break;
+        case "reverbSend":
+          v.reverb.wet.setValueAtTime(value, now);
+          break;
+        case "delaySend":
+          v.delay.wet.setValueAtTime(value, now);
+          break;
+        case "distortionAmount":
+          if (v.drive) v.drive.wet.setValueAtTime(value, now);
+          break;
+        case "effectWetDry":
+          if (v.chorus) v.chorus.wet.setValueAtTime(value, now);
+          break;
+        case "pitch":
+        case "sampleStart":
+          // Not directly applicable at audio-rate; gracefully skip
+          break;
+      }
+    } catch {
+      // best effort — ignore audio graph errors
+    }
+  }
+
   /** Project-wide groove default. Merged under per-track overrides at
    *  schedule time so tracks without their own groove still humanize. */
   setGlobalGroove(settings: Partial<GrooveSettings> | undefined) {
@@ -1114,6 +1314,16 @@ class AudioEngine {
   }
 
   /** Schedule a vocal audio clip via Tone.Player aligned to its start beat. */
+  // ---- Phase 11: parameter override (shift-click on channel strip) ----
+  private paramOverrides = new Set<string>(); // `${trackId}:${param}`
+
+  /** Temporarily suppress automation/modulation writes for a given param so the user can manually scrub it. */
+  setParamOverride(trackId: string, param: AutomationParamId, active: boolean) {
+    const key = `${trackId}:${param}`;
+    if (active) this.paramOverrides.add(key);
+    else this.paramOverrides.delete(key);
+  }
+
   scheduleAudioClip(
     track: Track,
     clip: {
@@ -1122,6 +1332,7 @@ class AudioEngine {
       durationSec: number;
       offsetSec?: number;
       blob?: Blob;
+      reversed?: boolean;
     },
   ): { id: number; player: Tone.Player } | null {
     const v = this.voices.get(track.id);
@@ -1129,6 +1340,8 @@ class AudioEngine {
     const url = URL.createObjectURL(clip.blob);
     const player = new Tone.Player(url).connect(v.channel);
     player.autostart = false;
+    // Phase 11: honour the reversed flag
+    if (clip.reversed) player.reverse = true;
     this.activeAudioPlayers.add(player);
     const origDispose = player.dispose.bind(player);
     player.dispose = () => {
@@ -1318,4 +1531,38 @@ export const audio = new AudioEngine();
 
 function clampDb(x: number): number {
   return Math.max(-18, Math.min(18, x));
+}
+
+/** Evaluate a sorted array of breakpoints at `beat` using the given interpolation mode. */
+export function evalBreakpoints(
+  breakpoints: { beat: number; value: number }[],
+  beat: number,
+  interpolation: AutomationInterpolation,
+): number {
+  if (breakpoints.length === 0) return 0.5;
+  const sorted = [...breakpoints].sort((a, b) => a.beat - b.beat);
+  if (beat <= sorted[0].beat) return sorted[0].value;
+  const last = sorted[sorted.length - 1];
+  if (beat >= last.beat) return last.value;
+
+  let lo = sorted[0];
+  let hi = last;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (sorted[i].beat <= beat && sorted[i + 1].beat >= beat) {
+      lo = sorted[i];
+      hi = sorted[i + 1];
+      break;
+    }
+  }
+
+  const span = hi.beat - lo.beat;
+  if (span <= 0) return lo.value;
+  const t = (beat - lo.beat) / span;
+
+  if (interpolation === "smooth") {
+    // Cubic smoothstep
+    const s = t * t * (3 - 2 * t);
+    return lo.value + (hi.value - lo.value) * s;
+  }
+  return lo.value + (hi.value - lo.value) * t;
 }

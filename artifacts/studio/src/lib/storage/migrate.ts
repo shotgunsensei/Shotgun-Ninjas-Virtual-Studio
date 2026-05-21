@@ -13,8 +13,10 @@ import { DEFAULT_MASTER_BUS } from "../audio/master";
  *        sample library normalised, sections/midiMappings defaulted.
  *   v3 — Phase 3 sharing polish: createdAt + optional `metadata`
  *        (creator/description/tags/mood/genre) populated.
+ *   v4 — Phase 11: automationLanes per track; modulationSources and
+ *        modulationRoutings at project level.
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 /** Known FX module ids — anything else is dropped (with a warning) by
  *  `checkProjectHealth`. Kept in sync with `FxModuleId`. */
@@ -86,6 +88,8 @@ function migrateTrack(t: unknown): Track {
     sends: { ...ZERO_SENDS, ...(raw.sends ?? {}) },
     fxRack: raw.fxRack ?? {},
     meta: raw.meta ?? {},
+    // v4: automation lanes default to empty array for older projects
+    automationLanes: Array.isArray(raw.automationLanes) ? raw.automationLanes : [],
   };
   return next;
 }
@@ -138,6 +142,9 @@ export function migrateProject(input: unknown): MigrationResult {
           ? raw.updatedAt
           : Date.now(),
     metadata: normalizeMetadata(raw.metadata),
+    // v4: Phase 11 — automation & modulation defaults
+    modulationSources: Array.isArray(raw.modulationSources) ? raw.modulationSources : [],
+    modulationRoutings: Array.isArray(raw.modulationRoutings) ? raw.modulationRoutings : [],
   };
 
   return {

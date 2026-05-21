@@ -176,6 +176,136 @@ export interface NoteEvent {
   flam?: boolean;
   /** If true, boost effective velocity (and render brighter). */
   accent?: boolean;
+  /** Phase 11: If true, play audio clip reversed. */
+  reversed?: boolean;
+}
+
+// ---- Phase 11: Automation & Modulation ----
+
+/** Automatable parameter identifiers for the per-track automation engine. */
+export type AutomationParamId =
+  | "volume"
+  | "pan"
+  | "filterCutoff"
+  | "reverbSend"
+  | "delaySend"
+  | "distortionAmount"
+  | "pitch"
+  | "sampleStart"
+  | "effectWetDry";
+
+/** Ordered list of all automatable param ids (used for pickers and iteration). */
+export const AUTOMATION_PARAM_IDS: AutomationParamId[] = [
+  "volume",
+  "pan",
+  "filterCutoff",
+  "reverbSend",
+  "delaySend",
+  "distortionAmount",
+  "pitch",
+  "sampleStart",
+  "effectWetDry",
+];
+
+export const AUTOMATION_PARAM_LABELS: Record<AutomationParamId, string> = {
+  volume: "Volume",
+  pan: "Pan",
+  filterCutoff: "Filter Cutoff",
+  reverbSend: "Reverb Send",
+  delaySend: "Delay Send",
+  distortionAmount: "Distortion",
+  pitch: "Pitch",
+  sampleStart: "Sample Start",
+  effectWetDry: "FX Wet/Dry",
+};
+
+/** Default normalized value (0..1) for each automatable param. */
+export const AUTOMATION_PARAM_DEFAULTS: Record<AutomationParamId, number> = {
+  volume: 0.78,
+  pan: 0.5,
+  filterCutoff: 1,
+  reverbSend: 0.1,
+  delaySend: 0,
+  distortionAmount: 0,
+  pitch: 0.5,
+  sampleStart: 0,
+  effectWetDry: 0,
+};
+
+/** A single breakpoint on an automation curve: position in beats + normalized value. */
+export interface AutomationBreakpoint {
+  beat: number;
+  value: number; // 0..1 normalized
+}
+
+export type AutomationInterpolation = "linear" | "smooth";
+
+/** One automation lane for a single parameter on a track. */
+export interface AutomationLane {
+  id: string;
+  param: AutomationParamId;
+  breakpoints: AutomationBreakpoint[];
+  interpolation: AutomationInterpolation;
+}
+
+// ---- Modulation Sources ----
+
+export type ModulationSourceType =
+  | "lfo"
+  | "envelopeFollower"
+  | "randomDrift"
+  | "stepMod"
+  | "sidechainEnv";
+
+export interface LfoSettings {
+  shape: "sine" | "triangle" | "square" | "sawtooth";
+  rate: number;  // Hz, 0.01..20
+  depth: number; // 0..1
+  phase: number; // 0..360 degrees
+}
+
+export interface EnvelopeFollowerSettings {
+  attack: number;     // 0..1
+  release: number;    // 0..1
+  sourceTrackId: string;
+}
+
+export interface RandomDriftSettings {
+  rate: number;      // Hz, 0.01..10
+  smoothing: number; // 0..1
+}
+
+export interface StepModSettings {
+  steps: number[];   // up to 16 values, each 0..1
+  rate: number;      // beats per step
+  glide: number;     // 0..1
+}
+
+export interface SidechainEnvSettings {
+  sourceTrackId: string;
+  attack: number;
+  release: number;
+  depth: number;
+}
+
+export interface ModulationSource {
+  id: string;
+  type: ModulationSourceType;
+  label: string;
+  lfo?: LfoSettings;
+  envelopeFollower?: EnvelopeFollowerSettings;
+  randomDrift?: RandomDriftSettings;
+  stepMod?: StepModSettings;
+  sidechainEnv?: SidechainEnvSettings;
+}
+
+/** Routes one modulation source's output to a track parameter with a depth scale. */
+export interface ModulationRouting {
+  id: string;
+  sourceId: string;
+  trackId: string;
+  param: AutomationParamId;
+  depth: number; // -1..1 (0 = no effect, 1 = full positive, -1 = full negative)
 }
 
 /** Division selector for the step sequencer / piano roll. */
@@ -208,6 +338,8 @@ export interface AudioClip {
   start: number;
   // seconds — visible/audible length of the clip
   durationSec: number;
+  /** Phase 11: If true, play this clip reversed. */
+  reversed?: boolean;
   // seconds — playback offset into the underlying blob; advances when the
   // user trims the left edge so the audio that remains visible keeps
   // playing from the correct sample.
@@ -280,6 +412,8 @@ export interface Track {
   fxRack?: FxRack;
   /** Channel-strip metadata (color, icon, source label). */
   meta?: ChannelStripMeta;
+  /** Phase 11: Per-track automation lanes (one per param). */
+  automationLanes?: AutomationLane[];
 }
 
 export type MidiTarget =
@@ -439,4 +573,8 @@ export interface Project {
   soundPackId?: string;
   /** Phase 13: Performance mode settings (persisted per project). */
   performance?: PerformanceSettings;
+  /** Phase 11: Global modulation sources (LFO, Envelope Follower, etc.). */
+  modulationSources?: ModulationSource[];
+  /** Phase 11: Modulation routings (source → track param). */
+  modulationRoutings?: ModulationRouting[];
 }

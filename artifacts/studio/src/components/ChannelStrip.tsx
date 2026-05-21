@@ -8,9 +8,41 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
 import { audio } from "../lib/audio/engine";
-import type { AnyPreset, InstrumentKind, MidiTarget, SendBusId, Track, TrackEq } from "../types";
+import type { AnyPreset, AutomationParamId, InstrumentKind, MidiTarget, SendBusId, Track, TrackEq } from "../types";
 import { SEND_BUS_IDS, SEND_BUS_LABELS } from "../types";
 import { MidiLearnButton } from "./MidiLearnButton";
+
+/** Returns true when any automation lane or modulation routing currently controls
+ *  the given param on the given track. Used to render the automation indicator dot. */
+function useIsParamControlled(trackId: string, param: AutomationParamId): boolean {
+  return useStore((s) => {
+    const t = s.project.tracks.find((x) => x.id === trackId);
+    if (t?.automationLanes?.some((l) => l.param === param && l.breakpoints.length > 0)) return true;
+    return !!(s.project.modulationRoutings ?? []).some(
+      (r) => r.trackId === trackId && r.param === param,
+    );
+  });
+}
+
+/** Small indicator dot shown next to a knob/slider when automation or modulation is active.
+ *  Shift-click the adjacent slider to temporarily override automation on that param. */
+function AutoDot({
+  trackId,
+  param,
+}: {
+  trackId: string;
+  param: AutomationParamId;
+}) {
+  const controlled = useIsParamControlled(trackId, param);
+  if (!controlled) return null;
+  return (
+    <span
+      className="inline-block w-1.5 h-1.5 rounded-full bg-neon glow-neon flex-none"
+      title={`Automation active · Shift-click slider to override`}
+      style={{ boxShadow: "0 0 4px #39ff14" }}
+    />
+  );
+}
 
 const PRESETS: Record<InstrumentKind, { value: AnyPreset; label: string }[]> = {
   piano: [
@@ -168,11 +200,16 @@ const ChannelStrip = memo(function ChannelStrip({
 
       <div className="flex items-center gap-1">
         <Volume2 className="w-3 h-3 text-muted-foreground" />
+        <AutoDot trackId={track.id} param="volume" />
         <Slider
           value={[track.volume * 100]}
           max={100}
           step={1}
           onValueChange={([v]) => getStore().patchTrack(track.id, { volume: (v ?? 0) / 100 })}
+          onMouseDown={(e) => {
+            if (e.shiftKey) audio.setParamOverride(track.id, "volume", true);
+          }}
+          onMouseUp={() => audio.setParamOverride(track.id, "volume", false)}
         />
         <MidiLearnButton target={{ kind: "track-volume", trackId: track.id }} small />
       </div>
@@ -181,11 +218,16 @@ const ChannelStrip = memo(function ChannelStrip({
 
       <div className="flex items-center gap-1">
         <span className="text-[9px] text-muted-foreground w-6">PAN</span>
+        <AutoDot trackId={track.id} param="pan" />
         <Slider
           value={[(track.pan + 1) * 50]}
           max={100}
           step={1}
           onValueChange={([v]) => getStore().patchTrack(track.id, { pan: ((v ?? 50) / 50) - 1 })}
+          onMouseDown={(e) => {
+            if (e.shiftKey) audio.setParamOverride(track.id, "pan", true);
+          }}
+          onMouseUp={() => audio.setParamOverride(track.id, "pan", false)}
         />
         <MidiLearnButton target={{ kind: "track-pan", trackId: track.id }} small />
       </div>

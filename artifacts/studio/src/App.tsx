@@ -12,6 +12,9 @@ import { ChannelStripsBar } from "./components/ChannelStrip";
 const MidiPanel = lazy(() =>
   import("./components/MidiPanel").then((m) => ({ default: m.MidiPanel })),
 );
+const ModulationPanel = lazy(() =>
+  import("./components/ModulationPanel").then((m) => ({ default: m.ModulationPanel })),
+);
 import { HelpDialog } from "./components/HelpDialog";
 import { StatusToast } from "./components/StatusToast";
 import { PwaUpdateToast } from "./components/PwaUpdateToast";
@@ -888,17 +891,7 @@ function Studio() {
             <div className="p-3 border-b border-border overflow-y-auto">
               {selectedTrack && <SelectedInstrument trackId={selectedTrack.id} />}
             </div>
-            <div className="p-3 flex-1 overflow-hidden">
-              <Suspense
-                fallback={
-                  <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Loading MIDI…
-                  </div>
-                }
-              >
-                <MidiPanel />
-              </Suspense>
-            </div>
+            <RightInspectorTabs />
           </aside>
         ) : (
           <CollapsedRail label="Inspector" side="right" onExpand={onShowRight} />
@@ -1015,6 +1008,59 @@ function PanelHeader({
       >
         <Icon className="w-3.5 h-3.5" />
       </button>
+    </div>
+  );
+}
+
+type RightTab = "midi" | "mod";
+
+function RightInspectorTabs() {
+  const [tab, setTab] = useState<RightTab>("midi");
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex border-b border-border/60 shrink-0">
+        {(["midi", "mod"] as RightTab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`flex-1 h-7 font-mono text-[10px] uppercase tracking-widest transition-colors ${
+              tab === t
+                ? "bg-neon/10 text-neon border-b-2 border-neon"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t === "midi" ? "MIDI" : "MOD"}
+          </button>
+        ))}
+      </div>
+      {/* Content */}
+      <div className="flex-1 overflow-hidden">
+        {tab === "midi" ? (
+          <div className="p-3 h-full overflow-y-auto">
+            <Suspense
+              fallback={
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Loading MIDI…
+                </div>
+              }
+            >
+              <MidiPanel />
+            </Suspense>
+          </div>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Loading MOD…
+              </div>
+            }
+          >
+            <ModulationPanel />
+          </Suspense>
+        )}
+      </div>
     </div>
   );
 }
