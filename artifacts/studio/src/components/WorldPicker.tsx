@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Globe, Play, Volume2, VolumeX } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Globe, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { WORLDS, type WorldId } from "../lib/worlds";
+import { WORLDS, type WorldId, getWorldPrefs, resetWorldPrefs } from "../lib/worlds";
 import { useWorld } from "../contexts/WorldContext";
 import { Tip } from "./Tip";
 import { useStore } from "../store";
@@ -52,6 +52,7 @@ export function WorldPickerModal({
 }) {
   const { activeWorld, setWorld, ambientEnabled, setAmbientEnabled } = useWorld();
   const [hovered, setHovered] = useState<WorldId | null>(null);
+  const [resetTick, setResetTick] = useState(0);
   const isTransient = useStore((s) => s.isTransientProject);
 
   const handleSelect = (id: WorldId) => {
@@ -64,6 +65,12 @@ export function WorldPickerModal({
     loadDemo(demoId);
     onOpenChange(false);
   };
+
+  const handleResetPrefs = useCallback((e: React.MouseEvent, worldId: WorldId) => {
+    e.stopPropagation();
+    resetWorldPrefs(worldId);
+    setResetTick((t) => t + 1);
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,6 +117,8 @@ export function WorldPickerModal({
           {WORLDS.map((world) => {
             const isActive = world.id === activeWorld.id;
             const isHovered = world.id === hovered;
+            // resetTick dependency forces re-read when prefs are cleared
+            const hasSavedPrefs = resetTick >= 0 && !!getWorldPrefs(world.id as WorldId);
             return (
               <button
                 key={world.id}
@@ -196,20 +205,35 @@ export function WorldPickerModal({
                   {world.lore}
                 </div>
 
-                {/* Load world demo button — only surfaces when no unsaved work */}
-                {isTransient && (
+                {/* Bottom actions row */}
+                {(isTransient || hasSavedPrefs) && (
                   <div
-                    className="mt-2 pt-2 border-t border-border/50"
+                    className="mt-2 pt-2 border-t border-border/50 flex gap-1.5"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      onClick={(e) => handleLoadDemo(e, world.demoId)}
-                      className="flex items-center gap-1 w-full justify-center h-6 rounded border border-border/70 text-muted-foreground hover:border-primary/50 hover:text-primary font-mono text-[9px] uppercase tracking-widest transition-colors"
-                    >
-                      <Play className="w-2.5 h-2.5" />
-                      Load world demo
-                    </button>
+                    {isTransient && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleLoadDemo(e, world.demoId)}
+                        className="flex items-center gap-1 flex-1 justify-center h-6 rounded border border-border/70 text-muted-foreground hover:border-primary/50 hover:text-primary font-mono text-[9px] uppercase tracking-widest transition-colors"
+                      >
+                        <Play className="w-2.5 h-2.5" />
+                        Load demo
+                      </button>
+                    )}
+                    {hasSavedPrefs && (
+                      <Tip label="Clear saved kit & BPM for this world">
+                        <button
+                          type="button"
+                          onClick={(e) => handleResetPrefs(e, world.id as WorldId)}
+                          className="flex items-center gap-1 flex-1 justify-center h-6 rounded border border-border/70 text-muted-foreground hover:border-destructive/50 hover:text-destructive font-mono text-[9px] uppercase tracking-widest transition-colors"
+                          aria-label={`Reset saved kit and BPM for ${world.name}`}
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Reset defaults
+                        </button>
+                      </Tip>
+                    )}
                   </div>
                 )}
               </button>

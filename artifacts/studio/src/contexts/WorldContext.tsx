@@ -14,8 +14,13 @@ import {
   applyWorldTheme,
   findWorld,
   getStoredWorldId,
+  getWorldPrefs,
+  saveWorldPrefs,
 } from "../lib/worlds";
 import { playWorldWelcome, startAmbientLoop, type AmbientLoop } from "../lib/worldAudio";
+import { getStore } from "../store";
+import { audio } from "../lib/audio/engine";
+import type { DrumKitId } from "../lib/audio/sounds/kits";
 
 const AMBIENT_VOLUME = 0.10;
 
@@ -146,6 +151,16 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
     (id: WorldId) => {
       const world = findWorld(id);
       if (!world) return;
+
+      // Save current world's kit + BPM before switching
+      const store = getStore();
+      const { project } = store.state;
+      const drumTrack = project.tracks.find((t) => t.kind === "drums");
+      saveWorldPrefs(activeWorldId, {
+        kitId: drumTrack?.kitId,
+        bpm: project.bpm,
+      });
+
       setActiveWorldId(id);
       applyWorldTheme(world);
 
@@ -155,6 +170,20 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
       if (ambientLoopRef.current) {
         ambientLoopRef.current.stop();
         ambientLoopRef.current = null;
+      }
+
+      // Restore saved kit + BPM for the new world (if any)
+      const savedPrefs = getWorldPrefs(id);
+      if (savedPrefs) {
+        if (savedPrefs.bpm !== undefined) {
+          const clampedBpm = Math.max(40, Math.min(240, savedPrefs.bpm));
+          store.patchProject({ bpm: clampedBpm });
+          audio.setBpm(clampedBpm);
+        }
+        if (savedPrefs.kitId !== undefined && drumTrack) {
+          store.patchTrack(drumTrack.id, { kitId: savedPrefs.kitId as DrumKitId });
+          audio.setKit(drumTrack.id, savedPrefs.kitId as DrumKitId);
+        }
       }
 
       // Play welcome cue — resume AudioContext if needed (browsers suspend by default)
@@ -189,7 +218,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
         // Ignore
       }
     },
-    [getAudioCtx, _cancelPendingAmbientStart],
+    [activeWorldId, getAudioCtx, _cancelPendingAmbientStart],
   );
 
   const setAmbientEnabled = useCallback((enabled: boolean) => {

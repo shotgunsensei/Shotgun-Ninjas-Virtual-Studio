@@ -264,6 +264,12 @@ export const WORLDS: StudioWorld[] = [
 ];
 
 const WORLD_STORAGE_KEY = "studio.world";
+const WORLD_PREFS_STORAGE_KEY = "studio.worldPrefs";
+
+export interface WorldPrefs {
+  kitId?: string;
+  bpm?: number;
+}
 
 export function getStoredWorldId(): WorldId {
   if (typeof localStorage === "undefined") return "dojo-dark";
@@ -287,4 +293,38 @@ export function applyWorldTheme(world: StudioWorld) {
   } catch {
     /* quota */
   }
+}
+
+function loadAllWorldPrefs(): Record<string, WorldPrefs> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(WORLD_PREFS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, WorldPrefs>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAllWorldPrefs(all: Record<string, WorldPrefs>) {
+  try {
+    localStorage.setItem(WORLD_PREFS_STORAGE_KEY, JSON.stringify(all));
+  } catch {
+    /* quota */
+  }
+}
+
+export function getWorldPrefs(worldId: string): WorldPrefs | undefined {
+  return loadAllWorldPrefs()[worldId];
+}
+
+export function saveWorldPrefs(worldId: string, prefs: WorldPrefs) {
+  const all = loadAllWorldPrefs();
+  all[worldId] = prefs;
+  saveAllWorldPrefs(all);
+}
+
+export function resetWorldPrefs(worldId: string) {
+  const all = loadAllWorldPrefs();
+  delete all[worldId];
+  saveAllWorldPrefs(all);
 }
