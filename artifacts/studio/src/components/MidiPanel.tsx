@@ -186,7 +186,7 @@ export function MidiPanel() {
       )}
 
       {midi.status === "ready" && (
-        <div className="mb-2">
+        <div className="mb-2 space-y-1">
           <Select
             value={midi.selectedId ?? ""}
             onValueChange={(v) => midi.selectInput(v || null)}
@@ -207,6 +207,34 @@ export function MidiPanel() {
               ))}
             </SelectContent>
           </Select>
+
+          {midi.selectedId && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-muted-foreground whitespace-nowrap">
+                Default ch
+              </span>
+              <Select
+                value={String(midi.selectedDeviceChannel)}
+                onValueChange={(v) =>
+                  midi.setDeviceChannel(midi.selectedId!, Number(v))
+                }
+              >
+                <SelectTrigger className="bg-background h-7 text-[11px] flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0" className="text-xs">
+                    Any channel
+                  </SelectItem>
+                  {Array.from({ length: 16 }, (_, i) => i + 1).map((ch) => (
+                    <SelectItem key={ch} value={String(ch)} className="text-xs">
+                      Channel {ch}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
       )}
 

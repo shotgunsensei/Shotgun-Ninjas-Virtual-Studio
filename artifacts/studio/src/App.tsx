@@ -61,7 +61,7 @@ import {
 import { checkProjectHealth, type HealthReport } from "./lib/storage/health";
 import { HealthBanner } from "./components/HealthBanner";
 import { RecoveryBanner } from "./components/RecoveryBanner";
-import { useMidiEvents } from "./lib/midi/midi";
+import { useMidiEvents, midiBus } from "./lib/midi/midi";
 import type { DrumPiece } from "./lib/audio/engine";
 import { initPluginSystem } from "./lib/plugins";
 import { useSettings } from "./lib/settings";
@@ -622,8 +622,14 @@ function Studio() {
         device: e.device,
       });
       const store = getStore();
-      // if learning, bind
+      // if learning, bind — but respect the device's default channel filter
       if (store.state.midiLearnTargetId && (e.type === "noteon" || e.type === "cc")) {
+        const defaultCh = midiBus.selectedDeviceChannel;
+        const eventCh = e.channel + 1; // 1-based
+        if (defaultCh !== 0 && eventCh !== defaultCh) {
+          // Wrong channel for this device — skip so only the preferred channel learns
+          return;
+        }
         store.bindMidiLearn(e.signature, e.device);
         store.setStatus(`MIDI learned: ${e.signature}`, "info");
         return;

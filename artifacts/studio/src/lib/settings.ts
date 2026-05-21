@@ -53,6 +53,11 @@ export interface StudioSettings {
   midiEnabled: boolean;
   midiInputId: string | null;
   midiPassthrough: boolean;
+  /**
+   * Per-device default channel preference. Key is the MIDI input device ID.
+   * Value is 1-16 for a specific channel, or 0 meaning "any channel".
+   */
+  midiDeviceChannels: Record<string, number>;
 
   // Phase 6: Pro Audio Engine
   latencyOffsetMs: number;
@@ -97,6 +102,7 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   midiEnabled: false,
   midiInputId: null,
   midiPassthrough: true,
+  midiDeviceChannels: {},
 
   latencyOffsetMs: 0,
   oversampleEnabled: false,

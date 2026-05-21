@@ -112,6 +112,34 @@ class MidiBus {
     this.notify();
   }
 
+  /** Returns the stored default channel (1-16) for the given device ID, or 0 if unset. */
+  getDeviceChannel(deviceId: string): number {
+    return getSettings().midiDeviceChannels?.[deviceId] ?? 0;
+  }
+
+  /** Persist a default channel (1-16) for a device. Pass 0 to clear (any channel). */
+  setDeviceChannel(deviceId: string, channel: number) {
+    const prev = getSettings().midiDeviceChannels ?? {};
+    const next = { ...prev };
+    if (channel === 0) {
+      delete next[deviceId];
+    } else {
+      next[deviceId] = channel;
+    }
+    try {
+      setSettings({ midiDeviceChannels: next });
+    } catch {
+      /* settings unavailable */
+    }
+    this.notify();
+  }
+
+  /** Default channel for the currently selected device, or 0 if none/unset. */
+  get selectedDeviceChannel(): number {
+    if (!this.selectedId) return 0;
+    return this.getDeviceChannel(this.selectedId);
+  }
+
   private bind(id: string | null) {
     if (!this.access) return;
     this.access.inputs.forEach((inp) => {
@@ -171,9 +199,12 @@ export function useMidi() {
     status: midiBus.status,
     inputs: midiBus.inputs,
     selectedId: midiBus.selectedId,
+    selectedDeviceChannel: midiBus.selectedDeviceChannel,
     error: midiBus.error,
     requestAccess: () => midiBus.requestAccess(),
     selectInput: (id: string | null) => midiBus.selectInput(id),
+    getDeviceChannel: (id: string) => midiBus.getDeviceChannel(id),
+    setDeviceChannel: (id: string, ch: number) => midiBus.setDeviceChannel(id, ch),
   };
 }
 
