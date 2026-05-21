@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "-_80wQQkbhk6k5j1Km4kE"
+uri = "file://artifacts/studio/public/og-image.png"
+type = "image"
+title = "generated_image"

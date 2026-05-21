@@ -108,10 +108,10 @@ export default function PressPage() {
                 filename="sn-studio-icon.svg"
               />
               <AssetCard
-                label="OG Image (JPG, 1200×630)"
+                label="OG Image (PNG, 1200×630)"
                 description="Social share card banner"
-                href="/opengraph.jpg"
-                filename="sn-studio-og.jpg"
+                href="/og-image.png"
+                filename="sn-studio-og.png"
               />
             </div>
             <div className="bg-background/40 border border-border rounded-lg p-4">
