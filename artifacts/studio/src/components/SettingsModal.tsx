@@ -68,12 +68,13 @@ export function SettingsModal({
           </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="audio" className="w-full">
-          <TabsList className="grid grid-cols-5 w-full bg-graphite/60">
+          <TabsList className="grid grid-cols-6 w-full bg-graphite/60">
             <TabsTrigger value="audio">Audio</TabsTrigger>
             <TabsTrigger value="ui">UI</TabsTrigger>
             <TabsTrigger value="project">Project</TabsTrigger>
-            <TabsTrigger value="keyboard">Keyboard</TabsTrigger>
+            <TabsTrigger value="keyboard">Keys</TabsTrigger>
             <TabsTrigger value="midi">MIDI</TabsTrigger>
+            <TabsTrigger value="interop">Formats</TabsTrigger>
           </TabsList>
 
           <TabsContent value="audio" className="space-y-3 pt-3">
@@ -281,6 +282,10 @@ export function SettingsModal({
               value={s.midiPassthrough}
               onChange={(v) => setSettings({ midiPassthrough: v })}
             />
+          </TabsContent>
+
+          <TabsContent value="interop">
+            <InteropTabContent />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -591,6 +596,110 @@ function MidiSection() {
           Mappings persist with your project. Sysex is never requested.
         </p>
       </div>
+    </div>
+  );
+}
+
+function InteropTabContent() {
+  const formats = [
+    {
+      id: "midi",
+      label: "MIDI (.mid)",
+      icon: "🎹",
+      desc: "Standard MIDI File (SMF Type 1). Export all instrument and drum tracks — import into Ableton, Logic, FL Studio, Reaper, GarageBand, and any notation app.",
+      status: "supported" as const,
+    },
+    {
+      id: "stems",
+      label: "Stems WAV (.wav)",
+      icon: "🎛️",
+      desc: "One isolated WAV per track, zipped together. Gives mixers and collaborators independent control over every element of the arrangement.",
+      status: "supported" as const,
+    },
+    {
+      id: "musicxml",
+      label: "MusicXML 4.0 (.musicxml)",
+      icon: "🎼",
+      desc: "Open standard for music notation. Import into MuseScore, Sibelius, Finale, Dorico, or Noteflight for printing, arranging or orchestration.",
+      status: "supported" as const,
+    },
+    {
+      id: "snproj",
+      label: "Project File (.snproj.json)",
+      icon: "📁",
+      desc: "Re-importable project snapshot with all track data, clip positions, BPM and mixer settings. Use to share sessions with other Shotgun Ninjas users or keep backups.",
+      status: "supported" as const,
+    },
+    {
+      id: "dawpack",
+      label: "DAW Pack (.zip)",
+      icon: "📦",
+      desc: "One-click bundle: full mix WAV + individual stems + MIDI files + project file + README with BPM, track listing and export timestamp.",
+      status: "supported" as const,
+    },
+    {
+      id: "dawproject",
+      label: "DAWproject (.dawproject)",
+      icon: "🔮",
+      desc: "Universal DAW interchange format supported by Bitwig, Reaper, and others. Full session graph export including automation lanes.",
+      status: "coming-soon" as const,
+      link: "https://dawproject.org",
+    },
+  ];
+
+  return (
+    <div className="space-y-3 pt-3 max-h-96 overflow-y-auto pr-1">
+      <p className="text-[11px] text-muted-foreground leading-snug">
+        Shotgun Ninjas exports to open formats so you can continue working in any DAW — no lock-in.
+        All exports respect the current export range (loop region or full project).
+      </p>
+      <div className="space-y-2">
+        {formats.map((f) => (
+          <div
+            key={f.id}
+            className={`border rounded-md p-3 ${
+              f.status === "coming-soon"
+                ? "border-border bg-background/30 opacity-70"
+                : "border-border bg-background/50"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base leading-none">{f.icon}</span>
+                <span className="font-mono text-xs font-medium">{f.label}</span>
+              </div>
+              {f.status === "coming-soon" ? (
+                <span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground border border-border rounded px-1.5 py-0.5 shrink-0">
+                  Coming Soon
+                </span>
+              ) : (
+                <span className="font-mono text-[9px] uppercase tracking-widest text-emerald-500 border border-emerald-500/30 rounded px-1.5 py-0.5 shrink-0">
+                  Supported
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-snug mt-1.5 ml-6">
+              {f.desc}
+              {f.link && (
+                <>
+                  {" "}
+                  <a
+                    href={f.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    Spec ↗
+                  </a>
+                </>
+              )}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        Open the Export dialog (Ctrl/⌘+E) to access all supported formats.
+      </p>
     </div>
   );
 }

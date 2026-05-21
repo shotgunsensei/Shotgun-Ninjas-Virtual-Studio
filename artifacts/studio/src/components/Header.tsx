@@ -56,9 +56,15 @@ import {
   studioExportFilename,
   studioProjectFilename,
   detectClipping,
+  exportStemsZip,
+  exportDawPack,
   type ExportFormat,
   type RenderProgress,
+  type StemProgress,
 } from "../lib/audio/export";
+import { encodeMidiFile, encodeSingleTrackMidi } from "../lib/export/midi";
+import { encodeMusicXml, hasMelodicTracks } from "../lib/export/musicxml";
+import { parseMidiFile, midiToTrackPartials } from "../lib/import/midi";
 import {
   saveProject,
   listProjects,
@@ -190,6 +196,11 @@ export function Header() {
   );
   const cancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const jsonImportRef = useRef<HTMLInputElement>(null);
+  const midiImportRef = useRef<HTMLInputElement>(null);
+  const [stemsExporting, setStemsExporting] = useState(false);
+  const [stemProgress, setStemProgress] = useState<StemProgress | null>(null);
+  const [dawPackExporting, setDawPackExporting] = useState(false);
+  const [dawPackProgress, setDawPackProgress] = useState<StemProgress | null>(null);
 
   const fsSaveSupported = canUseFileSystemAccess("save");
   const fsOpenSupported = canUseFileSystemAccess("open");
@@ -478,6 +489,141 @@ export function Header() {
     getStore().setStatus(`Duplicated to “${dup.name}”`, "info");
   };
 
+  const onMidiExport = () => {
+    try {
+      const proj = getStore().state.project;
+      const exportTracks = proj.tracks.filter((t) => t.kind !== "vocals");
+      if (exportTracks.length === 0) {
+        getStore().setStatus("No exportable tracks for MIDI.", "warn");
+        return;
+      }
+      const startBeat = loopOnly && proj.loopEnabled ? proj.loopStartBeat : 0;
+      const endBeat = loopOnly && proj.loopEnabled ? proj.loopEndBeat : proj.bars * 4;
+      const bytes = encodeMidiFile(proj, exportTracks, { startBeat, endBeat });
+      const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/midi" });
+      const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
+      downloadBlob(blob, `${safe}.mid`);
+      getStore().setStatus("MIDI exported", "info");
+      setExportModalOpen(false);
+    } catch (err) {
+      getStore().setStatus(`MIDI export failed: ${(err as Error).message}`, "error");
+    }
+  };
+
+  const onMusicXmlExport = () => {
+    try {
+      const proj = getStore().state.project;
+      const startBeat = loopOnly && proj.loopEnabled ? proj.loopStartBeat : 0;
+      const endBeat = loopOnly && proj.loopEnabled ? proj.loopEndBeat : proj.bars * 4;
+      const xml = encodeMusicXml(proj, { startBeat, endBeat });
+      const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
+      const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
+      downloadBlob(blob, `${safe}.musicxml`);
+      getStore().setStatus("MusicXML exported", "info");
+      setExportModalOpen(false);
+    } catch (err) {
+      getStore().setStatus(`MusicXML export failed: ${(err as Error).message}`, "error");
+    }
+  };
+
+  const onStemsExport = async () => {
+    if (stemsExporting || dawPackExporting) return;
+    audio.stop();
+    setStemsExporting(true);
+    setStemProgress(null);
+    setExportModalOpen(false);
+    try {
+      const proj = getStore().state.project;
+      const options = { loopOnly };
+      const blob = await exportStemsZip(proj, options, (p) => setStemProgress(p));
+      const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
+      downloadBlob(blob, `${safe}_stems.zip`);
+      getStore().setStatus("Stems exported", "info");
+    } catch (err) {
+      getStore().setStatus(`Stems export failed: ${(err as Error).message}`, "error");
+    } finally {
+      setStemsExporting(false);
+      setStemProgress(null);
+    }
+  };
+
+  const onDawPackExport = async () => {
+    if (stemsExporting || dawPackExporting) return;
+    audio.stop();
+    setDawPackExporting(true);
+    setDawPackProgress(null);
+    setExportModalOpen(false);
+    try {
+      const proj = getStore().state.project;
+      const options = { loopOnly };
+      const startBeat = loopOnly && proj.loopEnabled ? proj.loopStartBeat : 0;
+      const endBeat = loopOnly && proj.loopEnabled ? proj.loopEndBeat : proj.bars * 4;
+      const projectJson = await projectToJson(proj, "project-only");
+      const melodicTracks = proj.tracks.filter(
+        (t) => t.kind !== "vocals" && t.noteClips.some((c) => c.notes.length > 0),
+      );
+      const midiFiles = melodicTracks.map((t) => ({
+        name: t.name,
+        bytes: encodeSingleTrackMidi(proj, t, { startBeat, endBeat }),
+      }));
+      const blob = await exportDawPack(proj, projectJson, midiFiles, options, (p) =>
+        setDawPackProgress(p),
+      );
+      const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
+      downloadBlob(blob, `${safe}_daw_pack.zip`);
+      getStore().setStatus("DAW Pack exported", "info");
+    } catch (err) {
+      getStore().setStatus(`DAW Pack export failed: ${(err as Error).message}`, "error");
+    } finally {
+      setDawPackExporting(false);
+      setDawPackProgress(null);
+    }
+  };
+
+  const onMidiImport = async (file: File) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = parseMidiFile(buffer);
+      const trackPartials = midiToTrackPartials(parsed);
+      if (trackPartials.length === 0) {
+        getStore().setStatus("No note tracks found in MIDI file.", "warn");
+        return;
+      }
+      const newId = () =>
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      for (const tp of trackPartials) {
+        const trackId = newId();
+        const newTrack = {
+          id: trackId,
+          name: tp.name || "MIDI Import",
+          kind: tp.kind,
+          preset: tp.kind === "drums" ? "acoustic" : "electric",
+          volume: 0.78,
+          pan: 0,
+          muted: false,
+          solo: false,
+          armed: false,
+          noteClips: [tp.clip],
+          audioClips: [],
+          fx: { reverb: 0.1, delay: 0, filter: 1 },
+          eq: { low: 0, mid: 0, high: 0, hpfOn: false, hpfHz: 80 },
+          sends: { roomReverb: 0, neonHall: 0, tapeDelay: 0, darkSlapback: 0 },
+          fxRack: {},
+          meta: {},
+        } as import("../types").Track;
+        getStore().patchProject({
+          tracks: [...getStore().state.project.tracks, newTrack],
+        });
+      }
+      getStore().setStatus(
+        `Imported ${trackPartials.length} track${trackPartials.length > 1 ? "s" : ""} from MIDI`,
+        "info",
+      );
+    } catch (err) {
+      getStore().setStatus(`MIDI import failed: ${(err as Error).message}`, "error");
+    }
+  };
+
   const openLoadDialog = async () => {
     setProjects(await listProjects());
     setOpenLoad(true);
@@ -732,7 +878,58 @@ export function Header() {
             e.target.value = "";
           }}
         />
+        <input
+          ref={midiImportRef}
+          type="file"
+          accept=".mid,.midi,audio/midi,audio/x-midi"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void onMidiImport(f);
+            e.target.value = "";
+          }}
+        />
       </div>
+
+      {/* Stems export progress banner */}
+      {stemsExporting && (
+        <div className="fixed bottom-4 right-4 z-50 bg-graphite border border-border rounded-lg p-3 shadow-xl min-w-56">
+          <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground mb-1">
+            Rendering stems…
+          </div>
+          {stemProgress && (
+            <div className="text-xs font-mono truncate text-foreground/80">
+              {stemProgress.trackName}
+              {stemProgress.trackCount > 1 &&
+                ` (${stemProgress.trackIndex + 1}/${stemProgress.trackCount})`}
+            </div>
+          )}
+          <Progress value={
+            stemProgress
+              ? Math.round(((stemProgress.trackIndex) / stemProgress.trackCount) * 100)
+              : 10
+          } className="mt-2 h-1.5" />
+        </div>
+      )}
+
+      {/* DAW Pack export progress banner */}
+      {dawPackExporting && (
+        <div className="fixed bottom-4 right-4 z-50 bg-graphite border border-border rounded-lg p-3 shadow-xl min-w-56">
+          <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground mb-1">
+            Building DAW Pack…
+          </div>
+          {dawPackProgress && (
+            <div className="text-xs font-mono truncate text-foreground/80">
+              {dawPackProgress.phase === "packaging" ? "Packaging…" : dawPackProgress.trackName}
+            </div>
+          )}
+          <Progress value={
+            dawPackProgress
+              ? Math.round(((dawPackProgress.trackIndex) / Math.max(1, dawPackProgress.trackCount)) * 100)
+              : 10
+          } className="mt-2 h-1.5" />
+        </div>
+      )}
 
       {/* Export modal — opens chooser, kicks off render, shows progress, cancel, errors */}
       <Dialog
@@ -892,6 +1089,73 @@ export function Header() {
                     192 kbps stereo. Smaller, easy to share.
                   </div>
                 </button>
+              </div>
+
+              <div className="pt-1 border-t border-border space-y-2">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground pt-1">
+                  DAW &amp; Format Exports
+                </div>
+                <button
+                  type="button"
+                  onClick={onDawPackExport}
+                  className="w-full text-left border border-primary/50 rounded-md p-3 bg-primary/5 hover:bg-primary/10 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1 text-primary">
+                    <Download className="w-3.5 h-3.5" /> Export to DAW Pack
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    ZIP with mix, stems, MIDI and project file. Open in Ableton, Logic, FL Studio…
+                  </div>
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={onMidiExport}
+                    className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                  >
+                    <div className="font-mono text-sm">Export MIDI</div>
+                    <div className="text-xs text-muted-foreground">
+                      Standard .mid — import into any DAW or notation app.
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onStemsExport}
+                    className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                  >
+                    <div className="font-mono text-sm">Export Stems (ZIP)</div>
+                    <div className="text-xs text-muted-foreground">
+                      One WAV per track. Re-mix in any DAW.
+                    </div>
+                  </button>
+                  {hasMelodicTracks(project) && (
+                    <button
+                      type="button"
+                      onClick={onMusicXmlExport}
+                      className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                    >
+                      <div className="font-mono text-sm">Export MusicXML</div>
+                      <div className="text-xs text-muted-foreground">
+                        Open in MuseScore, Sibelius, Finale, Dorico…
+                      </div>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportModalOpen(false);
+                      midiImportRef.current?.click();
+                    }}
+                    className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                  >
+                    <div className="font-mono text-sm flex items-center gap-1">
+                      <Upload className="w-3.5 h-3.5" /> Import MIDI
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Add tracks from a .mid file.
+                    </div>
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border">

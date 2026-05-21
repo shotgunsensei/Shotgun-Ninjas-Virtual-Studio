@@ -542,6 +542,158 @@ function dateStamp(): string {
   return `${y}-${m}-${day}`;
 }
 
+// ---------- Stems & DAW Pack export ----------
+
+export interface StemProgress {
+  trackIndex: number;
+  trackCount: number;
+  trackName: string;
+  phase: RenderPhase | "packaging";
+}
+
+export type StemsProgressCallback = (p: StemProgress) => void;
+
+/**
+ * Render a single track in isolation and return a WAV Blob.
+ * All other tracks are muted for this render pass.
+ */
+export async function renderStemForTrack(
+  project: Project,
+  trackId: string,
+  options: RenderOptions = {},
+): Promise<Blob> {
+  const soloProject: Project = {
+    ...project,
+    tracks: project.tracks.map((t) => ({
+      ...t,
+      muted: t.id !== trackId,
+      solo: false,
+    })),
+  };
+  const result = await renderProject(soloProject, "wav", undefined, options);
+  return result.blob;
+}
+
+/**
+ * Render each un-muted, non-vocals track as its own WAV file.
+ * Returns an array of { name, wav } ready to zip.
+ */
+export async function renderStems(
+  project: Project,
+  options: RenderOptions = {},
+  onProgress?: StemsProgressCallback,
+): Promise<Array<{ name: string; wav: Blob }>> {
+  const anySolo = project.tracks.some((t) => t.solo);
+  const eligible = project.tracks.filter(
+    (t) => !t.muted && (!anySolo || t.solo) && t.kind !== "vocals",
+  );
+  const out: Array<{ name: string; wav: Blob }> = [];
+  for (let i = 0; i < eligible.length; i++) {
+    const t = eligible[i];
+    onProgress?.({
+      trackIndex: i,
+      trackCount: eligible.length,
+      trackName: t.name,
+      phase: "rendering",
+    });
+    const wav = await renderStemForTrack(project, t.id, options);
+    out.push({ name: t.name, wav });
+  }
+  return out;
+}
+
+/**
+ * Assemble a Stems ZIP: stems/<trackname>.wav for each eligible track.
+ */
+export async function exportStemsZip(
+  project: Project,
+  options: RenderOptions = {},
+  onProgress?: StemsProgressCallback,
+): Promise<Blob> {
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  const stems = await renderStems(project, options, onProgress);
+  for (const s of stems) {
+    onProgress?.({
+      trackIndex: stems.indexOf(s),
+      trackCount: stems.length,
+      trackName: s.name,
+      phase: "packaging",
+    });
+    const safe = safeFilename(s.name);
+    zip.file(`${safe}.wav`, s.wav);
+  }
+  return zip.generateAsync({ type: "blob" });
+}
+
+/**
+ * Build the full DAW Pack ZIP containing:
+ *   mix.wav, stems/<track>.wav, midi/<track>.mid,
+ *   project.snproj.json, README.txt
+ */
+export async function exportDawPack(
+  project: Project,
+  projectJson: string,
+  midiFiles: Array<{ name: string; bytes: Uint8Array }>,
+  options: RenderOptions = {},
+  onProgress?: StemsProgressCallback,
+): Promise<Blob> {
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+
+  // Full mix
+  onProgress?.({ trackIndex: 0, trackCount: 1, trackName: "Full mix", phase: "rendering" });
+  const mixResult = await renderProject(project, "wav", undefined, options);
+  zip.file("mix.wav", mixResult.blob);
+
+  // Stems
+  const stems = await renderStems(project, options, (p) => {
+    onProgress?.(p);
+  });
+  const stemsFolder = zip.folder("stems")!;
+  for (const s of stems) {
+    stemsFolder.file(`${safeFilename(s.name)}.wav`, s.wav);
+  }
+
+  // MIDI files
+  const midiFolder = zip.folder("midi")!;
+  for (const m of midiFiles) {
+    midiFolder.file(`${safeFilename(m.name)}.mid`, m.bytes);
+  }
+
+  // Project file
+  zip.file("project.snproj.json", projectJson);
+
+  // README
+  const anySolo = project.tracks.some((t) => t.solo);
+  const trackLines = project.tracks
+    .filter((t) => !t.muted && (!anySolo || t.solo))
+    .map((t) => `  - ${t.name} (${t.kind})`)
+    .join("\n");
+  const now = new Date();
+  const readme =
+    `Shotgun Ninjas Virtual Studio — DAW Pack\n` +
+    `=========================================\n\n` +
+    `Project : ${project.name}\n` +
+    `BPM     : ${project.bpm}\n` +
+    `Bars    : ${project.bars}\n` +
+    `Exported: ${now.toISOString()}\n\n` +
+    `Tracks\n------\n${trackLines}\n\n` +
+    `Contents\n--------\n` +
+    `  mix.wav            — Full stereo mixdown\n` +
+    `  stems/<name>.wav   — Individual track renders\n` +
+    `  midi/<name>.mid    — MIDI data for melodic tracks\n` +
+    `  project.snproj.json — Re-importable project file\n\n` +
+    `Open mix.wav or any stems/*.wav in Ableton, Logic, FL Studio, Reaper, etc.\n` +
+    `Import midi/*.mid into any DAW or notation app (MuseScore, Sibelius, Finale).\n` +
+    `Import project.snproj.json back into Shotgun Ninjas Virtual Studio.\n\n` +
+    `Made with Shotgun Ninjas Virtual Studio — https://shotgunninjas.com/studio\n`;
+  zip.file("README.txt", readme);
+
+  onProgress?.({ trackIndex: 0, trackCount: 1, trackName: "Packaging…", phase: "packaging" });
+  return zip.generateAsync({ type: "blob" });
+}
+
 /**
  * Scan an AudioBuffer for samples above 0 dBFS. Returns the peak in dBFS
  * and a clipping flag, used to surface the master clipping warning in the
