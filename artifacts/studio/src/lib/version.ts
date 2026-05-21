@@ -4,7 +4,7 @@
  * Bumped manually as each Phase 3 task lands. Surfaced in the footer,
  * the About dialog, and any future PWA update toast.
  */
-export const APP_VERSION = "3.2.0-share";
+export const APP_VERSION = "4.0.0-launch";
 export const APP_NAME = "Shotgun Ninjas Virtual Studio";
 /** Canonical landing URL stamped on exported projects so a JSON file
  *  always tells you where it came from. The browser preview rewrites

@@ -5,15 +5,19 @@ import { AboutDialog } from "./AboutDialog";
 
 /**
  * Tiny footer strip pinned at the bottom of the studio shell. Surfaces
- * the app version (so users can quote it in bug reports) and a discreet
- * About link that opens the brand / changelog / diagnostics surface.
+ * the app version and links to Changelog, Credits, Press, and About.
  */
 export function StudioFooter() {
   const [open, setOpen] = useState(false);
   return (
     <>
       <div className="h-5 px-3 flex items-center justify-between border-t border-border bg-graphite/60 text-[9px] font-mono uppercase tracking-widest text-muted-foreground select-none">
-        <span>Shotgun Ninjas · free forever</span>
+        <div className="flex items-center gap-4">
+          <span>Shotgun Ninjas · free forever</span>
+          <a href="/changelog" className="hover:text-foreground transition-colors">Changelog</a>
+          <a href="/credits" className="hover:text-foreground transition-colors">Credits</a>
+          <a href="/press" className="hover:text-foreground transition-colors">Press</a>
+        </div>
         <button
           type="button"
           onClick={() => setOpen(true)}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import {
   Save,
   FolderOpen,
@@ -16,7 +17,9 @@ import {
   Info,
   Share2,
   Tag,
+  Home,
 } from "lucide-react";
+import { ShareCardModal, type ShareCardData } from "./ShareCardModal";
 import { ProjectInfoDialog } from "./ProjectInfoDialog";
 import { ImportSummaryDialog } from "./ImportSummaryDialog";
 import {
@@ -92,10 +95,13 @@ import {
 
 export function Header() {
   const project = useStore((s) => s.project);
+  const [, setLocation] = useLocation();
   const [openLoad, setOpenLoad] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [shareCardOpen, setShareCardOpen] = useState(false);
+  const [shareCardData, setShareCardData] = useState<ShareCardData | null>(null);
   const showShortcutsButton = useSettings((s) => s.showShortcutsButton);
   const [isFullscreen, setIsFullscreen] = useState(
     typeof document !== "undefined" && !!document.fullscreenElement,
@@ -279,6 +285,14 @@ export function Header() {
         getStore().setStatus(`Exported ${format.toUpperCase()}`, "info");
       }
       if (format === "wav") setLastWav({ blob: result.blob, filename });
+      // Offer the share card after any successful export
+      setShareCardData({
+        projectName: proj.name,
+        bpm: proj.bpm,
+        genre: (proj as Record<string, unknown>).genre as string | undefined,
+        exportDate: new Date(),
+      });
+      setShareCardOpen(true);
     } catch (err) {
       const msg = (err as Error).message || "Export failed";
       if (msg === "Export cancelled") {
@@ -742,15 +756,33 @@ export function Header() {
   return (
     <header className="h-14 border-b border-border flex items-center px-4 gap-4 bg-graphite">
       <div className="flex items-center gap-3">
-        <Logo className="w-9 h-9" />
-        <div className="leading-tight">
-          <div className="font-display text-sm tracking-[0.2em] text-foreground/90">
-            SHOTGUN NINJAS
+        <button
+          type="button"
+          onClick={() => setLocation("/")}
+          className="flex items-center gap-3 hover:opacity-75 transition-opacity"
+          title="Back to home"
+          aria-label="Back to home"
+        >
+          <Logo className="w-9 h-9" />
+          <div className="leading-tight">
+            <div className="font-display text-sm tracking-[0.2em] text-foreground/90">
+              SHOTGUN NINJAS
+            </div>
+            <div className="font-mono text-[10px] tracking-[0.3em] text-primary uppercase">
+              Virtual Studio
+            </div>
           </div>
-          <div className="font-mono text-[10px] tracking-[0.3em] text-primary uppercase">
-            Virtual Studio
-          </div>
-        </div>
+        </button>
+        <Tip label="Back to home">
+          <button
+            type="button"
+            onClick={() => setLocation("/")}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Back to home"
+          >
+            <Home className="w-3.5 h-3.5" />
+          </button>
+        </Tip>
       </div>
 
       <div className="h-8 w-px bg-border mx-2" />
@@ -1464,6 +1496,11 @@ export function Header() {
         summary={importSummary}
         onCancel={() => setImportSummary(null)}
         onConfirm={confirmImport}
+      />
+      <ShareCardModal
+        open={shareCardOpen}
+        onOpenChange={setShareCardOpen}
+        data={shareCardData}
       />
     </header>
   );

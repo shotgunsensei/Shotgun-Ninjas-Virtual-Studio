@@ -1,9 +1,9 @@
 {
   "name": "Shotgun Ninjas Virtual Studio",
   "short_name": "SN Studio",
-  "description": "Free browser beat studio by Shotgun Ninjas Productions",
-  "start_url": ".",
-  "scope": ".",
+  "description": "Free browser beat studio by Shotgun Ninjas Productions. Drum sequencer, piano roll, mixer, MIDI, WAV/MP3 export.",
+  "start_url": "/studio",
+  "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0c0c0c",
@@ -39,6 +39,21 @@
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open Studio",
+      "short_name": "Studio",
+      "description": "Jump straight to the DAW",
+      "url": "/studio",
+      "icons": [{ "src": "pwa-icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Changelog",
+      "short_name": "What's New",
+      "description": "See recent updates",
+      "url": "/changelog"
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { Suspense } from "react";
-import App from "./App";
+import { Router } from "wouter";
+import { AppRouter } from "./router";
 import "./index.css";
 import { initPwa } from "./lib/pwa";
 
@@ -17,7 +18,9 @@ function Loading() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <Suspense fallback={<Loading />}>
-    <App />
-  </Suspense>,
+  <Router>
+    <Suspense fallback={<Loading />}>
+      <AppRouter />
+    </Suspense>
+  </Router>,
 );
