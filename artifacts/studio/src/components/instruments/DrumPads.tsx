@@ -935,7 +935,7 @@ function PieceMixer({ track }: { track: Track }) {
       <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
         Piece Mixer
       </div>
-      <div className="grid grid-cols-[2.5rem_repeat(7,1fr)_auto_auto] gap-x-1 gap-y-0.5 items-center text-[9px] font-mono text-muted-foreground">
+      <div className="grid grid-cols-[2.5rem_repeat(7,1fr)_auto_auto_auto_auto_auto] gap-x-1 gap-y-0.5 items-center text-[9px] font-mono text-muted-foreground">
         <div />
         <div className="text-center">Vol</div>
         <div className="text-center">Pan</div>
@@ -946,6 +946,9 @@ function PieceMixer({ track }: { track: Track }) {
         <div className="text-center">Dly</div>
         <div className="text-center px-1">M</div>
         <div className="text-center px-1">S</div>
+        <div className="text-center" title="MIDI: Volume">Mv</div>
+        <div className="text-center" title="MIDI: Pan">Mp</div>
+        <div className="text-center" title="MIDI: Pitch">Mt</div>
         {DRUM_PIECES.map((p) => {
           const s = settings[p] ?? {};
           const v = (k: keyof DrumPieceSettings, dflt: number) =>
@@ -953,6 +956,8 @@ function PieceMixer({ track }: { track: Track }) {
           return (
             <Row
               key={p}
+              trackId={track.id}
+              pieceId={p}
               label={LABELS[p]}
               vol={v("volume", 1)}
               pan={v("pan", 0)}
@@ -973,6 +978,8 @@ function PieceMixer({ track }: { track: Track }) {
 }
 
 function Row({
+  trackId,
+  pieceId,
   label,
   vol,
   pan,
@@ -985,6 +992,8 @@ function Row({
   solo,
   onChange,
 }: {
+  trackId: string;
+  pieceId: string;
   label: string;
   vol: number;
   pan: number;
@@ -1036,6 +1045,9 @@ function Row({
       >
         S
       </button>
+      <MidiLearnButton small target={{ kind: "drum-piece-volume", trackId, pieceId }} />
+      <MidiLearnButton small target={{ kind: "drum-piece-pan", trackId, pieceId }} />
+      <MidiLearnButton small target={{ kind: "drum-piece-pitch", trackId, pieceId }} />
     </>
   );
 }

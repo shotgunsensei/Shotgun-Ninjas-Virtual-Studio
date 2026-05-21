@@ -699,6 +699,42 @@ function Studio() {
             }
             break;
           }
+          case "drum-piece-volume": {
+            if (e.type !== "cc") break;
+            const dpvt = m.target as { kind: "drum-piece-volume"; trackId: string; pieceId: string };
+            const vol = e.data2 / 127;
+            const tr = store.state.project.tracks.find((t) => t.id === dpvt.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [dpvt.pieceId]: { ...(cur[dpvt.pieceId] ?? {}), volume: vol } };
+            audio.setPieceSetting(dpvt.trackId, dpvt.pieceId as DrumPiece, { volume: vol }, next);
+            store.patchTrack(dpvt.trackId, { pieceSettings: next });
+            break;
+          }
+          case "drum-piece-pan": {
+            if (e.type !== "cc") break;
+            const dppt = m.target as { kind: "drum-piece-pan"; trackId: string; pieceId: string };
+            const pan = (e.data2 / 127) * 2 - 1;
+            const tr = store.state.project.tracks.find((t) => t.id === dppt.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [dppt.pieceId]: { ...(cur[dppt.pieceId] ?? {}), pan } };
+            audio.setPieceSetting(dppt.trackId, dppt.pieceId as DrumPiece, { pan }, next);
+            store.patchTrack(dppt.trackId, { pieceSettings: next });
+            break;
+          }
+          case "drum-piece-pitch": {
+            if (e.type !== "cc") break;
+            const dpitt = m.target as { kind: "drum-piece-pitch"; trackId: string; pieceId: string };
+            const pitch = (e.data2 / 127) * 24 - 12;
+            const tr = store.state.project.tracks.find((t) => t.id === dpitt.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [dpitt.pieceId]: { ...(cur[dpitt.pieceId] ?? {}), pitch } };
+            audio.setPieceSetting(dpitt.trackId, dpitt.pieceId as DrumPiece, { pitch }, next);
+            store.patchTrack(dpitt.trackId, { pieceSettings: next });
+            break;
+          }
         }
       }
     },

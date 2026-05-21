@@ -430,7 +430,10 @@ export type MidiTarget =
   | { kind: "track-send"; trackId: string; busId: SendBusId }
   | { kind: "track-eq"; trackId: string; band: "low" | "mid" | "high" | "hpf" }
   | { kind: "fx-amount"; trackId: string; moduleId: FxModuleId }
-  | { kind: "drum-pad"; pad: string };
+  | { kind: "drum-pad"; pad: string }
+  | { kind: "drum-piece-volume"; trackId: string; pieceId: string }
+  | { kind: "drum-piece-pan"; trackId: string; pieceId: string }
+  | { kind: "drum-piece-pitch"; trackId: string; pieceId: string };
 
 export interface MidiMapping {
   id: string;

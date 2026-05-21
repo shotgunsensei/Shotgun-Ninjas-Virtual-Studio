@@ -984,6 +984,18 @@ export function midiTargetLabel(target: MidiTarget, project: Project): string {
     }
     case "drum-pad":
       return `Drum Pad: ${target.pad}`;
+    case "drum-piece-volume": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Volume`;
+    }
+    case "drum-piece-pan": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Pan`;
+    }
+    case "drum-piece-pitch": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Pitch`;
+    }
   }
 }
 
