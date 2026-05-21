@@ -735,6 +735,54 @@ function Studio() {
             store.patchTrack(dpitt.trackId, { pieceSettings: next });
             break;
           }
+          case "drum-piece-decay": {
+            if (e.type !== "cc") break;
+            const t = m.target as { kind: "drum-piece-decay"; trackId: string; pieceId: string };
+            const decay = e.data2 / 127;
+            const tr = store.state.project.tracks.find((tk) => tk.id === t.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [t.pieceId]: { ...(cur[t.pieceId] ?? {}), decay } };
+            audio.setPieceSetting(t.trackId, t.pieceId as DrumPiece, { decay }, next);
+            store.patchTrack(t.trackId, { pieceSettings: next });
+            break;
+          }
+          case "drum-piece-cutoff": {
+            if (e.type !== "cc") break;
+            const t = m.target as { kind: "drum-piece-cutoff"; trackId: string; pieceId: string };
+            const cutoff = e.data2 / 127;
+            const tr = store.state.project.tracks.find((tk) => tk.id === t.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [t.pieceId]: { ...(cur[t.pieceId] ?? {}), cutoff } };
+            audio.setPieceSetting(t.trackId, t.pieceId as DrumPiece, { cutoff }, next);
+            store.patchTrack(t.trackId, { pieceSettings: next });
+            break;
+          }
+          case "drum-piece-reverb": {
+            if (e.type !== "cc") break;
+            const t = m.target as { kind: "drum-piece-reverb"; trackId: string; pieceId: string };
+            const reverbSend = e.data2 / 127;
+            const tr = store.state.project.tracks.find((tk) => tk.id === t.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [t.pieceId]: { ...(cur[t.pieceId] ?? {}), reverbSend } };
+            audio.setPieceSetting(t.trackId, t.pieceId as DrumPiece, { reverbSend }, next);
+            store.patchTrack(t.trackId, { pieceSettings: next });
+            break;
+          }
+          case "drum-piece-delay": {
+            if (e.type !== "cc") break;
+            const t = m.target as { kind: "drum-piece-delay"; trackId: string; pieceId: string };
+            const delaySend = e.data2 / 127;
+            const tr = store.state.project.tracks.find((tk) => tk.id === t.trackId);
+            if (!tr) break;
+            const cur = tr.pieceSettings ?? {};
+            const next = { ...cur, [t.pieceId]: { ...(cur[t.pieceId] ?? {}), delaySend } };
+            audio.setPieceSetting(t.trackId, t.pieceId as DrumPiece, { delaySend }, next);
+            store.patchTrack(t.trackId, { pieceSettings: next });
+            break;
+          }
         }
       }
     },

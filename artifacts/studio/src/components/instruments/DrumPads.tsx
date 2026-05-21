@@ -1048,6 +1048,10 @@ function Row({
       <MidiLearnButton small target={{ kind: "drum-piece-volume", trackId, pieceId }} />
       <MidiLearnButton small target={{ kind: "drum-piece-pan", trackId, pieceId }} />
       <MidiLearnButton small target={{ kind: "drum-piece-pitch", trackId, pieceId }} />
+      <MidiLearnButton small target={{ kind: "drum-piece-decay", trackId, pieceId }} />
+      <MidiLearnButton small target={{ kind: "drum-piece-cutoff", trackId, pieceId }} />
+      <MidiLearnButton small target={{ kind: "drum-piece-reverb", trackId, pieceId }} />
+      <MidiLearnButton small target={{ kind: "drum-piece-delay", trackId, pieceId }} />
     </>
   );
 }

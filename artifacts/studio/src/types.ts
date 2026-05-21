@@ -433,7 +433,11 @@ export type MidiTarget =
   | { kind: "drum-pad"; pad: string }
   | { kind: "drum-piece-volume"; trackId: string; pieceId: string }
   | { kind: "drum-piece-pan"; trackId: string; pieceId: string }
-  | { kind: "drum-piece-pitch"; trackId: string; pieceId: string };
+  | { kind: "drum-piece-pitch"; trackId: string; pieceId: string }
+  | { kind: "drum-piece-decay"; trackId: string; pieceId: string }
+  | { kind: "drum-piece-cutoff"; trackId: string; pieceId: string }
+  | { kind: "drum-piece-reverb"; trackId: string; pieceId: string }
+  | { kind: "drum-piece-delay"; trackId: string; pieceId: string };
 
 export interface MidiMapping {
   id: string;

@@ -996,6 +996,22 @@ export function midiTargetLabel(target: MidiTarget, project: Project): string {
       const t = project.tracks.find((tr) => tr.id === target.trackId);
       return `${t?.name ?? "Drums"} · ${target.pieceId} Pitch`;
     }
+    case "drum-piece-decay": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Decay`;
+    }
+    case "drum-piece-cutoff": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Cutoff`;
+    }
+    case "drum-piece-reverb": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Reverb Send`;
+    }
+    case "drum-piece-delay": {
+      const t = project.tracks.find((tr) => tr.id === target.trackId);
+      return `${t?.name ?? "Drums"} · ${target.pieceId} Delay Send`;
+    }
   }
 }
 
