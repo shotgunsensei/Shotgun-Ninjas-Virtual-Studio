@@ -8,6 +8,7 @@ import type {
   PianoPreset,
   VocalsPreset,
 } from "../../types";
+import { makeWorkletSampledDrum } from "./worklet-sample-player";
 
 /**
  * Voice construction module.
@@ -910,11 +911,17 @@ function makeSampledDrum(url: string, fallback: DrumVoice, volumeDb = 0): DrumVo
   };
 }
 
-/** Build the acoustic kit from Berklee CDN samples with synth fallbacks. */
+/** Build the acoustic kit from Berklee CDN samples with synth fallbacks.
+ *
+ *  Kick and snare use `makeWorkletSampledDrum` so their playback is routed
+ *  through SamplePlayerProcessor on the audio thread — eliminating main-thread
+ *  scheduling jitter on the most timing-critical hits. All other pieces keep
+ *  the existing Tone.Player path until the worklet benefit is confirmed by ear.
+ */
 function buildAcousticSampledKit(): DrumKit {
   return {
-    kick:    makeSampledDrum(AK.kick,  makeKick("acoustic"),      -2),
-    snare:   makeSampledDrum(AK.snare, makeSnare("acoustic"),     -4),
+    kick:    makeWorkletSampledDrum(AK.kick,  makeKick("acoustic"),      -2),
+    snare:   makeWorkletSampledDrum(AK.snare, makeSnare("acoustic"),     -4),
     clap:    makeSampledDrum(AK.clap,  makeClap(),                -6),
     hat:     makeSampledDrum(AK.hat,   makeHat("acoustic", false),-8),
     ohat:    makeSampledDrum(AK.ohat,  makeHat("acoustic", true), -6),

@@ -28,6 +28,7 @@ import { SHORTCUTS } from "./ShortcutOverlay";
 import { useMidi } from "../lib/midi/midi";
 import { getStore, useStore } from "../store";
 import { lookaheadScheduler } from "../lib/audio/lookahead-scheduler";
+import { audio } from "../lib/audio/engine";
 import { useWorld } from "../contexts/WorldContext";
 import { WorldPickerModal } from "./WorldPicker";
 
@@ -157,6 +158,8 @@ export function SettingsModal({
                   });
                 }}
               />
+
+              <WorkletDrumsToggleRow />
 
               <LatencyCalibrationRow
                 latencyOffsetMs={s.latencyOffsetMs}
@@ -465,6 +468,49 @@ function SliderRow({
           {Math.round(value * 100)}
         </span>
       </div>
+    </Row>
+  );
+}
+
+/**
+ * A/B toggle for the AudioWorklet sample player path on kick and snare.
+ * Reads the live engine flag (not persisted — resets to `true` on reload,
+ * which is the desired default). Useful for A/B comparison during a session.
+ */
+function WorkletDrumsToggleRow() {
+  const [enabled, setEnabled] = useState(() => {
+    try {
+      return (audio as unknown as { getWorkletDrumsEnabled?: () => boolean })
+        .getWorkletDrumsEnabled?.() ?? true;
+    } catch {
+      return true;
+    }
+  });
+
+  const workletReady = audio.getWorkletStatus().ready;
+
+  return (
+    <Row
+      label="Worklet drum player (kick & snare)"
+      hint={
+        workletReady
+          ? "Routes kick and snare through the audio thread for sample-accurate timing. Toggle to A/B compare against the main-thread Tone.Player path."
+          : "AudioWorklet not yet active — enable audio first to use this path."
+      }
+    >
+      <Switch
+        checked={enabled}
+        disabled={!workletReady}
+        onCheckedChange={(v) => {
+          setEnabled(v);
+          try {
+            (audio as unknown as { setWorkletDrumsEnabled?: (on: boolean) => void })
+              .setWorkletDrumsEnabled?.(v);
+          } catch {
+            // ignore if audio not yet unlocked
+          }
+        }}
+      />
     </Row>
   );
 }

@@ -23,6 +23,10 @@ import type {
 import { SEND_BUS_IDS } from "../../types";
 import { MasterChain } from "./master";
 import { workletManager } from "./worklet-manager";
+import {
+  getWorkletPlayerEnabled,
+  setWorkletPlayerEnabled,
+} from "./worklet-sample-player";
 import { lookaheadScheduler } from "./lookahead-scheduler";
 import {
   announceSamplerLoadIfNeeded,
@@ -574,6 +578,23 @@ class AudioEngine {
    */
   getWorkletStatus(): { ready: boolean; fallback: boolean } {
     return { ready: workletManager.ready, fallback: workletManager.fallback };
+  }
+
+  /**
+   * A/B toggle: enable or disable the SamplePlayerProcessor path for drum
+   * voices that support it (kick and snare in the acoustic kit).
+   *
+   * When disabled, those voices fall back to Tone.Player (main-thread
+   * scheduling). Toggle this at runtime to compare timing accuracy by ear.
+   * The setting takes effect on the next drum hit — no rebuild needed.
+   */
+  setWorkletDrumsEnabled(enabled: boolean): void {
+    setWorkletPlayerEnabled(enabled);
+  }
+
+  /** Returns whether the AudioWorklet sample player path is currently on. */
+  getWorkletDrumsEnabled(): boolean {
+    return getWorkletPlayerEnabled();
   }
 
   // ---- tracks ----
