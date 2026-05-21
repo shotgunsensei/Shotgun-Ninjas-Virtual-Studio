@@ -40,6 +40,7 @@ import { AboutDialog } from "./AboutDialog";
 import { Tip } from "./Tip";
 import { GlossaryPanel } from "./GlossaryPanel";
 import { LessonsPanel } from "./LessonsPanel";
+import { ShortcutsPanel } from "./ShortcutsPanel";
 import {
   useSettings,
   getSettings,
@@ -136,6 +137,7 @@ export function Header() {
       setGlossaryOpen(true);
     };
     const onOpenLessons = () => setLessonsOpen(true);
+    const onOpenShortcutsPanel = () => setShortcutsPanelOpen(true);
     window.addEventListener("studio:open-shortcuts", onOpen);
     window.addEventListener("studio:open-export", onExport);
     window.addEventListener("studio:open-settings", onSettings);
@@ -146,6 +148,7 @@ export function Header() {
     window.addEventListener("studio:open-load", onOpenLoad);
     window.addEventListener("studio:open-glossary", onOpenGlossary);
     window.addEventListener("studio:open-lessons", onOpenLessons);
+    window.addEventListener("studio:open-shortcuts-panel", onOpenShortcutsPanel);
     return () => {
       window.removeEventListener("studio:open-shortcuts", onOpen);
       window.removeEventListener("studio:open-export", onExport);
@@ -157,6 +160,7 @@ export function Header() {
       window.removeEventListener("studio:open-load", onOpenLoad);
       window.removeEventListener("studio:open-glossary", onOpenGlossary);
       window.removeEventListener("studio:open-lessons", onOpenLessons);
+      window.removeEventListener("studio:open-shortcuts-panel", onOpenShortcutsPanel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -261,6 +265,7 @@ export function Header() {
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryTerm, setGlossaryTerm] = useState<string | undefined>(undefined);
   const [lessonsOpen, setLessonsOpen] = useState(false);
+  const [shortcutsPanelOpen, setShortcutsPanelOpen] = useState(false);
 
   const fsSaveSupported = canUseFileSystemAccess("save");
   const fsOpenSupported = canUseFileSystemAccess("open");
@@ -974,6 +979,17 @@ export function Header() {
             Lessons
           </Button>
         </Tip>
+        <Tip label="Keyboard shortcut reference card">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShortcutsPanelOpen(true)}
+            className="font-mono text-xs"
+            aria-label="Open keyboard shortcuts reference"
+          >
+            Shortcuts
+          </Button>
+        </Tip>
         {showShortcutsButton && (
           <Tip label="Keyboard shortcuts (?)">
             <Button
@@ -1648,6 +1664,7 @@ export function Header() {
         initialTerm={glossaryTerm}
       />
       <LessonsPanel open={lessonsOpen} onOpenChange={setLessonsOpen} />
+      <ShortcutsPanel open={shortcutsPanelOpen} onOpenChange={setShortcutsPanelOpen} />
       <ProjectInfoDialog
         open={projectInfoOpen}
         onOpenChange={setProjectInfoOpen}

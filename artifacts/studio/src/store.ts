@@ -325,7 +325,6 @@ class Store {
     const e = Math.max(s + 1, Math.min(bars, endBar));
     this.set({ exportStartBar: s, exportEndBar: e });
   }
-  }
 
   setStatus(message: string | null, variant: "info" | "warn" | "error" | null = "info") {
     this.set({ statusMessage: message, statusVariant: variant });
