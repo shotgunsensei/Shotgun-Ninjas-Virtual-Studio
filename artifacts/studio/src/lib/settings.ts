@@ -76,6 +76,10 @@ export interface StudioSettings {
   exportStartBar: number;
   /** Stored as an absolute bar number; clamped to project.bars on read. */
   exportEndBar: number;
+
+  // Phase 17: Release Engineering & Trust Layer
+  /** Show a backup reminder toast every N sessions. 0 = disabled. */
+  backupReminderSessions: number;
 }
 
 export const DEFAULT_SETTINGS: StudioSettings = {
@@ -109,6 +113,8 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   exportRangeMode: "whole",
   exportStartBar: 1,
   exportEndBar: 9999,
+
+  backupReminderSessions: 5,
 };
 
 const STORAGE_KEY = "studio.settings.v1";

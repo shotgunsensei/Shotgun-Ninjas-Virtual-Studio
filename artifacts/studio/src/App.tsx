@@ -5,6 +5,9 @@ import { StudioFooter } from "./components/Footer";
 import { TransportBar } from "./components/TransportBar";
 import { Timeline } from "./components/Timeline";
 import { ChannelStripsBar } from "./components/ChannelStrip";
+import { CorruptionRecoveryDialog } from "./components/CorruptionRecoveryDialog";
+import { MissingSamplesDialog, type MissingSampleEntry } from "./components/MissingSamplesDialog";
+import { ChangelogDialog } from "./components/ChangelogDialog";
 // MidiPanel is heavier than the rest of the inspector (pulls in the
 // MIDI runtime + device listing) and lives in a collapsible aside, so
 // lazy-loading it keeps the initial bundle smaller without affecting
@@ -22,7 +25,7 @@ import { BackgroundFx } from "./components/BackgroundFx";
 import { Logo } from "./components/Logo";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { applySideEffects, getSettings, subscribeSettings } from "./lib/settings";
-import { APP_NAME } from "./lib/version";
+import { APP_NAME, APP_VERSION } from "./lib/version";
 import { DropZone } from "./components/DropZone";
 import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
 import { StudioErrorBoundary } from "./components/ErrorBoundary";
@@ -91,8 +94,17 @@ interface BootstrapResult {
     /** The draft is for the project that the user just loaded. */
     forCurrentProject: boolean;
   } | null;
+  /** Non-null when the saved project JSON could not be deserialized. */
+  corruption: { rawJson: string | null } | null;
+  /** Missing samples detected after project load. */
+  missingSamples: MissingSampleEntry[];
 }
-let bootstrapResult: BootstrapResult = { health: null, draftAvailable: null };
+let bootstrapResult: BootstrapResult = {
+  health: null,
+  draftAvailable: null,
+  corruption: null,
+  missingSamples: [],
+};
 
 function bootstrap() {
   if (bootstrapPromise) return bootstrapPromise;
@@ -102,6 +114,7 @@ function bootstrap() {
     initPluginSystem();
     const settings = getSettings();
     let project = null;
+    let corruptRawJson: string | null = null;
     try {
       const lastId = await getLastProjectId();
       // Honor the "Restore last project on launch" preference — when the
@@ -111,9 +124,18 @@ function bootstrap() {
       }
     } catch (err) {
       console.error("bootstrap load failed", err);
+      // Try to preserve the raw JSON for the corruption recovery dialog
+      // so the user can download it for manual inspection.
+      try {
+        corruptRawJson = JSON.stringify((err as { raw?: unknown }).raw ?? null);
+      } catch {
+        corruptRawJson = null;
+      }
+      bootstrapResult.corruption = { rawJson: corruptRawJson };
       project = null;
     }
-    if (!project) {
+    if (!project && !bootstrapResult.corruption) {
+      // Normal first-run: no saved project.
       project = defaultProject();
       resetStore(project);
       let shown = false;
@@ -123,21 +145,53 @@ function bootstrap() {
         /* ignore */
       }
       if (!shown) getStore().set({ showOnboarding: true });
-    } else {
+    } else if (!project && bootstrapResult.corruption) {
+      // Corrupted project: start fresh silently; the dialog will show.
+      project = defaultProject();
+      resetStore(project);
+    } else if (project) {
       resetStore(project);
     }
     try {
-      for (const t of project.tracks) audio.ensureTrack(t);
-      flushMixToEngine(project);
+      for (const t of project!.tracks) audio.ensureTrack(t);
+      flushMixToEngine(project!);
     } catch (err) {
       console.error("bootstrap engine init failed", err);
     }
     // Project health: surface missing samples / orphaned data so the
     // user can act on it before they edit on top of broken state.
     try {
-      bootstrapResult.health = checkProjectHealth(project);
+      bootstrapResult.health = checkProjectHealth(project!);
     } catch (err) {
       console.error("health check failed", err);
+    }
+    // Collect missing samples for the MissingSamplesDialog wizard.
+    try {
+      const missing: MissingSampleEntry[] = [];
+      for (const s of (project!.samples ?? [])) {
+        if (s.blobKey && !s.blob) {
+          missing.push({
+            sampleId: s.id,
+            blobKey: s.blobKey,
+            name: s.name,
+          });
+        }
+      }
+      for (const t of project!.tracks) {
+        for (const c of t.audioClips ?? []) {
+          if (c.blobKey && !c.blob) {
+            missing.push({
+              sampleId: c.id,
+              blobKey: c.blobKey,
+              name: c.name ?? `Clip on ${t.name}`,
+              trackName: t.name,
+            });
+          }
+        }
+      }
+      bootstrapResult.missingSamples = missing;
+    } catch (err) {
+      console.error("missing samples scan failed", err);
     }
     // Draft recovery: offer the user a chance to recover a draft
     // snapshot if it's newer than the last durable save for this
@@ -150,9 +204,9 @@ function bootstrap() {
       ]);
       if (
         draft &&
-        draft.projectId === project.id &&
+        draft.projectId === project!.id &&
         (!lastSaved ||
-          lastSaved.projectId !== project.id ||
+          lastSaved.projectId !== project!.id ||
           draft.ts > lastSaved.ts + 250)
       ) {
         bootstrapResult.draftAvailable = {
@@ -172,8 +226,12 @@ function getBootstrapResult(): BootstrapResult {
   return bootstrapResult;
 }
 
-function clearBootstrapResult(key: "health" | "draftAvailable") {
-  bootstrapResult = { ...bootstrapResult, [key]: null };
+function clearBootstrapResult(key: "health" | "draftAvailable" | "corruption" | "missingSamples") {
+  if (key === "missingSamples") {
+    bootstrapResult = { ...bootstrapResult, missingSamples: [] };
+  } else {
+    bootstrapResult = { ...bootstrapResult, [key]: null };
+  }
 }
 
 // Apply the persisted theme + UI preferences synchronously at module-
@@ -710,6 +768,87 @@ function Studio() {
       return r ? { ts: r.ts } : null;
     },
   );
+
+  // ---- Corruption recovery dialog ----
+  const [corruptionInfo, setCorruptionInfo] = useState<{ rawJson: string | null } | null>(
+    () => getBootstrapResult().corruption,
+  );
+
+  // ---- Missing samples wizard ----
+  const [missingSamples, setMissingSamples] = useState<MissingSampleEntry[]>(
+    () => getBootstrapResult().missingSamples,
+  );
+  const [missingSamplesOpen, setMissingSamplesOpen] = useState(
+    () => getBootstrapResult().missingSamples.length > 0,
+  );
+
+  // ---- Changelog auto-open on version bump ----
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("studio.lastSeenVersion");
+      if (stored !== APP_VERSION) {
+        // New version detected — auto-open the changelog once, then mark seen.
+        if (stored !== null) {
+          setChangelogOpen(true);
+        }
+        localStorage.setItem("studio.lastSeenVersion", APP_VERSION);
+      }
+    } catch {
+      /* localStorage unavailable */
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Backup reminder (session count) ----
+  useEffect(() => {
+    try {
+      const n = parseInt(localStorage.getItem("studio.sessionCount") ?? "0", 10);
+      const next = (isNaN(n) ? 0 : n) + 1;
+      localStorage.setItem("studio.sessionCount", String(next));
+      const threshold = getSettings().backupReminderSessions;
+      if (threshold > 0 && next % threshold === 0) {
+        window.setTimeout(() => {
+          getStore().setStatus(
+            "You've been here a while — consider exporting a backup (.snproj.json).",
+            "info",
+          );
+        }, 4000);
+      }
+    } catch {
+      /* ignore */
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ---- Corruption recovery handlers ----
+  const onCorruptionRestoreAutosave = async () => {
+    try {
+      const snap = await loadDraft();
+      if (snap) {
+        const recovered = await hydrateDraft(snap);
+        audio.stop();
+        resetStore(recovered);
+        for (const t of recovered.tracks) audio.ensureTrack(t);
+        flushMixToEngine(recovered);
+        setHealthReport(checkProjectHealth(recovered));
+        getStore().setStatus("Autosave restored", "info");
+      } else {
+        getStore().setStatus("No autosave found — starting fresh", "warn");
+      }
+    } catch (err) {
+      getStore().setStatus(`Recovery failed: ${(err as Error).message}`, "error");
+    } finally {
+      setCorruptionInfo(null);
+      clearBootstrapResult("corruption");
+    }
+  };
+
+  const onCorruptionStartFresh = () => {
+    setCorruptionInfo(null);
+    clearBootstrapResult("corruption");
+    getStore().set({ showOnboarding: true });
+  };
+
   const onRecoverDraft = async () => {
     try {
       const snap = await loadDraft();
@@ -992,6 +1131,36 @@ function Studio() {
       />
       <PendingSampleHost />
       <StudioFooter />
+
+      {/* Corruption recovery — blocks all interaction until resolved */}
+      <CorruptionRecoveryDialog
+        open={!!corruptionInfo}
+        rawJson={corruptionInfo?.rawJson ?? null}
+        onRestoreAutosave={onCorruptionRestoreAutosave}
+        onStartFresh={onCorruptionStartFresh}
+      />
+
+      {/* Missing samples wizard */}
+      <MissingSamplesDialog
+        open={missingSamplesOpen && missingSamples.length > 0}
+        entries={missingSamples}
+        onClose={() => {
+          setMissingSamplesOpen(false);
+          setMissingSamples([]);
+          clearBootstrapResult("missingSamples");
+        }}
+        onMuteTrack={(sampleId) => {
+          const tracks = getStore().state.project.tracks.map((t) => {
+            const hasMissing = t.audioClips.some((c) => c.id === sampleId);
+            if (hasMissing) return { ...t, muted: true };
+            return t;
+          });
+          getStore().patchProject({ tracks });
+        }}
+      />
+
+      {/* Changelog — auto-opens on version bump */}
+      <ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} />
     </div>
   );
 }

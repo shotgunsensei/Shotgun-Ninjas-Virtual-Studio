@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Copy } from "lucide-react";
+import { Copy, Download, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
 import { APP_VERSION, APP_NAME } from "../lib/version";
 import { listProjects } from "../lib/storage/db";
 
@@ -27,6 +27,12 @@ interface DiagnosticsSnapshot {
   savedProjects: number | "unavailable";
   storageUsageMb: number | "unavailable";
   storageQuotaMb: number | "unavailable";
+}
+
+interface CompatResult {
+  label: string;
+  status: "ok" | "warn" | "error";
+  note: string;
 }
 
 function detectBrowser(ua: string): string {
@@ -73,7 +79,6 @@ async function gather(): Promise<DiagnosticsSnapshot> {
     try {
       if (typeof window === "undefined") return "unknown";
       if (window.matchMedia?.("(display-mode: standalone)").matches) return true;
-      // iOS Safari uses a non-standard property.
       const navAny = navigator as unknown as { standalone?: boolean };
       if (navAny.standalone) return true;
       return false;
@@ -109,6 +114,63 @@ async function gather(): Promise<DiagnosticsSnapshot> {
   };
 }
 
+function checkBrowserCompat(): CompatResult[] {
+  const results: CompatResult[] = [];
+
+  const hasAudioCtx =
+    typeof window !== "undefined" &&
+    (typeof AudioContext !== "undefined" || typeof (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext !== "undefined");
+  results.push({
+    label: "AudioContext",
+    status: hasAudioCtx ? "ok" : "error",
+    note: hasAudioCtx ? "Audio engine available" : "Audio engine unavailable — studio cannot play sound",
+  });
+
+  const hasIDB = typeof indexedDB !== "undefined";
+  results.push({
+    label: "IndexedDB",
+    status: hasIDB ? "ok" : "error",
+    note: hasIDB ? "Project storage available" : "Project storage unavailable — save/load disabled",
+  });
+
+  const hasWebMidi =
+    typeof navigator !== "undefined" && "requestMIDIAccess" in navigator;
+  results.push({
+    label: "Web MIDI",
+    status: hasWebMidi ? "ok" : "warn",
+    note: hasWebMidi ? "MIDI controller input available" : "MIDI controller input disabled in this browser",
+  });
+
+  const hasSAB = typeof SharedArrayBuffer !== "undefined";
+  results.push({
+    label: "SharedArrayBuffer",
+    status: hasSAB ? "ok" : "warn",
+    note: hasSAB ? "High-performance audio worklets enabled" : "Some audio worklets may be limited — use Chrome or Edge with HTTPS",
+  });
+
+  const hasOPFS = (() => {
+    try {
+      return typeof navigator !== "undefined" && "storage" in navigator && typeof (navigator.storage as unknown as { getDirectory?: unknown }).getDirectory === "function";
+    } catch {
+      return false;
+    }
+  })();
+  results.push({
+    label: "OPFS",
+    status: hasOPFS ? "ok" : "warn",
+    note: hasOPFS ? "Origin Private File System available for large file caching" : "Large sample caching limited — IndexedDB used as fallback",
+  });
+
+  const hasMediaRecorder = typeof MediaRecorder !== "undefined";
+  results.push({
+    label: "MediaRecorder",
+    status: hasMediaRecorder ? "ok" : "error",
+    note: hasMediaRecorder ? "Vocal recording available" : "Vocal/microphone recording unavailable",
+  });
+
+  return results;
+}
+
 export function DiagnosticsDialog({
   open,
   onOpenChange,
@@ -117,6 +179,8 @@ export function DiagnosticsDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [snap, setSnap] = useState<DiagnosticsSnapshot | null>(null);
+  const [compat] = useState<CompatResult[]>(() => checkBrowserCompat());
+  const [showCompat, setShowCompat] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -134,6 +198,26 @@ export function DiagnosticsDialog({
     navigator.clipboard?.writeText(JSON.stringify(snap, null, 2)).catch(() => {
       /* clipboard denied */
     });
+  };
+
+  const exportReport = () => {
+    if (!snap) return;
+    const report = {
+      ...snap,
+      browserCompatibility: compat,
+    };
+    const blob = new Blob([JSON.stringify(report, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    a.href = url;
+    a.download = `sn-studio-diagnostics-${ts}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -220,18 +304,48 @@ export function DiagnosticsDialog({
             <div className="text-muted-foreground">Gathering…</div>
           )}
         </div>
-        <div className="flex items-center justify-between pt-2">
+
+        {/* Browser compatibility matrix */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={() => setShowCompat((v) => !v)}
+            className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground w-full text-left"
+          >
+            <span className="flex-1">Browser compatibility</span>
+            <span>{showCompat ? "▲" : "▼"}</span>
+          </button>
+          {showCompat && (
+            <div className="mt-2 space-y-1 border border-border rounded-md p-2">
+              {compat.map((c) => (
+                <CompatRow key={c.label} result={c} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between pt-2 gap-2">
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
             Free forever · no accounts · no paywalls
           </span>
-          <button
-            onClick={copy}
-            disabled={!snap}
-            className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border font-mono text-[10px] uppercase tracking-widest hover:bg-accent/40 disabled:opacity-50"
-          >
-            <Copy className="w-3 h-3" />
-            Copy
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={copy}
+              disabled={!snap}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border font-mono text-[10px] uppercase tracking-widest hover:bg-accent/40 disabled:opacity-50"
+            >
+              <Copy className="w-3 h-3" />
+              Copy
+            </button>
+            <button
+              onClick={exportReport}
+              disabled={!snap}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border font-mono text-[10px] uppercase tracking-widest hover:bg-accent/40 disabled:opacity-50"
+            >
+              <Download className="w-3 h-3" />
+              Export
+            </button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -245,6 +359,34 @@ function Row({ label, value }: { label: string; value: string }) {
         {label}
       </span>
       <span className="text-foreground truncate text-right">{value}</span>
+    </div>
+  );
+}
+
+function CompatRow({ result }: { result: CompatResult }) {
+  const Icon =
+    result.status === "ok"
+      ? CheckCircle2
+      : result.status === "warn"
+        ? AlertCircle
+        : XCircle;
+  const color =
+    result.status === "ok"
+      ? "text-emerald-500"
+      : result.status === "warn"
+        ? "text-yellow-400"
+        : "text-destructive";
+  return (
+    <div className="flex items-start gap-2 py-0.5">
+      <Icon className={`w-3 h-3 mt-0.5 flex-none ${color}`} />
+      <div className="flex-1 min-w-0">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-foreground">
+          {result.label}
+        </span>
+        <span className="text-muted-foreground text-[10px] ml-2 leading-snug">
+          {result.note}
+        </span>
+      </div>
     </div>
   );
 }

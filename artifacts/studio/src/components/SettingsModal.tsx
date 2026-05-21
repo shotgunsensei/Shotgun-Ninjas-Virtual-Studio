@@ -265,6 +265,19 @@ export function SettingsModal({
               value={s.confirmBeforeOverwrite}
               onChange={(v) => setSettings({ confirmBeforeOverwrite: v })}
             />
+            <SelectRow
+              label="Backup reminder"
+              hint="Show a reminder to export a project backup every N sessions. Set to 0 to disable."
+              value={String(s.backupReminderSessions)}
+              options={[
+                { value: "0", label: "Off" },
+                { value: "3", label: "Every 3 sessions" },
+                { value: "5", label: "Every 5 sessions (default)" },
+                { value: "10", label: "Every 10 sessions" },
+                { value: "20", label: "Every 20 sessions" },
+              ]}
+              onChange={(v) => setSettings({ backupReminderSessions: Number(v) || 0 })}
+            />
           </TabsContent>
 
           <TabsContent value="keyboard" className="space-y-3 pt-3">
