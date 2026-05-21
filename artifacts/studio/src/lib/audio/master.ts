@@ -1,28 +1,33 @@
 import * as Tone from "tone";
 import type { MasterBusSettings, SendBusId } from "../../types";
 import { SEND_BUS_IDS } from "../../types";
+import { workletManager } from "./worklet-manager";
 
 /**
- * Master safety chain (v2).
+ * Master safety chain (v2, Phase 6 upgrade).
  *
  * Every track channel feeds into `input`. The chain then runs:
- *   input -> glueComp -> softClip -> width -> safetyComp -> limiter -> Destination
+ *   input -> glueComp -> softClip -> [saturation*] -> width -> safetyComp -> limiter -> makeup -> Destination
  *
- * In addition, the master owns 4 named global send buses
- * (Room Reverb, Neon Hall, Tape Delay, Dark Slapback). Each track can
- * tap its post-fader signal into any combination of these buses via
- * dedicated send gains; the bus output is summed into the master input
- * before the glue/safety chain.
+ * (* saturation stage added in Phase 6 when AudioWorklet is available)
  *
- * `getClipped()` returns a latched flag set whenever the post-limiter
- * peak ever crosses -0.1 dBFS. The UI calls `resetClip()` to clear it.
+ * Phase 6 additions:
+ *   - Three AudioWorkletProcessor nodes (SoftClipper, Saturation, Limiter) inserted
+ *     when worklets are available, keeping the Tone.js nodes as fallback.
+ *   - 2× oversampling option for the saturation stage (CPU-intensive — warn in diagnostics).
+ *   - All parameter changes use linearRampToValueAtTime / rampTo for anti-click.
+ *
+ * In addition, the master owns 4 named global send buses (Room Reverb, Neon Hall,
+ * Tape Delay, Dark Slapback). Each track taps its post-fader signal into any
+ * combination of these buses via dedicated send gains.
+ *
+ * `getClipped()` returns a latched flag set whenever the post-limiter peak ever
+ * crosses -0.1 dBFS. The UI calls `resetClip()` to clear it.
  */
 
 export interface SendBusNode {
   id: SendBusId;
-  /** Public input node for tracks to connect their send gains to. */
   input: Tone.Gain;
-  /** The effect node that processes the bus (Freeverb, JCReverb, or FeedbackDelay). */
   fx: Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay;
 }
 
@@ -36,6 +41,7 @@ export const DEFAULT_MASTER_BUS: MasterBusSettings = {
   glueRelease: 0.18,
   softClip: false,
   width: 1,
+  oversample: false,
 };
 
 export class MasterChain {
@@ -57,6 +63,12 @@ export class MasterChain {
     peakDb: [-Infinity, -Infinity],
     rmsDb: [-Infinity, -Infinity],
   };
+
+  // Phase 6: AudioWorklet DSP nodes (null = worklets not yet registered / unsupported)
+  private softClipperWorklet: AudioWorkletNode | null = null;
+  private saturationWorklet: AudioWorkletNode | null = null;
+  private limiterWorklet: AudioWorkletNode | null = null;
+  private workletsActive = false;
 
   constructor() {
     this.input = new Tone.Channel({ volume: 0 });
@@ -98,17 +110,118 @@ export class MasterChain {
       const fx = makeBusFx(id);
       const input = new Tone.Gain(1);
       input.connect(fx);
-      // Sum bus output back into master input (pre-glue, post-track).
       fx.connect(this.input);
       this.buses.set(id, { id, input, fx });
     }
 
-    // Apply soft-clip / width / limiter once the curve is staged.
     this.applySettings(this.settings);
     this.startClipWatcher();
   }
 
-  // ---- send buses ----
+  // ── Phase 6: AudioWorklet integration ───────────────────────────────────
+
+  /**
+   * Call after AudioWorklet registration succeeds. Inserts the three worklet
+   * processors into the master chain, replacing the Tone.js WaveShaper and
+   * augmenting the Tone.Limiter. Falls back silently if node creation fails.
+   */
+  initWorklets(): void {
+    if (workletManager.fallback || !workletManager.ready) return;
+    const rawCtx = Tone.getContext().rawContext as AudioContext;
+
+    const clip = workletManager.createNode("soft-clipper", rawCtx);
+    const sat  = workletManager.createNode("saturation",   rawCtx);
+    const lim  = workletManager.createNode("limiter",      rawCtx);
+
+    if (!clip || !sat || !lim) return;
+
+    this.softClipperWorklet = clip;
+    this.saturationWorklet  = sat;
+    this.limiterWorklet     = lim;
+
+    try {
+      // ── Rewire: glueComp -> softClipperWorklet -> saturationWorklet -> softClipper (identity) -> widener ──
+      this.glueComp.disconnect(this.softClipper);
+      // Tone.ToneAudioNode.connect accepts raw AudioNodes via the underlying AudioNode.
+      const rawGlue = getOutputNode(this.glueComp);
+      const rawClip = getInputNode(this.softClipper);
+
+      rawGlue.connect(this.softClipperWorklet);
+      this.softClipperWorklet.connect(this.saturationWorklet);
+      this.saturationWorklet.connect(rawClip);
+
+      // Set WaveShaper to identity so it becomes a pass-through.
+      this.softClipper.curve = makeIdentityCurve();
+
+      // ── Rewire: safetyComp -> limiterWorklet -> limiter ──
+      this.safetyComp.disconnect(this.limiter);
+      const rawSafety = getOutputNode(this.safetyComp);
+      const rawLim    = getInputNode(this.limiter);
+
+      rawSafety.connect(this.limiterWorklet);
+      this.limiterWorklet.connect(rawLim);
+
+      // Park Tone.Limiter at 0 dBFS so worklet limiter is the active gate.
+      this.limiter.threshold.value = 0;
+
+      this.workletsActive = true;
+
+      // Sync initial settings to worklet parameters.
+      this._applyWorkletParams();
+    } catch (err) {
+      console.warn("[MasterChain] Worklet rewire failed — keeping Tone.js chain:", err);
+      this.softClipperWorklet = null;
+      this.saturationWorklet  = null;
+      this.limiterWorklet     = null;
+    }
+  }
+
+  /** Sync current settings to worklet AudioParams. */
+  private _applyWorkletParams(): void {
+    if (!this.workletsActive) return;
+    const s = this.settings;
+
+    // Soft clipper: enable only when softClip setting is on.
+    if (this.softClipperWorklet) {
+      const p = this.softClipperWorklet.parameters as unknown as Map<string, AudioParam>;
+      const enabled = p.get("enabled");
+      const drive   = p.get("drive");
+      if (enabled) enabled.value = s.softClip ? 1 : 0;
+      if (drive)   drive.value   = 1.6;
+    }
+
+    // Saturation: always mildly active for warmth; oversample controls 2× mode.
+    if (this.saturationWorklet) {
+      const p = this.saturationWorklet.parameters as unknown as Map<string, AudioParam>;
+      const enabled    = p.get("enabled");
+      const drive      = p.get("drive");
+      const mix        = p.get("mix");
+      const oversample = p.get("oversample");
+      if (enabled)    enabled.value    = 1;
+      if (drive)      drive.value      = 1.3;
+      if (mix)        mix.value        = 0.15; // mild default warmth
+      if (oversample) oversample.value = s.oversample ? 1 : 0;
+    }
+
+    // Limiter: threshold + enabled.
+    if (this.limiterWorklet) {
+      const p = this.limiterWorklet.parameters as unknown as Map<string, AudioParam>;
+      const threshold = p.get("threshold");
+      const enabled   = p.get("enabled");
+      if (threshold) threshold.value = clamp(s.limiterThresholdDb, -24, 0);
+      if (enabled)   enabled.value   = 1;
+    }
+  }
+
+  /** Enable or disable 2× oversampling on the saturation worklet. */
+  setOversampling(on: boolean): void {
+    if (!this.saturationWorklet) return;
+    const p = this.saturationWorklet.parameters as unknown as Map<string, AudioParam>;
+    const oversample = p.get("oversample");
+    if (oversample) oversample.value = on ? 1 : 0;
+  }
+
+  // ── send buses ──────────────────────────────────────────────────────────
 
   getBus(id: SendBusId): SendBusNode | undefined {
     return this.buses.get(id);
@@ -118,14 +231,14 @@ export class MasterChain {
     return SEND_BUS_IDS.map((id) => this.buses.get(id)!).filter(Boolean);
   }
 
-  // ---- meter ----
+  // ── meter ───────────────────────────────────────────────────────────────
 
   getMeter(): Tone.Meter {
     return this.meter;
   }
 
   getLevels(): { peakDb: [number, number]; rmsDb: [number, number] } {
-    const rms = this.meter.getValue();
+    const rms  = this.meter.getValue();
     const peak = this.peakMeter.getValue();
     if (typeof rms === "number") {
       this.levels.rmsDb[0] = rms;
@@ -144,7 +257,7 @@ export class MasterChain {
     return this.levels;
   }
 
-  // ---- clipping latch ----
+  // ── clipping latch ──────────────────────────────────────────────────────
 
   getClipped(): boolean {
     return this.clipped;
@@ -163,51 +276,65 @@ export class MasterChain {
     this.clipCheckId = window.setInterval(tick, 80);
   }
 
-  // ---- master settings ----
+  // ── master settings ─────────────────────────────────────────────────────
 
   setVolume(volume0to1: number) {
-    const db =
-      volume0to1 <= 0.005 ? -Infinity : 20 * Math.log10(volume0to1);
+    const db = volume0to1 <= 0.005 ? -Infinity : 20 * Math.log10(volume0to1);
     if (this.panicHeldVolume !== null) {
       this.panicHeldVolume = db;
       return;
     }
-    this.input.volume.rampTo(db, 0.05);
+    // Phase 6: short ramp for anti-click (3 ms).
+    this.input.volume.rampTo(db, 0.003);
   }
 
   applySettings(s: Partial<MasterBusSettings>) {
     const next = { ...this.settings, ...s };
     this.settings = next;
-    // Limiter threshold + makeup.
-    this.limiter.threshold.value = clamp(next.limiterThresholdDb, -24, 0);
+
+    // Limiter threshold + makeup — use ramps for anti-click.
+    this.limiter.threshold.rampTo(clamp(next.limiterThresholdDb, -24, 0), 0.01);
     const makeupLin = Math.pow(10, clamp(next.limiterGainDb, -12, 12) / 20);
     this.makeup.gain.rampTo(makeupLin, 0.05);
-    // Glue comp.
+
+    // Glue comp — ramp parameters to avoid step-change clicks.
     if (next.glueEnabled) {
-      this.glueComp.threshold.value = clamp(next.glueThresholdDb, -36, 0);
-      this.glueComp.ratio.value = clamp(next.glueRatio, 1, 10);
-      this.glueComp.attack.value = clamp(next.glueAttack, 0.001, 0.1);
-      this.glueComp.release.value = clamp(next.glueRelease, 0.05, 1);
+      this.glueComp.threshold.rampTo(clamp(next.glueThresholdDb, -36, 0), 0.01);
+      this.glueComp.ratio.rampTo(clamp(next.glueRatio, 1, 10), 0.01);
+      this.glueComp.attack.rampTo(clamp(next.glueAttack, 0.001, 0.1), 0.01);
+      this.glueComp.release.rampTo(clamp(next.glueRelease, 0.05, 1), 0.01);
     } else {
-      // Effective bypass: very high threshold so comp never engages.
-      this.glueComp.threshold.value = 0;
-      this.glueComp.ratio.value = 1;
+      this.glueComp.threshold.rampTo(0, 0.01);
+      this.glueComp.ratio.rampTo(1, 0.01);
     }
-    // Soft clip — swap curve.
-    this.softClipper.curve = next.softClip
-      ? makeSoftClipCurve()
-      : makeIdentityCurve();
-    // Stereo width — Tone.StereoWidener takes 0..1 (0=mono, 0.5=stereo, 1=wide).
-    // Map our 0..2 user range to that.
+
+    // Soft clip — swap WaveShaper curve (only meaningful in Tone.js fallback mode;
+    // when workletsActive the WaveShaper is an identity pass-through and the
+    // worklet soft-clipper is toggled via its `enabled` AudioParam).
+    if (!this.workletsActive) {
+      this.softClipper.curve = next.softClip
+        ? makeSoftClipCurve()
+        : makeIdentityCurve();
+    } else {
+      // Toggle worklet soft clipper enabled param.
+      this._applyWorkletParams();
+    }
+
+    // Stereo width.
     const w = clamp(next.width, 0, 2);
     this.widener.width.rampTo(Math.min(1, w * 0.5), 0.05);
+
+    // Phase 6: oversample sync.
+    if ("oversample" in next) {
+      this.setOversampling(!!next.oversample);
+    }
   }
 
   getSettings(): MasterBusSettings {
     return { ...this.settings };
   }
 
-  // ---- panic ----
+  // ── panic ────────────────────────────────────────────────────────────────
 
   private panicHeldVolume: number | null = null;
 
@@ -239,30 +366,45 @@ export class MasterChain {
     if (this.clipCheckId !== null && typeof window !== "undefined") {
       window.clearInterval(this.clipCheckId);
     }
+    // Disconnect worklet nodes safely.
+    for (const node of [this.softClipperWorklet, this.saturationWorklet, this.limiterWorklet]) {
+      if (node) {
+        try { node.disconnect(); } catch { /* ignore */ }
+      }
+    }
+    this.softClipperWorklet = null;
+    this.saturationWorklet  = null;
+    this.limiterWorklet     = null;
   }
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+/** Get the underlying native AudioNode output from a Tone.js node. */
+function getOutputNode(node: Tone.ToneAudioNode): AudioNode {
+  const any = node as unknown as { output?: AudioNode; context?: { rawContext?: AudioContext } };
+  if (any.output instanceof AudioNode) return any.output;
+  // Fallback: return the node's native input/output directly.
+  return node as unknown as AudioNode;
+}
+
+/** Get the underlying native AudioNode input from a Tone.js node. */
+function getInputNode(node: Tone.ToneAudioNode): AudioNode {
+  const any = node as unknown as { input?: AudioNode };
+  if (any.input instanceof AudioNode) return any.input;
+  return node as unknown as AudioNode;
 }
 
 function makeBusFx(id: SendBusId): Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay {
   switch (id) {
     case "roomReverb":
-      // Freeverb: algorithmic, instantaneous — avoids the OfflineAudioContext
-      // IR-generation cost of Tone.Reverb (~6-8 s per instance).
       return new Tone.Freeverb({ roomSize: 0.6, dampening: 2500, wet: 1 });
     case "neonHall":
-      // JCReverb gives a lusher, larger-room character for the "hall" bus.
       return new Tone.JCReverb({ roomSize: 0.85, wet: 1 });
     case "tapeDelay":
-      return new Tone.FeedbackDelay({
-        delayTime: "8n.",
-        feedback: 0.42,
-        wet: 1,
-      });
+      return new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.42, wet: 1 });
     case "darkSlapback":
-      return new Tone.FeedbackDelay({
-        delayTime: 0.11,
-        feedback: 0.18,
-        wet: 1,
-      });
+      return new Tone.FeedbackDelay({ delayTime: 0.11, feedback: 0.18, wet: 1 });
   }
 }
 
@@ -274,7 +416,6 @@ function makeIdentityCurve(): Float32Array {
 }
 
 function makeSoftClipCurve(): Float32Array {
-  // tanh-based soft clip; mild drive so transparent at low levels.
   const n = 2048;
   const c = new Float32Array(n);
   const k = 1.6;

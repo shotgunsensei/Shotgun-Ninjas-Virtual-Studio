@@ -110,6 +110,10 @@ export interface MasterBusSettings {
   glueRelease: number; // seconds 0.05..1
   softClip: boolean;
   width: number; // 0..2 (1 = natural, 0 = mono, 2 = wide)
+  /** Phase 6: enable 2× oversampling for the saturation stage.
+   *  Default false. Shows a CPU cost warning in the Diagnostics panel
+   *  when active voice count is high. */
+  oversample?: boolean;
 }
 
 export type MixPresetId =

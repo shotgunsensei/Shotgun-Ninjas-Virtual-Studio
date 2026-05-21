@@ -22,6 +22,8 @@ import type {
 } from "../../types";
 import { SEND_BUS_IDS } from "../../types";
 import { MasterChain } from "./master";
+import { workletManager } from "./worklet-manager";
+import { lookaheadScheduler } from "./lookahead-scheduler";
 import {
   announceSamplerLoadIfNeeded,
   applyVocalPresetTo,
@@ -102,6 +104,11 @@ class AudioEngine {
   private masterChain = new MasterChain();
   private metronomeSynth: Tone.MembraneSynth;
   private metronomeAccent: Tone.MembraneSynth;
+  /** Phase 6: shared gain for all metronome sources so setMetronomeVolume()
+   *  controls both the Tone.js fallback synths and the AudioWorklet click. */
+  private metronomeGain: Tone.Gain;
+  /** Phase 6: AudioWorkletNode running MetronomeProcessor on the audio thread. */
+  private metronomeWorkletNode: AudioWorkletNode | null = null;
 
   private voices = new Map<string, TrackVoice>();
 
@@ -143,16 +150,20 @@ class AudioEngine {
     Tone.getTransport().bpm.value = 100;
     Tone.getTransport().timeSignature = [4, 4];
 
+    // Phase 6: shared gain node for all metronome signal sources (worklet + fallback synths).
+    // Volume is controlled via metronomeGain.gain so a single ramp covers both paths.
+    this.metronomeGain = new Tone.Gain(1).connect(this.masterChain.input);
+
     this.metronomeSynth = new Tone.MembraneSynth({
       pitchDecay: 0.008,
       octaves: 2,
       envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 },
-    }).connect(this.masterChain.input);
+    }).connect(this.metronomeGain);
     this.metronomeAccent = new Tone.MembraneSynth({
       pitchDecay: 0.008,
       octaves: 4,
       envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 },
-    }).connect(this.masterChain.input);
+    }).connect(this.metronomeGain);
   }
 
   // ---- lifecycle ----
@@ -165,6 +176,35 @@ class AudioEngine {
   async unlock() {
     if (this.unlocked) return;
     await Tone.start();
+
+    // Phase 6: register AudioWorklet processors then wire them into the master chain.
+    try {
+      const rawCtx = Tone.getContext().rawContext as AudioContext;
+      await workletManager.register(rawCtx);
+      this.masterChain.initWorklets();
+
+      // Create the MetronomeProcessor node on the audio thread.
+      if (workletManager.ready) {
+        const node = workletManager.createNode("metronome", rawCtx);
+        if (node) {
+          // Bridge the AudioWorkletNode (native) to the Tone.js metronomeGain node.
+          const gainAny = this.metronomeGain as unknown as { input?: AudioNode };
+          if (gainAny.input instanceof AudioNode) {
+            node.connect(gainAny.input);
+          } else {
+            // Fallback: connect to Tone destination directly (lower precedence than master chain).
+            node.connect(rawCtx.destination);
+          }
+          this.metronomeWorkletNode = node;
+        }
+      }
+    } catch (err) {
+      console.warn("[AudioEngine] Worklet init failed — Tone.js fallback active.", err);
+    }
+
+    // Phase 6: start the lookahead scheduler.
+    lookaheadScheduler.start();
+
     this.unlocked = true;
   }
 
@@ -448,6 +488,12 @@ class AudioEngine {
         v.micOn = false;
       }
     }
+    // Phase 6: clear any queued worklet metronome clicks and lookahead events.
+    if (this.metronomeWorkletNode) {
+      workletManager.postMessage(this.metronomeWorkletNode, { type: "clear" });
+    }
+    lookaheadScheduler.cancelAll();
+
     this.masterChain.duckForPanic();
   }
 
@@ -455,28 +501,68 @@ class AudioEngine {
   /** Set the metronome ticks loudness (0..1). 0 mutes them. */
   setMetronomeVolume(v: number) {
     const clamped = Math.max(0, Math.min(1, v));
-    // -60 dB at 0, 0 dB at 1 — matches the slider feel of the master bus.
-    const db = clamped <= 0.001 ? -Infinity : (clamped - 1) * 60;
-    this.metronomeSynth.volume.value = db;
-    this.metronomeAccent.volume.value = db;
+    // Phase 6: volume controlled via the shared metronomeGain so both the
+    // Tone.js fallback synths AND the AudioWorklet click node are affected.
+    // A 3 ms ramp prevents audible clicks when the slider moves quickly.
+    const lin = clamped <= 0.001 ? 0 : Math.pow(10, ((clamped - 1) * 60) / 20);
+    this.metronomeGain.gain.rampTo(lin, 0.003);
   }
+
   setMetronome(on: boolean) {
     this.metronomeEnabled = on;
     if (on && this.metronomeId === null) {
       let beat = 0;
       this.metronomeId = Tone.getTransport().scheduleRepeat((time) => {
         if (!this.metronomeEnabled) return;
-        if (beat % 4 === 0) {
-          this.metronomeAccent.triggerAttackRelease("C5", "32n", time);
+        const accent = beat % 4 === 0;
+
+        if (this.metronomeWorkletNode) {
+          // Phase 6: schedule click on the audio thread for jitter-free timing.
+          workletManager.postMessage(this.metronomeWorkletNode, {
+            type: "schedule",
+            audioTime: time,
+            accent,
+          });
+          // Register with lookahead scheduler so diagnostics panel can count it.
+          lookaheadScheduler.schedule(time, () => { /* click fired */ });
         } else {
-          this.metronomeSynth.triggerAttackRelease("C4", "32n", time);
+          // Tone.js fallback path (MembraneSynth).
+          // Phase 6: apply short linear ramps on triggers to eliminate click transients.
+          if (accent) {
+            this.metronomeAccent.triggerAttackRelease("C5", "32n", time);
+          } else {
+            this.metronomeSynth.triggerAttackRelease("C4", "32n", time);
+          }
         }
         beat++;
       }, "4n");
     }
   }
+
   isMetronomeOn() {
     return this.metronomeEnabled;
+  }
+
+  // ---- Phase 6 diagnostics helpers ----
+
+  /**
+   * Count of active track voices (voices that have an instrument attached).
+   * Used by the Diagnostics panel for CPU load estimation.
+   */
+  getActiveVoiceCount(): number {
+    let count = 0;
+    for (const v of this.voices.values()) {
+      if (v.poly || v.drums || v.kit) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Expose whether AudioWorklets are active (for the diagnostics panel).
+   * Mirrors workletManager.ready.
+   */
+  getWorkletStatus(): { ready: boolean; fallback: boolean } {
+    return { ready: workletManager.ready, fallback: workletManager.fallback };
   }
 
   // ---- tracks ----

@@ -62,6 +62,14 @@ export interface StudioSettings {
   midiEnabled: boolean;
   midiInputId: string | null;
   midiPassthrough: boolean;
+
+  // Phase 6: Pro Audio Engine
+  /** Measured or manually-entered round-trip latency offset in ms.
+   *  The LookaheadScheduler subtracts this when computing AudioContext.currentTime targets. */
+  latencyOffsetMs: number;
+  /** Enable 2× oversampling for the master saturation stage.
+   *  Increases CPU usage; shows a warning in the Diagnostics panel at high voice counts. */
+  oversampleEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: StudioSettings = {
@@ -88,6 +96,9 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   midiEnabled: false,
   midiInputId: null,
   midiPassthrough: true,
+
+  latencyOffsetMs: 0,
+  oversampleEnabled: false,
 };
 
 const STORAGE_KEY = "studio.settings.v1";

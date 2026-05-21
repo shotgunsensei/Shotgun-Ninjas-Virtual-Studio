@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +15,8 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, KeyRound, Trash2 } from "lucide-react";
+import { RotateCcw, KeyRound, Trash2, Gauge } from "lucide-react";
+import * as Tone from "tone";
 import {
   DEFAULT_SETTINGS,
   resetSettings,
@@ -25,6 +27,7 @@ import { THEMES } from "../lib/themes";
 import { SHORTCUTS } from "./ShortcutOverlay";
 import { useMidi } from "../lib/midi/midi";
 import { getStore, useStore } from "../store";
+import { lookaheadScheduler } from "../lib/audio/lookahead-scheduler";
 
 /**
  * Project-wide settings modal. Backed by `lib/settings.ts` and split
@@ -129,6 +132,37 @@ export function SettingsModal({
                 })
               }
             />
+
+            {/* ── Phase 6: Pro Audio Engine ──────────────────────────────── */}
+            <div className="border-t border-border pt-3 mt-1">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                <Gauge className="w-3 h-3" />
+                Pro Audio Engine
+              </div>
+
+              <ToggleRow
+                label="2× Oversampling (saturation)"
+                hint="Reduces aliasing in the master saturation stage. Costs extra CPU — a warning appears in the diagnostics panel at high voice counts."
+                value={s.oversampleEnabled}
+                onChange={(v) => {
+                  setSettings({ oversampleEnabled: v });
+                  // Sync to the master chain immediately.
+                  import("../lib/audio/master").then(({ MasterChain: _ }) => {
+                    import("../lib/audio/engine").then(({ audio }) => {
+                      audio.setMasterBus({ oversample: v });
+                    });
+                  });
+                }}
+              />
+
+              <LatencyCalibrationRow
+                latencyOffsetMs={s.latencyOffsetMs}
+                onChange={(ms) => {
+                  setSettings({ latencyOffsetMs: ms });
+                  lookaheadScheduler.setLatencyOffset(ms);
+                }}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="ui" className="space-y-3 pt-3">
@@ -430,6 +464,77 @@ function Row({
  * "Enable MIDI". Renders a clear fallback message on browsers that
  * don't expose Web MIDI at all.
  */
+/**
+ * Latency calibration row — reads AudioContext.baseLatency + outputLatency
+ * from the browser and lets the user fine-tune or manually enter a value.
+ * The measured value is stored in settings.latencyOffsetMs and applied to
+ * the LookaheadScheduler so it compensates for measured output delay.
+ */
+function LatencyCalibrationRow({
+  latencyOffsetMs,
+  onChange,
+}: {
+  latencyOffsetMs: number;
+  onChange: (ms: number) => void;
+}) {
+  const [measuring, setMeasuring] = useState(false);
+  const [measured, setMeasured] = useState<number | null>(null);
+
+  const handleMeasure = async () => {
+    setMeasuring(true);
+    try {
+      const rawCtx = Tone.getContext().rawContext as AudioContext & {
+        baseLatency?: number;
+        outputLatency?: number;
+      };
+      const base   = typeof rawCtx.baseLatency   === "number" ? rawCtx.baseLatency   : 0;
+      const output = typeof rawCtx.outputLatency === "number" ? rawCtx.outputLatency : 0;
+      const totalMs = Math.round((base + output) * 1000);
+      setMeasured(totalMs);
+      onChange(totalMs);
+    } catch {
+      setMeasured(null);
+    } finally {
+      setMeasuring(false);
+    }
+  };
+
+  return (
+    <Row
+      label="Output latency offset"
+      hint="Milliseconds the scheduler subtracts from audio event times to compensate for measured output delay."
+    >
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={0}
+          max={500}
+          step={1}
+          value={latencyOffsetMs}
+          onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+          className="bg-background border border-border rounded-md h-7 w-16 text-center font-mono text-sm"
+        />
+        <span className="font-mono text-[10px] text-muted-foreground">ms</span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="font-mono text-[10px] h-7"
+          disabled={measuring}
+          onClick={handleMeasure}
+          title="Read AudioContext.baseLatency + outputLatency from browser"
+        >
+          {measuring ? "…" : "Measure"}
+        </Button>
+        {measured !== null && (
+          <span className="font-mono text-[10px] text-primary">
+            ={measured} ms
+          </span>
+        )}
+      </div>
+    </Row>
+  );
+}
+
 function MidiSection() {
   const midi = useMidi();
   const mappings = useStore((s) => s.project.midiMappings);

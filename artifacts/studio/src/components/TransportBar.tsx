@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2 } from "lucide-react";
+import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2, Activity } from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { OfflineReadyIndicator } from "./PwaInstallControls";
 import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
 import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
 import { useGamepad } from "../lib/performance/gamepad";
+import { AudioDiagnosticsPanel } from "./AudioDiagnosticsPanel";
 
 export function TransportBar() {
   const bpm = useStore((s) => s.project.bpm);
@@ -34,6 +35,7 @@ export function TransportBar() {
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const { play, pause, stop, record } = useTransport();
   const metronomeVolume = useSettings((s) => s.metronomeVolume);
+  const [diagOpen, setDiagOpen] = useState(false);
 
   useEffect(() => { audio.setBpm(bpm); }, [bpm]);
   useEffect(() => { audio.setMaster(masterVolume); }, [masterVolume]);
@@ -45,6 +47,7 @@ export function TransportBar() {
   useEffect(() => { audio.setSwing(globalSwing); }, [globalSwing]);
 
   return (
+    <div className="relative">
     <div className="h-16 border-b border-border flex items-center px-4 gap-3 bg-graphite/60 backdrop-blur">
       <div className="flex items-center gap-1.5">
         <Button
@@ -259,6 +262,20 @@ export function TransportBar() {
           {Math.round(masterVolume * 100)}
         </span>
       </div>
+
+      <Tip label="Audio diagnostics panel">
+        <Button
+          size="icon"
+          variant={diagOpen ? "secondary" : "ghost"}
+          onClick={() => setDiagOpen((v) => !v)}
+          className={`h-7 w-7 rounded-md ${diagOpen ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          aria-label="Toggle audio diagnostics panel"
+        >
+          <Activity className="w-3.5 h-3.5" />
+        </Button>
+      </Tip>
+    </div>
+    <AudioDiagnosticsPanel open={diagOpen} onClose={() => setDiagOpen(false)} />
     </div>
   );
 }
