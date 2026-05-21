@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Gamepad2, Keyboard, Music, Mic2, X, ChevronDown } from "lucide-react";
 import { useStore, getStore } from "../store";
 import { useGamepad } from "../lib/performance/gamepad";
@@ -349,6 +349,179 @@ function ToggleBtn({
   );
 }
 
+const DRUM_NOTES: { note: number; label: string }[] = [
+  { note: 36, label: "Kick" },
+  { note: 38, label: "Snare" },
+  { note: 42, label: "Hi-Hat" },
+  { note: 46, label: "Open Hat" },
+  { note: 39, label: "Clap" },
+  { note: 49, label: "Crash" },
+  { note: 41, label: "Tom Lo" },
+  { note: 43, label: "Tom Hi" },
+  { note: 48, label: "FX" },
+  { note: 45, label: "Tom Mid" },
+  { note: 60, label: "C4" },
+  { note: 62, label: "D4" },
+  { note: 64, label: "E4" },
+  { note: 65, label: "F4" },
+  { note: 67, label: "G4" },
+  { note: 69, label: "A4" },
+];
+
+interface BtnLayout {
+  index: number;
+  shortLabel: string;
+  x: number;
+  y: number;
+}
+
+const BUTTON_LAYOUT: BtnLayout[] = [
+  { index: 6,  shortLabel: "LT",  x: 14.5, y: 7   },
+  { index: 7,  shortLabel: "RT",  x: 85.5, y: 7   },
+  { index: 4,  shortLabel: "LB",  x: 19,   y: 21  },
+  { index: 5,  shortLabel: "RB",  x: 81,   y: 21  },
+  { index: 14, shortLabel: "◄",   x: 20.5, y: 50  },
+  { index: 12, shortLabel: "▲",   x: 29,   y: 40  },
+  { index: 13, shortLabel: "▼",   x: 29,   y: 60  },
+  { index: 15, shortLabel: "►",   x: 37.5, y: 50  },
+  { index: 3,  shortLabel: "Y",   x: 68,   y: 33  },
+  { index: 2,  shortLabel: "X",   x: 59.5, y: 44  },
+  { index: 1,  shortLabel: "B",   x: 76.5, y: 44  },
+  { index: 0,  shortLabel: "A",   x: 68,   y: 55  },
+];
+
+function GamepadDiagram({
+  mappings,
+  selectedBtn,
+  onSelectBtn,
+}: {
+  mappings: GamepadMapping[];
+  selectedBtn: number | null;
+  onSelectBtn: (idx: number) => void;
+}) {
+  const noteLabel = (btnIndex: number) => {
+    const m = mappings.find((x) => x.buttonIndex === btnIndex);
+    if (!m) return "—";
+    const dn = DRUM_NOTES.find((d) => d.note === m.note);
+    return dn ? dn.label : `n${m.note}`;
+  };
+
+  return (
+    <svg
+      viewBox="0 0 400 230"
+      className="w-full"
+      style={{ maxHeight: 200 }}
+      aria-label="Gamepad controller diagram"
+    >
+      {/* Controller body */}
+      <rect x="55" y="35" width="290" height="145" rx="32" ry="32"
+        fill="#1a1a2e" stroke="#334155" strokeWidth="2" />
+      {/* Left grip */}
+      <ellipse cx="105" cy="178" rx="48" ry="42"
+        fill="#1a1a2e" stroke="#334155" strokeWidth="2" />
+      {/* Right grip */}
+      <ellipse cx="295" cy="178" rx="48" ry="42"
+        fill="#1a1a2e" stroke="#334155" strokeWidth="2" />
+      {/* Top notch / camera bump */}
+      <rect x="160" y="30" width="80" height="22" rx="11"
+        fill="#1a1a2e" stroke="#334155" strokeWidth="2" />
+
+      {/* Center stripe */}
+      <rect x="168" y="90" width="64" height="30" rx="8"
+        fill="#0f172a" stroke="#334155" strokeWidth="1" opacity="0.7" />
+      {/* Select / Start dots */}
+      <circle cx="183" cy="105" r="5" fill="#334155" />
+      <circle cx="217" cy="105" r="5" fill="#334155" />
+
+      {/* D-pad cross shape */}
+      <rect x="99" y="130" width="14" height="42" rx="3" fill="#0f172a" stroke="#334155" strokeWidth="1" />
+      <rect x="85" y="144" width="42" height="14" rx="3" fill="#0f172a" stroke="#334155" strokeWidth="1" />
+
+      {/* Face button cluster background */}
+      <circle cx="272" cy="113" r="28" fill="#0f172a" stroke="#334155" strokeWidth="1" opacity="0.6" />
+
+      {/* Now draw interactive button hotspots */}
+      {BUTTON_LAYOUT.map((btn) => {
+        const cx = (btn.x / 100) * 400;
+        const cy = (btn.y / 100) * 230;
+        const isSelected = selectedBtn === btn.index;
+        const isShoulder = btn.index === 4 || btn.index === 5;
+        const isTrigger = btn.index === 6 || btn.index === 7;
+        const isDpad = [12, 13, 14, 15].includes(btn.index);
+        const isFace = [0, 1, 2, 3].includes(btn.index);
+
+        const faceColors: Record<number, string> = {
+          0: "#22c55e",
+          1: "#ef4444",
+          2: "#3b82f6",
+          3: "#eab308",
+        };
+        const fillColor = isSelected
+          ? "#a855f7"
+          : isFace
+            ? faceColors[btn.index] + "44"
+            : "#1e293b";
+        const strokeColor = isSelected
+          ? "#d946ef"
+          : isFace
+            ? faceColors[btn.index]
+            : isDpad
+              ? "#64748b"
+              : "#475569";
+
+        const rx = isTrigger ? 10 : isShoulder ? 9 : 8;
+        const ry = isTrigger ? 6 : isShoulder ? 5.5 : 8;
+        const label = noteLabel(btn.index);
+        const truncated = label.length > 5 ? label.slice(0, 5) : label;
+
+        return (
+          <g
+            key={btn.index}
+            style={{ cursor: "pointer" }}
+            onClick={() => onSelectBtn(btn.index)}
+            role="button"
+            aria-label={`${btn.shortLabel}: ${label}`}
+          >
+            <ellipse
+              cx={cx}
+              cy={cy}
+              rx={rx}
+              ry={ry}
+              fill={fillColor}
+              stroke={strokeColor}
+              strokeWidth={isSelected ? 1.5 : 1}
+            />
+            {/* Short button label (LT, RB, etc.) */}
+            <text
+              x={cx}
+              y={cy - ry - 2}
+              textAnchor="middle"
+              fontSize="6"
+              fill="#94a3b8"
+              fontFamily="monospace"
+            >
+              {btn.shortLabel}
+            </text>
+            {/* Mapped sound label */}
+            <text
+              x={cx}
+              y={cy + 1.5}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize="5.5"
+              fill={isSelected ? "#f0abfc" : "#e2e8f0"}
+              fontFamily="monospace"
+              fontWeight="600"
+            >
+              {truncated}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function GamepadMappingPanel({
   mappings,
   onUpdate,
@@ -356,59 +529,84 @@ function GamepadMappingPanel({
   mappings: GamepadMapping[];
   onUpdate: (m: GamepadMapping[]) => void;
 }) {
-  const DRUM_NOTES: { note: number; label: string }[] = [
-    { note: 36, label: "Kick" },
-    { note: 38, label: "Snare" },
-    { note: 42, label: "Hi-Hat" },
-    { note: 46, label: "Open Hat" },
-    { note: 39, label: "Clap" },
-    { note: 49, label: "Crash" },
-    { note: 41, label: "Tom Lo" },
-    { note: 43, label: "Tom Hi" },
-    { note: 48, label: "FX" },
-    { note: 45, label: "Tom Mid" },
-    { note: 60, label: "C4" },
-    { note: 62, label: "D4" },
-    { note: 64, label: "E4" },
-    { note: 65, label: "F4" },
-    { note: 67, label: "G4" },
-    { note: 69, label: "A4" },
-  ];
+  const [selectedBtn, setSelectedBtn] = useState<number | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
 
-  const BTN_LABELS: Record<number, string> = {
-    0: "A/Cross", 1: "B/Circle", 2: "X/Square", 3: "Y/Tri",
-    4: "LB/L1", 5: "RB/R1", 6: "LT/L2", 7: "RT/R2",
-    12: "D-Up", 13: "D-Down", 14: "D-Left", 15: "D-Right",
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setSelectedBtn(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selectedMapping = selectedBtn !== null
+    ? mappings.find((m) => m.buttonIndex === selectedBtn)
+    : null;
+
+  const BTN_FULL_LABELS: Record<number, string> = {
+    0: "A / Cross", 1: "B / Circle", 2: "X / Square", 3: "Y / Triangle",
+    4: "LB / L1", 5: "RB / R1", 6: "LT / L2", 7: "RT / R2",
+    12: "D-Pad Up", 13: "D-Pad Down", 14: "D-Pad Left", 15: "D-Pad Right",
+  };
+
+  const handleSelectBtn = (idx: number) => {
+    setSelectedBtn((prev) => (prev === idx ? null : idx));
+  };
+
+  const handleNoteChange = (note: number) => {
+    const dn = DRUM_NOTES.find((d) => d.note === note);
+    const next = mappings.map((x) =>
+      x.buttonIndex === selectedBtn
+        ? { ...x, note, label: `${BTN_FULL_LABELS[x.buttonIndex] ?? `Btn ${x.buttonIndex}`} → ${dn?.label ?? note}` }
+        : x,
+    );
+    onUpdate(next);
   };
 
   return (
-    <div className="space-y-1">
-      {mappings.map((m, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-muted-foreground w-16 shrink-0">
-            {BTN_LABELS[m.buttonIndex] ?? `Btn ${m.buttonIndex}`}
-          </span>
+    <div className="space-y-2" ref={pickerRef}>
+      <p className="text-[10px] font-mono text-muted-foreground">
+        Click a button to reassign its sound.
+      </p>
+
+      <GamepadDiagram
+        mappings={mappings}
+        selectedBtn={selectedBtn}
+        onSelectBtn={handleSelectBtn}
+      />
+
+      {selectedBtn !== null && (
+        <div className="mt-1 p-2 bg-background border border-primary/40 rounded-md space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+          <p className="text-[10px] font-mono text-primary font-semibold">
+            {BTN_FULL_LABELS[selectedBtn] ?? `Button ${selectedBtn}`}
+          </p>
           <select
-            value={m.note}
-            onChange={(e) => {
-              const next = mappings.map((x, j) =>
-                j === i ? { ...x, note: Number(e.target.value) } : x,
-              );
-              onUpdate(next);
-            }}
-            className="flex-1 bg-background border border-border rounded px-1 h-6 font-mono text-[10px]"
+            autoFocus
+            value={selectedMapping?.note ?? 36}
+            onChange={(e) => handleNoteChange(Number(e.target.value))}
+            className="w-full bg-background border border-border rounded px-2 h-7 font-mono text-xs"
           >
             {DRUM_NOTES.map(({ note, label }) => (
               <option key={note} value={note}>
-                {note} — {label}
+                {label}
               </option>
             ))}
           </select>
+          <button
+            onClick={() => setSelectedBtn(null)}
+            className="text-[10px] font-mono text-muted-foreground hover:text-foreground"
+          >
+            Done
+          </button>
         </div>
-      ))}
+      )}
+
       <button
-        onClick={() => onUpdate([...DEFAULT_GAMEPAD_MAPPINGS])}
-        className="mt-1 text-[10px] font-mono text-muted-foreground hover:text-foreground border border-border px-2 py-0.5 rounded"
+        onClick={() => { onUpdate([...DEFAULT_GAMEPAD_MAPPINGS]); setSelectedBtn(null); }}
+        className="text-[10px] font-mono text-muted-foreground hover:text-foreground border border-border px-2 py-0.5 rounded"
       >
         Reset to defaults
       </button>
