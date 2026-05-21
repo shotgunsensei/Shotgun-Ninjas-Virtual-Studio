@@ -7,9 +7,9 @@
  *   - Current BPM, scheduled event count, active voice count
  *   - Peak output level in dBFS (from the existing master Meter)
  *   - Dropped visual frames (rAF delta > 33 ms)
+ *   - Live CPU pressure via AudioWorklet round-trip timing (green→yellow→red)
  *   - Browser capability flags (AudioWorklet, MIDI, SharedArrayBuffer,
  *     OfflineAudioContext)
- *   - CPU warning when oversampling is on and voice count is high
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +19,12 @@ import { audio } from "../lib/audio/engine";
 import { lookaheadScheduler } from "../lib/audio/lookahead-scheduler";
 import { workletManager } from "../lib/audio/worklet-manager";
 import { useStore } from "../store";
+
+// CPU pressure thresholds (ms round-trip from main → audio worklet → main).
+// A single 128-sample buffer at 44.1 kHz is ~2.9 ms.
+// Round-trips well above that indicate the audio thread is struggling.
+const CPU_YELLOW_MS = 8;   // > 8 ms → moderate load
+const CPU_RED_MS    = 20;  // > 20 ms → heavy load / risk of glitches
 
 interface DiagSnap {
   contextState: string;
@@ -31,6 +37,7 @@ interface DiagSnap {
   peakDbL: number;
   peakDbR: number;
   droppedFrames: number;
+  cpuRoundTripMs: number | null;
   // capability flags
   capWorklet: boolean;
   capMidi: boolean;
@@ -39,7 +46,7 @@ interface DiagSnap {
   // worklet state
   workletReady: boolean;
   workletFallback: boolean;
-  // oversampling warning
+  // oversampling
   oversampleOn: boolean;
 }
 
@@ -56,6 +63,13 @@ function getCapabilities() {
 }
 
 const CAPS = getCapabilities();
+
+function cpuPressureLevel(ms: number | null): "unknown" | "low" | "medium" | "high" {
+  if (ms === null) return "unknown";
+  if (ms >= CPU_RED_MS) return "high";
+  if (ms >= CPU_YELLOW_MS) return "medium";
+  return "low";
+}
 
 function Flag({ label, ok }: { label: string; ok: boolean }) {
   return (
@@ -122,6 +136,58 @@ function PeakBar({ dbL, dbR }: { dbL: number; dbR: number }) {
   );
 }
 
+function CpuPressureBar({ roundTripMs }: { roundTripMs: number | null }) {
+  const level = cpuPressureLevel(roundTripMs);
+
+  // Map round-trip to a 0-100 fill (cap display at 40 ms)
+  const fillPct =
+    roundTripMs === null
+      ? 0
+      : Math.min(100, (roundTripMs / 40) * 100);
+
+  const barColor =
+    level === "high"    ? "bg-red-500" :
+    level === "medium"  ? "bg-yellow-400" :
+    level === "low"     ? "bg-primary" :
+    "bg-muted";
+
+  const labelColor =
+    level === "high"   ? "text-red-400" :
+    level === "medium" ? "text-yellow-400" :
+    level === "low"    ? "text-primary" :
+    "text-muted-foreground";
+
+  const levelLabel =
+    level === "high"    ? "HIGH" :
+    level === "medium"  ? "MED" :
+    level === "low"     ? "LOW" :
+    "—";
+
+  return (
+    <div className="mt-1">
+      <div className="flex items-center gap-1 mb-0.5">
+        <div className="flex-1 h-2 bg-background/60 rounded-full overflow-hidden border border-border/30">
+          <div
+            className={`h-full rounded-full transition-all duration-200 ${barColor}`}
+            style={{ width: `${fillPct}%` }}
+          />
+        </div>
+        <span className={`font-mono text-[9px] w-8 text-right tabular-nums font-bold ${labelColor}`}>
+          {levelLabel}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+          Round-trip
+        </span>
+        <span className="font-mono text-[9px] tabular-nums text-foreground">
+          {roundTripMs !== null ? `${roundTripMs.toFixed(1)} ms` : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function AudioDiagnosticsPanel({
   open,
   onClose,
@@ -161,6 +227,12 @@ export function AudioDiagnosticsPanel({
         const rawCtx = Tone.getContext().rawContext as AudioContext | undefined;
         const ctxAny = rawCtx as (AudioContext & { baseLatency?: number; outputLatency?: number }) | undefined;
 
+        // Kick off the CPU probe if the worklet is ready and probe not yet started.
+        if (rawCtx && workletManager.ready) {
+          workletManager.startCpuProbe(rawCtx as AudioContext);
+          workletManager.pingCpu();
+        }
+
         const levels = audio.getMasterLevels();
         const peakDbL = levels.peakDb[0] ?? -Infinity;
         const peakDbR = levels.peakDb[1] ?? peakDbL;
@@ -182,6 +254,7 @@ export function AudioDiagnosticsPanel({
           peakDbL,
           peakDbR,
           droppedFrames: droppedFramesRef.current,
+          cpuRoundTripMs: workletManager.lastRoundTripMs,
           ...CAPS,
           workletReady: workletManager.ready,
           workletFallback: workletManager.fallback,
@@ -200,7 +273,8 @@ export function AudioDiagnosticsPanel({
   if (!open) return null;
 
   const highVoices = (snap?.activeVoices ?? 0) > 6;
-  const showCpuWarn = snap?.oversampleOn && highVoices;
+  const cpuLevel = cpuPressureLevel(snap?.cpuRoundTripMs ?? null);
+  const showCpuWarn = cpuLevel === "high" || cpuLevel === "medium";
 
   return (
     <div className="absolute top-full left-0 right-0 z-50 bg-graphite/95 border-b border-border backdrop-blur-sm shadow-xl">
@@ -212,9 +286,15 @@ export function AudioDiagnosticsPanel({
               Audio Diagnostics
             </span>
             {showCpuWarn && (
-              <span className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-widest text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 px-2 py-0.5 rounded">
+              <span
+                className={`flex items-center gap-1 font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 rounded border ${
+                  cpuLevel === "high"
+                    ? "text-red-400 bg-red-500/10 border-red-500/30"
+                    : "text-yellow-400 bg-yellow-400/10 border-yellow-400/30"
+                }`}
+              >
                 <AlertTriangle className="w-3 h-3" />
-                CPU — oversampling + high voice count
+                {cpuLevel === "high" ? "CPU overload — reduce voices or disable effects" : "CPU pressure — approaching limit"}
               </span>
             )}
           </div>
@@ -282,17 +362,26 @@ export function AudioDiagnosticsPanel({
                 <Row
                   label="Oversampling"
                   value={snap.oversampleOn ? "2× ON" : "off"}
-                  warn={!!showCpuWarn}
                 />
               </div>
             </div>
 
-            {/* Column 4: Capability flags */}
+            {/* Column 4: CPU Pressure + Browser Support */}
             <div>
               <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
+                CPU Pressure
+              </div>
+              {snap.workletReady ? (
+                <CpuPressureBar roundTripMs={snap.cpuRoundTripMs} />
+              ) : (
+                <div className="text-[9px] text-muted-foreground font-mono mt-1">
+                  {snap.workletFallback ? "Worklet unavailable" : "Awaiting worklet…"}
+                </div>
+              )}
+              <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground mb-1 mt-3">
                 Browser Support
               </div>
-              <div className="flex flex-wrap gap-1 mt-1">
+              <div className="flex flex-wrap gap-1">
                 <Flag label="AudioWorklet" ok={snap.capWorklet} />
                 <Flag label="Web MIDI" ok={snap.capMidi} />
                 <Flag label="SharedArrayBuffer" ok={snap.capSab} />

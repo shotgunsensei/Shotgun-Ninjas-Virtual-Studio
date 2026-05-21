@@ -31,6 +31,8 @@ class MetronomeProcessor extends AudioWorkletProcessor {
         this._queue.sort((a, b) => a.time - b.time);
       } else if (d.type === 'clear') {
         this._queue = [];
+      } else if (d.type === 'ping') {
+        this.port.postMessage({ type: 'pong', sentAt: d.sentAt });
       }
     };
   }
@@ -288,6 +290,11 @@ class WorkletManager {
   private _fallback      = false;
   private _blobUrl: string | null = null;
 
+  // CPU round-trip probe state
+  private _probeNode: AudioWorkletNode | null = null;
+  private _lastRoundTripMs: number | null = null;
+  private _pingPendingAt: number | null = null;
+
   static get instance(): WorkletManager {
     if (!WorkletManager._instance) WorkletManager._instance = new WorkletManager();
     return WorkletManager._instance;
@@ -355,12 +362,58 @@ class WorkletManager {
     try { node.port.postMessage(msg); } catch { /* ignore */ }
   }
 
+  /**
+   * Initialise the CPU probe node (a silent metronome node used purely for
+   * ping/pong round-trip timing). Call once after registration succeeds.
+   */
+  startCpuProbe(context: AudioContext): void {
+    if (!this._registered || this._probeNode) return;
+    try {
+      const node = new AudioWorkletNode(context, 'sn-metronome');
+      // Do NOT connect to destination — we only use the message port.
+      node.port.onmessage = (e) => {
+        if (e.data?.type === 'pong' && this._pingPendingAt !== null) {
+          this._lastRoundTripMs = performance.now() - this._pingPendingAt;
+          this._pingPendingAt = null;
+        }
+      };
+      this._probeNode = node;
+    } catch {
+      // Probe is non-critical; ignore failures.
+    }
+  }
+
+  /**
+   * Send a ping to the audio worklet thread. Call periodically (e.g. 4 Hz).
+   * The measured round-trip is available via `getLastRoundTripMs()` on the
+   * next call — it reflects how quickly the audio thread could respond, which
+   * correlates with CPU headroom.
+   */
+  pingCpu(): void {
+    if (!this._probeNode || this._pingPendingAt !== null) return;
+    this._pingPendingAt = performance.now();
+    try {
+      this._probeNode.port.postMessage({ type: 'ping', sentAt: this._pingPendingAt });
+    } catch {
+      this._pingPendingAt = null;
+    }
+  }
+
+  /**
+   * Last measured main-thread → audio-worklet → main-thread round-trip in ms.
+   * Returns null until the first successful pong is received.
+   */
+  get lastRoundTripMs(): number | null {
+    return this._lastRoundTripMs;
+  }
+
   /** Dispose — revoke the blob URL to free memory. */
   dispose(): void {
     if (this._blobUrl) {
       URL.revokeObjectURL(this._blobUrl);
       this._blobUrl = null;
     }
+    this._probeNode = null;
   }
 }
 
