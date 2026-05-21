@@ -28,6 +28,8 @@ import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
 import { StudioErrorBoundary } from "./components/ErrorBoundary";
 import { LeftBrowser } from "./components/LeftBrowser";
 import { applyTheme, getStoredThemeId } from "./lib/themes";
+import { WorldProvider } from "./contexts/WorldContext";
+import { applyWorldTheme, findWorld, getStoredWorldId } from "./lib/worlds";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
@@ -179,7 +181,15 @@ function clearBootstrapResult(key: "health" | "draftAvailable") {
 // or scroll past unwanted animations.
 if (typeof document !== "undefined") {
   try {
-    applyTheme(getStoredThemeId());
+    // Apply world theme (which includes all CSS vars) — falls back to
+    // the plain theme-only path when no world is stored yet.
+    const storedWorldId = getStoredWorldId();
+    const world = findWorld(storedWorldId);
+    if (world) {
+      applyWorldTheme(world);
+    } else {
+      applyTheme(getStoredThemeId());
+    }
     applySideEffects();
   } catch {
     /* SSR-safe no-op */
@@ -217,11 +227,13 @@ export default function App() {
     );
   }
   return (
-    <TooltipProvider delayDuration={250}>
-      <StudioErrorBoundary onPanic={() => audio.panicStopAll()}>
-        <Studio />
-      </StudioErrorBoundary>
-    </TooltipProvider>
+    <WorldProvider>
+      <TooltipProvider delayDuration={250}>
+        <StudioErrorBoundary onPanic={() => audio.panicStopAll()}>
+          <Studio />
+        </StudioErrorBoundary>
+      </TooltipProvider>
+    </WorldProvider>
   );
 }
 

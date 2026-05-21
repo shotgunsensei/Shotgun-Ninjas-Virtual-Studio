@@ -15,7 +15,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, KeyRound, Trash2, Gauge } from "lucide-react";
+import { RotateCcw, KeyRound, Trash2, Gauge, Globe } from "lucide-react";
 import * as Tone from "tone";
 import {
   DEFAULT_SETTINGS,
@@ -28,6 +28,8 @@ import { SHORTCUTS } from "./ShortcutOverlay";
 import { useMidi } from "../lib/midi/midi";
 import { getStore, useStore } from "../store";
 import { lookaheadScheduler } from "../lib/audio/lookahead-scheduler";
+import { useWorld } from "../contexts/WorldContext";
+import { WorldPickerModal } from "./WorldPicker";
 
 /**
  * Project-wide settings modal. Backed by `lib/settings.ts` and split
@@ -166,6 +168,7 @@ export function SettingsModal({
           </TabsContent>
 
           <TabsContent value="ui" className="space-y-3 pt-3">
+            <StudioWorldRow />
             <div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
                 Theme
@@ -805,6 +808,54 @@ function InteropTabContent() {
       <p className="text-[10px] text-muted-foreground leading-snug">
         Open the Export dialog (Ctrl/⌘+E) to access all supported formats.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Studio World row for the UI settings tab — shows the active world name
+ * and a button to open the world picker modal.
+ */
+function StudioWorldRow() {
+  const { activeWorld } = useWorld();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  return (
+    <div className="border border-border rounded-md p-3 bg-background/40">
+      <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+        <Globe className="w-3 h-3" />
+        Studio World
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              {activeWorld.swatchColors.map((color, i) => (
+                <div
+                  key={i}
+                  className="w-3 h-3 rounded-sm"
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+            <span className="font-mono text-xs font-semibold">
+              {activeWorld.name}
+            </span>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {activeWorld.tagline}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setPickerOpen(true)}
+          className="shrink-0 h-7 text-[10px] font-mono uppercase tracking-widest"
+        >
+          Change
+        </Button>
+      </div>
+      <WorldPickerModal open={pickerOpen} onOpenChange={setPickerOpen} />
     </div>
   );
 }

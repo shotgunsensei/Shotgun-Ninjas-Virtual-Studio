@@ -336,6 +336,120 @@ html.studio-reduce-motion .studio-clip-led {
 }
 
 /*
+ * Studio Worlds — visualizer animations. All gated on the same
+ * prefers-reduced-motion / studio-reduce-motion guards as the shuriken.
+ */
+
+/* Sparks: particles fly upward with a random horizontal drift */
+@keyframes studio-spark-rise {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.8;
+  }
+  80% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translateY(-100vh) translateX(var(--spark-drift, 0px));
+    opacity: 0;
+  }
+}
+
+/* Rain: drops fall from top to bottom */
+@keyframes studio-rain-fall {
+  0% {
+    transform: translateY(-30px) rotate(-8deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(100vh) rotate(-8deg);
+    opacity: 0;
+  }
+}
+
+/* Smoke: slow drift and subtle scale pulse */
+@keyframes studio-smoke-drift {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.04;
+  }
+  33% {
+    transform: translate(15px, -20px) scale(1.08);
+    opacity: 0.07;
+  }
+  66% {
+    transform: translate(-10px, -35px) scale(1.15);
+    opacity: 0.05;
+  }
+  100% {
+    transform: translate(0, -50px) scale(1.2);
+    opacity: 0;
+  }
+}
+
+/* Circuit node pulse */
+@keyframes studio-circuit-pulse {
+  0%, 100% {
+    opacity: 0.2;
+    r: 2;
+  }
+  50% {
+    opacity: 0.9;
+    r: 4;
+  }
+}
+
+/* Pixel blink for arcade */
+@keyframes studio-pixel-blink {
+  0%, 100% {
+    opacity: 0;
+  }
+  10%, 30% {
+    opacity: 0.7;
+  }
+  20% {
+    opacity: 0.2;
+  }
+}
+
+/* CRT flicker */
+@keyframes studio-crt-flicker {
+  0%, 97%, 100% {
+    opacity: 0;
+  }
+  98%, 99% {
+    opacity: 0.04;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.studio-reduce-motion) .studio-spark {
+    animation: studio-spark-rise linear infinite;
+  }
+  html:not(.studio-reduce-motion) .studio-rain-drop {
+    animation: studio-rain-fall linear infinite;
+  }
+  html:not(.studio-reduce-motion) .studio-smoke-drift {
+    animation: studio-smoke-drift ease-in-out infinite;
+  }
+  html:not(.studio-reduce-motion) .studio-circuit-node {
+    animation: studio-circuit-pulse ease-in-out infinite;
+  }
+  html:not(.studio-reduce-motion) .studio-pixel-blink {
+    animation: studio-pixel-blink ease-in-out infinite;
+  }
+  html:not(.studio-reduce-motion) .studio-crt-flicker {
+    animation: studio-crt-flicker 7s ease-in-out infinite;
+  }
+}
+
+/*
  * Touch-first surfaces. Pads, step sequencer cells, on-screen keyboards,
  * and the timeline should not double-tap-zoom, accidentally select text,
  * or rubber-band the page while the user is performing.

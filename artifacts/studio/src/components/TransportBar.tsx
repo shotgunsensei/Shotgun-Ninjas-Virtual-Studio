@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2, Activity, History, Trash2, ExternalLink } from "lucide-react";
+import { WorldPickerButton } from "./WorldPicker";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
@@ -228,6 +229,7 @@ export function TransportBar() {
       )}
 
       <PerformanceButton />
+      <WorldPickerButton />
 
       <div className="flex-1" />
 
