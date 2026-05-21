@@ -245,6 +245,20 @@ export function DrumPads({ track }: { track: Track }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track.id, isRecording]);
 
+  // Flash state: track which drum pieces are highlighted by incoming MIDI
+  const [midiFlash, setMidiFlash] = useState<Set<DrumPiece>>(new Set());
+
+  const flashPiece = (piece: DrumPiece) => {
+    setMidiFlash((prev) => new Set(prev).add(piece));
+    window.setTimeout(() => {
+      setMidiFlash((prev) => {
+        const next = new Set(prev);
+        next.delete(piece);
+        return next;
+      });
+    }, 120);
+  };
+
   useMidiEvents(
     (e) => {
       if (e.type !== "noteon") return;
@@ -254,7 +268,10 @@ export function DrumPads({ track }: { track: Track }) {
         const customMapped = midiMappings.find(
           (m) => m.signature === e.signature && m.target.kind === "drum-pad",
         );
-        if (!customMapped) hit(DRUM_PIECES[idx]);
+        if (!customMapped) {
+          hit(DRUM_PIECES[idx]);
+          flashPiece(DRUM_PIECES[idx]);
+        }
       }
     },
     [track.id, isRecording, midiMappings],
@@ -371,7 +388,11 @@ export function DrumPads({ track }: { track: Track }) {
                 hit(p);
               }}
               data-pad-trigger={p}
-              className="touch-pad w-full aspect-square panel-inset rounded-md border-2 border-border hover:border-primary/60 active:bg-primary/30 active:glow-red transition-colors flex flex-col items-center justify-center"
+              className={`touch-pad w-full aspect-square panel-inset rounded-md border-2 transition-colors flex flex-col items-center justify-center ${
+                midiFlash.has(p)
+                  ? "border-primary bg-primary/30 glow-red"
+                  : "border-border hover:border-primary/60 active:bg-primary/30 active:glow-red"
+              }`}
             >
               <span className="font-mono text-xs font-semibold">{LABELS[p]}</span>
               <span className="font-mono text-[9px] text-muted-foreground mt-1">

@@ -335,6 +335,66 @@ export interface ProjectMetadata {
   genre?: string;
 }
 
+export type ScaleId =
+  | "chromatic"
+  | "major"
+  | "minor"
+  | "pentatonic_major"
+  | "pentatonic_minor"
+  | "blues"
+  | "dorian"
+  | "phrygian"
+  | "lydian"
+  | "mixolydian"
+  | "locrian"
+  | "harmonic_minor"
+  | "whole_tone";
+
+export type ChordType =
+  | "none"
+  | "power"
+  | "major_triad"
+  | "minor_triad"
+  | "major7"
+  | "minor7"
+  | "dom7"
+  | "sus2"
+  | "sus4";
+
+export type BasslinePatternId = "quarters" | "offbeat" | "walking";
+
+export type InputSource = "midi" | "keyboard" | "gamepad";
+
+export interface GamepadMapping {
+  buttonIndex: number;
+  note: number;
+  label: string;
+}
+
+/** Performance mode preferences — persisted with the project. */
+export interface PerformanceSettings {
+  /** Whether the performance overlay is currently open. */
+  open: boolean;
+  /** Which input source feeds the performance layer. */
+  inputSource: InputSource;
+  /** Scale lock enabled. */
+  scaleLock: boolean;
+  /** Root note semitone (0=C … 11=B). */
+  scaleRoot: number;
+  /** Active scale mode. */
+  scaleId: ScaleId;
+  /** Chord mode enabled. */
+  chordMode: boolean;
+  /** Active chord type. */
+  chordType: ChordType;
+  /** One-finger bassline mode enabled. */
+  basslineMode: boolean;
+  /** Active bassline pattern. */
+  basslinePatternId: BasslinePatternId;
+  /** Gamepad button → MIDI note mappings. */
+  gamepadMappings?: GamepadMapping[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -377,4 +437,6 @@ export interface Project {
    *  directly — the kit/preset ids on each track are the authoritative
    *  sound selectors. */
   soundPackId?: string;
+  /** Phase 13: Performance mode settings (persisted per project). */
+  performance?: PerformanceSettings;
 }

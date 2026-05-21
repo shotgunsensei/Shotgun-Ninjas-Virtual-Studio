@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower } from "lucide-react";
+import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2 } from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import { Tip } from "./Tip";
 import { useSettings } from "../lib/settings";
 import { OfflineReadyIndicator } from "./PwaInstallControls";
 import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
+import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
+import { useGamepad } from "../lib/performance/gamepad";
 
 export function TransportBar() {
   const bpm = useStore((s) => s.project.bpm);
@@ -220,6 +222,8 @@ export function TransportBar() {
           Count-in {countInBeat + 1}/4
         </div>
       )}
+
+      <PerformanceButton />
 
       <div className="flex-1" />
 
@@ -513,5 +517,45 @@ function MasterMeter({ bpm, pulsing }: { bpm: number; pulsing: boolean }) {
     >
       <StereoMeter getLevels={getLevels} label="MAS" showClip />
     </div>
+  );
+}
+
+/**
+ * Performance Mode button in the transport bar.
+ * Opens the performance overlay panel. Shows a gamepad icon;
+ * glows when performance mode is active or a gamepad is connected.
+ */
+function PerformanceButton() {
+  const perfOpen = useStore((s) => s.project.performance?.open ?? false);
+  const gamepad = useGamepad();
+
+  const toggle = () => {
+    const cur = getStore().state.project.performance;
+    const next = { ...(cur ?? {}), open: !perfOpen };
+    getStore().patchProject({ performance: next as import("../types").PerformanceSettings });
+  };
+
+  return (
+    <Tip label="Performance Mode — controllers, scale lock, chord mode">
+      <button
+        type="button"
+        onClick={toggle}
+        className={`flex items-center gap-1 h-8 px-2 rounded-md border font-mono text-[10px] transition-colors ${
+          perfOpen
+            ? "border-primary bg-primary/20 text-primary glow-red"
+            : gamepad.connected
+              ? "border-neon/50 text-neon hover:bg-neon/10"
+              : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+        }`}
+        aria-label="Toggle Performance Mode"
+        aria-pressed={perfOpen}
+      >
+        <Gamepad2 className="w-3.5 h-3.5" />
+        <span className="hidden sm:inline">Perform</span>
+        {gamepad.connected && !perfOpen && (
+          <span className="w-1.5 h-1.5 rounded-full bg-neon ml-0.5" />
+        )}
+      </button>
+    </Tip>
   );
 }

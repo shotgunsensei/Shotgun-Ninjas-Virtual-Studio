@@ -64,6 +64,11 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import { PerformanceModePanel } from "./components/PerformanceModePanel";
+import { PerformancePadScreen } from "./components/PerformancePadScreen";
+import { performanceRouter } from "./lib/performance/router";
+import { midiNoteToName } from "./lib/midi/midi";
+import { basslinePattern } from "./lib/performance/bassline";
 
 let bootstrapped = false;
 let bootstrapPromise: Promise<void> | null = null;
@@ -258,6 +263,79 @@ function Studio() {
   useEffect(() => writeCollapse(COLLAPSE_KEYS.left, leftCollapsed), [leftCollapsed]);
   useEffect(() => writeCollapse(COLLAPSE_KEYS.right, rightCollapsed), [rightCollapsed]);
   useEffect(() => writeCollapse(COLLAPSE_KEYS.mixer, mixerCollapsed), [mixerCollapsed]);
+
+  // Performance pad screen (fullscreen 4×4 grid)
+  const [padScreenOpen, setPadScreenOpen] = useState(false);
+
+  // Initialize the unified performance router once and wire it to the audio engine.
+  useEffect(() => {
+    performanceRouter.initialize();
+
+    // Wire bassline pattern to the audio engine so it can trigger notes
+    basslinePattern.setPlayNote((trackId, note, velocity, duration) => {
+      const durSec = duration === "8n" ? 0.25 : 0.5;
+      audio.triggerNote(trackId, note, durSec, velocity);
+    });
+
+    // Route performance note events → audio engine
+    const unsub = performanceRouter.onNote((e) => {
+      if (e.type !== "noteon") return;
+      const store = getStore();
+      const project = store.state.project;
+
+      const perf = project.performance;
+      if (!perf) return;
+
+      const note = midiNoteToName(e.note);
+      const velocity = typeof e.velocity === "number" ? e.velocity : 0.85;
+
+      // Bassline mode: route to first bass track if enabled
+      if (perf.basslineMode) {
+        const bassTrack = project.tracks.find(
+          (t) => t.kind === "bass" || t.kind === "piano",
+        );
+        if (bassTrack) {
+          basslinePattern.trigger(bassTrack.id, e.note, perf.basslinePatternId);
+          return;
+        }
+      }
+
+      // Drum notes (36-51 range) → drum track
+      if (e.note >= 36 && e.note <= 51) {
+        const drumTrack = project.tracks.find((t) => t.kind === "drums");
+        if (drumTrack) {
+          const PIECES = ["kick","snare","hat","ohat","clap","tomLow","tomHigh","crash","fx"] as DrumPiece[];
+          const piece = PIECES[e.note - 36] as DrumPiece | undefined;
+          if (piece) {
+            audio.triggerDrum(drumTrack.id, piece, velocity);
+            return;
+          }
+        }
+      }
+
+      // Melodic notes → selected track (if melodic)
+      const selectedId = store.state.selectedTrackId;
+      const selectedTrackNow = project.tracks.find((t) => t.id === selectedId);
+      const target = (selectedTrackNow?.kind === "piano" || selectedTrackNow?.kind === "guitar" || selectedTrackNow?.kind === "bass")
+        ? selectedTrackNow
+        : project.tracks.find((t) => t.kind === "piano" || t.kind === "guitar" || t.kind === "bass");
+      if (target) {
+        audio.triggerNote(target.id, note, 0.5, velocity);
+      }
+    });
+
+    // Handle pad screen open event from PerformanceModePanel
+    const onPadScreenOpen = () => setPadScreenOpen(true);
+    window.addEventListener("studio:open-pad-screen", onPadScreenOpen);
+
+    return () => {
+      unsub();
+      window.removeEventListener("studio:open-pad-screen", onPadScreenOpen);
+      performanceRouter.teardown();
+      basslinePattern.stop();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clipboard for clip copy/paste (in-memory, simple JSON snapshot)
   const clipboardRef = useRef<{
@@ -741,6 +819,12 @@ function Studio() {
         />
       )}
       <TransportBar />
+      {/* Performance Mode overlay — rendered above everything else */}
+      <PerformanceModePanel />
+      <PerformancePadScreen
+        open={padScreenOpen}
+        onClose={() => setPadScreenOpen(false)}
+      />
       <div className="flex flex-1 overflow-hidden">
         {/* Left browser: inline on desktop, drawer trigger on tablet. */}
         {showInlineLeft ? (
