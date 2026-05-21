@@ -1,4 +1,5 @@
 import { Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
@@ -8,6 +9,52 @@ export function MidiPanel() {
   const midi = useMidi();
   const project = useStore((s) => s.project);
   const monitor = useStore((s) => s.midiMonitor);
+
+  const liveValues = useMemo(() => {
+    const map: Record<string, { value: number; ts: number }> = {};
+    for (const entry of monitor) {
+      const sig =
+        entry.type === "cc"
+          ? `cc:${entry.data1}`
+          : entry.type === "noteon" || entry.type === "noteoff"
+            ? `note:${entry.data1}`
+            : null;
+      if (sig && !(sig in map)) {
+        map[sig] = { value: entry.data2, ts: entry.ts };
+      }
+    }
+    return map;
+  }, [monitor]);
+
+  const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
+  const prevTsRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    const newFlash: string[] = [];
+    for (const m of project.midiMappings) {
+      const live = liveValues[m.signature];
+      if (!live) continue;
+      const prev = prevTsRef.current[m.id];
+      if (prev === undefined || live.ts > prev) {
+        prevTsRef.current[m.id] = live.ts;
+        newFlash.push(m.id);
+      }
+    }
+    if (newFlash.length === 0) return;
+    setFlashIds((prev) => {
+      const next = new Set(prev);
+      for (const id of newFlash) next.add(id);
+      return next;
+    });
+    const timer = setTimeout(() => {
+      setFlashIds((prev) => {
+        const next = new Set(prev);
+        for (const id of newFlash) next.delete(id);
+        return next;
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [liveValues, project.midiMappings]);
 
   return (
     <div className="panel p-3 flex flex-col h-full overflow-hidden">
@@ -72,30 +119,60 @@ export function MidiPanel() {
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mt-1 mb-1">
         Mappings
       </div>
-      <div className="space-y-1 max-h-32 overflow-y-auto">
+      <div className="space-y-1 max-h-40 overflow-y-auto">
         {project.midiMappings.length === 0 && (
           <p className="text-[11px] text-muted-foreground font-mono">
             None. Click any brain icon to learn a mapping.
           </p>
         )}
-        {project.midiMappings.map((m) => (
-          <div
-            key={m.id}
-            className="flex items-center justify-between gap-2 panel-inset rounded px-2 py-1"
-          >
-            <div className="text-[11px] font-mono truncate">
-              <span className="text-foreground/90">{m.label}</span>{" "}
-              <span className="text-muted-foreground">{m.signature}</span>
-            </div>
-            <button
-              onClick={() => getStore().removeMapping(m.id)}
-              className="text-muted-foreground hover:text-destructive"
-              aria-label="Remove mapping"
+        {project.midiMappings.map((m) => {
+          const live = liveValues[m.signature];
+          const isFlashing = flashIds.has(m.id);
+          const pct = live ? Math.round((live.value / 127) * 100) : null;
+          return (
+            <div
+              key={m.id}
+              className={`flex items-center justify-between gap-2 panel-inset rounded px-2 py-1 transition-colors duration-150 ${
+                isFlashing ? "bg-neon/10 ring-1 ring-neon/30" : ""
+              }`}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-mono truncate">
+                  <span className="text-foreground/90">{m.label}</span>{" "}
+                  <span className="text-muted-foreground">{m.signature}</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-75 ${
+                        isFlashing ? "bg-neon" : "bg-neon/40"
+                      }`}
+                      style={{ width: pct !== null ? `${pct}%` : "0%" }}
+                    />
+                  </div>
+                  <span
+                    className={`text-[10px] font-mono tabular-nums w-6 text-right ${
+                      isFlashing
+                        ? "text-neon"
+                        : pct !== null
+                          ? "text-muted-foreground"
+                          : "text-muted-foreground/40"
+                    }`}
+                  >
+                    {pct !== null ? live!.value : "—"}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => getStore().removeMapping(m.id)}
+                className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                aria-label="Remove mapping"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mt-3 mb-1">
