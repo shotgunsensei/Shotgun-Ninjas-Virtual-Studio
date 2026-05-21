@@ -28,6 +28,7 @@ export interface StudioWorld extends ThemeDef {
   tagline: string;
   lore: string;
   swatchColors: string[];
+  isCustom?: boolean;
 }
 
 export type WorldId =
@@ -36,7 +37,8 @@ export type WorldId =
   | "neon-rooftop"
   | "lofi-smoke-room"
   | "cyber-temple"
-  | "arcade-alley";
+  | "arcade-alley"
+  | (string & {});
 
 export const WORLDS: StudioWorld[] = [
   {
@@ -263,6 +265,183 @@ export const WORLDS: StudioWorld[] = [
   },
 ];
 
+// ─── Custom world support ──────────────────────────────────────────────────
+
+export type BgVariant = "void" | "warm" | "cool" | "deep" | "matrix";
+
+export interface CustomWorldDef {
+  id: string;
+  name: string;
+  primaryColor: string;
+  neonColor: string;
+  bgVariant: BgVariant;
+}
+
+export const BG_VARIANTS: { id: BgVariant; label: string }[] = [
+  { id: "void", label: "Void (neutral dark)" },
+  { id: "warm", label: "Warm (amber undertones)" },
+  { id: "cool", label: "Cool (blue undertones)" },
+  { id: "deep", label: "Deep (violet undertones)" },
+  { id: "matrix", label: "Matrix (green undertones)" },
+];
+
+function hexToHsl(hex: string): [number, number, number] {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, Math.round(l * 100)];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
+}
+
+function hsl(h: number, s: number, l: number): string {
+  return `${h} ${s}% ${l}%`;
+}
+
+const BG_PROFILES: Record<
+  BgVariant,
+  {
+    bgH: number;
+    bgS: number;
+    visualizer: VisualizerVariant;
+    synth: WelcomeSynthDesc;
+    fgS: number;
+  }
+> = {
+  void: {
+    bgH: 0,
+    bgS: 0,
+    visualizer: "shuriken",
+    synth: { type: "percussive-strike", freq: 180, duration: 1.2 },
+    fgS: 0,
+  },
+  warm: {
+    bgH: 28,
+    bgS: 12,
+    visualizer: "smoke",
+    synth: { type: "chord-stab", freq: 220, duration: 1.5 },
+    fgS: 15,
+  },
+  cool: {
+    bgH: 215,
+    bgS: 28,
+    visualizer: "rain",
+    synth: { type: "arpeggio", freq: 660, duration: 1.0 },
+    fgS: 20,
+  },
+  deep: {
+    bgH: 270,
+    bgS: 22,
+    visualizer: "circuit",
+    synth: { type: "deep-gong", freq: 80, duration: 2.0 },
+    fgS: 10,
+  },
+  matrix: {
+    bgH: 120,
+    bgS: 25,
+    visualizer: "scanline",
+    synth: { type: "8bit-jingle", freq: 880, duration: 0.8 },
+    fgS: 30,
+  },
+};
+
+export function buildCustomWorld(def: CustomWorldDef): StudioWorld {
+  const [pH, pS, pL] = hexToHsl(def.primaryColor);
+  const [nH, nS, nL] = hexToHsl(def.neonColor);
+  const prof = BG_PROFILES[def.bgVariant];
+  const { bgH, bgS, fgS } = prof;
+
+  const bgFinalH = bgS === 0 ? pH : bgH;
+  const bgFinalS = bgS === 0 ? Math.min(pS * 0.08, 6) : bgS;
+
+  const bloodH = pH;
+  const bloodS = Math.max(pS, 60);
+  const bloodL = Math.min(Math.max(pL, 45), 65);
+
+  const neonH = nH;
+  const neonS = Math.max(nS, 60);
+  const neonL = Math.min(Math.max(nL, 50), 70);
+
+  return {
+    id: def.id,
+    name: def.name,
+    tagline: "Your world. Your rules.",
+    description: `Custom world: ${def.name}`,
+    lore: "Built from scratch, tuned to your taste. This world is entirely yours.",
+    kitId: "cyberpunk",
+    demoId: "cyber-ninja",
+    visualizerVariant: prof.visualizer,
+    welcomeSynth: prof.synth,
+    isCustom: true,
+    swatchColors: [
+      `hsl(${bgFinalH}, ${bgFinalS}%, 5%)`,
+      def.primaryColor,
+      def.neonColor,
+    ],
+    vars: {
+      "--background": hsl(bgFinalH, bgFinalS, 5),
+      "--foreground": hsl(bgFinalH, fgS, 93),
+      "--graphite": hsl(bgFinalH, bgFinalS, 9),
+      "--graphite-2": hsl(bgFinalH, bgFinalS, 13),
+      "--blood": hsl(bloodH, bloodS, bloodL),
+      "--neon": hsl(neonH, neonS, neonL),
+      "--card": hsl(bgFinalH, bgFinalS, 8),
+      "--card-foreground": hsl(bgFinalH, fgS, 93),
+      "--popover": hsl(bgFinalH, bgFinalS, 7),
+      "--popover-foreground": hsl(bgFinalH, fgS, 93),
+      "--primary": hsl(bloodH, bloodS, bloodL),
+      "--primary-foreground": hsl(bgFinalH, 10, 98),
+      "--secondary": hsl(bgFinalH, bgFinalS, 15),
+      "--secondary-foreground": hsl(bgFinalH, fgS, 93),
+      "--muted": hsl(bgFinalH, bgFinalS, 13),
+      "--muted-foreground": hsl(bgFinalH, fgS * 0.7, 63),
+      "--accent": hsl(bgFinalH, bgFinalS, 17),
+      "--accent-foreground": hsl(bgFinalH, fgS, 93),
+      "--destructive": hsl(0, 75, 52),
+      "--destructive-foreground": hsl(0, 0, 100),
+      "--border": hsl(bgFinalH, bgFinalS, 19),
+      "--input": hsl(bgFinalH, bgFinalS, 19),
+      "--ring": hsl(bloodH, bloodS, bloodL),
+    },
+  };
+}
+
+const CUSTOM_WORLDS_KEY = "studio.customWorlds";
+
+export function loadCustomWorldDefs(): CustomWorldDef[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_WORLDS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as CustomWorldDef[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomWorldDefs(defs: CustomWorldDef[]): void {
+  try {
+    localStorage.setItem(CUSTOM_WORLDS_KEY, JSON.stringify(defs));
+  } catch {
+    /* quota */
+  }
+}
+
+export function generateCustomWorldId(): string {
+  return `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// ─── Core helpers ──────────────────────────────────────────────────────────
+
 const WORLD_STORAGE_KEY = "studio.world";
 const WORLD_PREFS_STORAGE_KEY = "studio.worldPrefs";
 
@@ -271,15 +450,21 @@ export interface WorldPrefs {
   bpm?: number;
 }
 
-export function getStoredWorldId(): WorldId {
+export function getStoredWorldId(): string {
   if (typeof localStorage === "undefined") return "dojo-dark";
   const v = localStorage.getItem(WORLD_STORAGE_KEY);
-  if (v && WORLDS.some((w) => w.id === v)) return v as WorldId;
+  if (!v) return "dojo-dark";
+  if (WORLDS.some((w) => w.id === v)) return v;
+  const customs = loadCustomWorldDefs();
+  if (customs.some((c) => c.id === v)) return v;
   return "dojo-dark";
 }
 
-export function findWorld(id: string): StudioWorld | undefined {
-  return WORLDS.find((w) => w.id === id);
+export function findWorld(
+  id: string,
+  customWorlds: StudioWorld[] = [],
+): StudioWorld | undefined {
+  return WORLDS.find((w) => w.id === id) ?? customWorlds.find((w) => w.id === id);
 }
 
 export function applyWorldTheme(world: StudioWorld) {

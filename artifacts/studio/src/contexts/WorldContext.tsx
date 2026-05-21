@@ -10,12 +10,15 @@ import {
 import {
   WORLDS,
   type StudioWorld,
-  type WorldId,
+  type CustomWorldDef,
   applyWorldTheme,
   findWorld,
   getStoredWorldId,
   getWorldPrefs,
   saveWorldPrefs,
+  loadCustomWorldDefs,
+  saveCustomWorldDefs,
+  buildCustomWorld,
 } from "../lib/worlds";
 import { playWorldWelcome, startAmbientLoop, type AmbientLoop } from "../lib/worldAudio";
 import { getStore } from "../store";
@@ -26,9 +29,14 @@ const AMBIENT_VOLUME = 0.10;
 
 interface WorldContextValue {
   activeWorld: StudioWorld;
-  setWorld: (id: WorldId) => void;
+  setWorld: (id: string) => void;
   ambientEnabled: boolean;
   setAmbientEnabled: (enabled: boolean) => void;
+  customWorldDefs: CustomWorldDef[];
+  customWorlds: StudioWorld[];
+  allWorlds: StudioWorld[];
+  saveCustomWorld: (def: CustomWorldDef) => void;
+  deleteCustomWorld: (id: string) => void;
 }
 
 const WorldContext = createContext<WorldContextValue | null>(null);
@@ -45,8 +53,9 @@ function _prefersReducedAudio(): boolean {
 }
 
 export function WorldProvider({ children }: { children: React.ReactNode }) {
-  const [activeWorldId, setActiveWorldId] = useState<WorldId>(
-    getStoredWorldId,
+  const [activeWorldId, setActiveWorldId] = useState<string>(getStoredWorldId);
+  const [customWorldDefs, setCustomWorldDefs] = useState<CustomWorldDef[]>(
+    loadCustomWorldDefs,
   );
 
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -72,6 +81,16 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
     return audioCtxRef.current;
   }, []);
 
+  const customWorlds = useMemo(
+    () => customWorldDefs.map(buildCustomWorld),
+    [customWorldDefs],
+  );
+
+  const allWorlds = useMemo(
+    () => [...WORLDS, ...customWorlds],
+    [customWorlds],
+  );
+
   /** Cancel any pending delayed ambient-start. */
   const _cancelPendingAmbientStart = useCallback(() => {
     if (ambientStartTimerRef.current !== null) {
@@ -91,7 +110,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
 
   /** Start the ambient loop for a given world (stops any current one first). */
   const _startAmbient = useCallback(
-    (worldId: WorldId) => {
+    (worldId: string) => {
       _stopAmbient();
       if (_prefersReducedAudio()) return;
       try {
@@ -126,9 +145,9 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
 
   // Apply the world theme on mount and whenever it changes
   useEffect(() => {
-    const world = findWorld(activeWorldId) ?? WORLDS[0];
+    const world = findWorld(activeWorldId, customWorlds) ?? WORLDS[0];
     applyWorldTheme(world);
-  }, [activeWorldId]);
+  }, [activeWorldId, customWorlds]);
 
   // React to ambientEnabled toggle
   useEffect(() => {
@@ -148,8 +167,8 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
   }, [_stopAmbient]);
 
   const setWorld = useCallback(
-    (id: WorldId) => {
-      const world = findWorld(id);
+    (id: string) => {
+      const world = findWorld(id, customWorlds);
       if (!world) return;
 
       // Save current world's kit + BPM before switching
@@ -218,21 +237,69 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
         // Ignore
       }
     },
-    [activeWorldId, getAudioCtx, _cancelPendingAmbientStart],
+    [activeWorldId, getAudioCtx, _cancelPendingAmbientStart, customWorlds],
   );
 
   const setAmbientEnabled = useCallback((enabled: boolean) => {
     setAmbientEnabledState(enabled);
   }, []);
 
-  const activeWorld = useMemo(
-    () => findWorld(activeWorldId) ?? WORLDS[0],
+  const saveCustomWorld = useCallback((def: CustomWorldDef) => {
+    setCustomWorldDefs((prev) => {
+      const existing = prev.findIndex((d) => d.id === def.id);
+      const next =
+        existing >= 0
+          ? prev.map((d, i) => (i === existing ? def : d))
+          : [...prev, def];
+      saveCustomWorldDefs(next);
+      return next;
+    });
+  }, []);
+
+  const deleteCustomWorld = useCallback(
+    (id: string) => {
+      setCustomWorldDefs((prev) => {
+        const next = prev.filter((d) => d.id !== id);
+        saveCustomWorldDefs(next);
+        return next;
+      });
+      // If the deleted world is active, switch to the default
+      if (activeWorldId === id) {
+        setActiveWorldId("dojo-dark");
+        applyWorldTheme(WORLDS[0]);
+      }
+    },
     [activeWorldId],
   );
 
+  const activeWorld = useMemo(
+    () => findWorld(activeWorldId, customWorlds) ?? WORLDS[0],
+    [activeWorldId, customWorlds],
+  );
+
   const value = useMemo(
-    () => ({ activeWorld, setWorld, ambientEnabled, setAmbientEnabled }),
-    [activeWorld, setWorld, ambientEnabled, setAmbientEnabled],
+    () => ({
+      activeWorld,
+      setWorld,
+      ambientEnabled,
+      setAmbientEnabled,
+      customWorldDefs,
+      customWorlds,
+      allWorlds,
+      saveCustomWorld,
+      deleteCustomWorld,
+    }),
+    [
+      activeWorld,
+      setWorld,
+      ambientEnabled,
+      setAmbientEnabled,
+      customWorldDefs,
+      customWorlds,
+      allWorlds,
+      saveCustomWorld,
+      deleteCustomWorld,
+    ],
   );
 
   return (
