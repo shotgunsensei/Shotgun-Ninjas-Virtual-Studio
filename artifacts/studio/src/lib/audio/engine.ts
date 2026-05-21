@@ -101,6 +101,16 @@ interface TrackVoice {
 }
 
 class AudioEngine {
+  /**
+   * When `?disableAudio=1` is present in the URL the engine silently skips
+   * all Tone.js node creation and teardown.  This lets E2E tests exercise
+   * loadDemo / remixDemo flows without hitting the multi-second AudioContext
+   * initialisation that headless Chromium incurs per track.
+   */
+  private readonly noAudio =
+    typeof location !== "undefined" &&
+    new URLSearchParams(location.search).has("disableAudio");
+
   private masterChain = new MasterChain();
   private metronomeSynth: Tone.MembraneSynth;
   private metronomeAccent: Tone.MembraneSynth;
@@ -425,6 +435,7 @@ class AudioEngine {
    * — for a hard cut (e.g. user-initiated panic) use `panicStopAll()`.
    */
   stop() {
+    if (this.noAudio) return;
     Tone.getTransport().stop();
     Tone.getTransport().position = 0;
     for (const v of this.voices.values()) {
@@ -567,6 +578,7 @@ class AudioEngine {
 
   // ---- tracks ----
   ensureTrack(track: Track) {
+    if (this.noAudio) return;
     let v = this.voices.get(track.id);
     if (!v) {
       v = this.buildVoice(track);
@@ -620,6 +632,7 @@ class AudioEngine {
    * (e.g. loading a demo) so we don't leak instruments or accumulate
    * stale voice ids in the engine. */
   disposeAllTracks() {
+    if (this.noAudio) return;
     for (const id of Array.from(this.voices.keys())) {
       this.removeTrack(id);
     }

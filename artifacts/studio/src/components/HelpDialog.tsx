@@ -44,6 +44,9 @@ export function HelpDialog() {
     const mode = STARTING_MODES.find((m) => m.id === id);
     if (!mode) return;
     loadDemo(mode.demoId);
+    // loadDemo → resetStore clears showOnboarding; restore it so the dialog
+    // stays open for the coach-card step that follows.
+    getStore().set({ showOnboarding: true });
     // Move to the coach card so the user gets the four-step tour after
     // their starting template is on screen. The studio is now ready to
     // play behind the dimmed dialog.

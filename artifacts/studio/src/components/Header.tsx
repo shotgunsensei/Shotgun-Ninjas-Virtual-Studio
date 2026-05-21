@@ -795,6 +795,7 @@ export function Header() {
           value={project.name}
           onChange={(e) => getStore().patchProject({ name: e.target.value })}
           className="h-8 bg-background border-border font-mono text-sm"
+          data-testid="project-name-input"
         />
       </div>
 
@@ -813,7 +814,7 @@ export function Header() {
         >
           <Copy className="w-3.5 h-3.5 mr-1" /> Save As
         </Button>
-        <Button variant="outline" size="sm" onClick={openLoadDialog} className="font-mono text-xs">
+        <Button variant="outline" size="sm" onClick={openLoadDialog} className="font-mono text-xs" data-testid="open-load-dialog">
           <FolderOpen className="w-3.5 h-3.5 mr-1" /> Load
         </Button>
         <Button
