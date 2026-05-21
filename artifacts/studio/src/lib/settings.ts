@@ -70,6 +70,12 @@ export interface StudioSettings {
   /** Enable 2× oversampling for the master saturation stage.
    *  Increases CPU usage; shows a warning in the Diagnostics panel at high voice counts. */
   oversampleEnabled: boolean;
+
+  // Export dialog — persisted so values survive dialog close / page reload
+  exportRangeMode: "whole" | "loop" | "custom";
+  exportStartBar: number;
+  /** Stored as an absolute bar number; clamped to project.bars on read. */
+  exportEndBar: number;
 }
 
 export const DEFAULT_SETTINGS: StudioSettings = {
@@ -99,6 +105,10 @@ export const DEFAULT_SETTINGS: StudioSettings = {
 
   latencyOffsetMs: 0,
   oversampleEnabled: false,
+
+  exportRangeMode: "whole",
+  exportStartBar: 1,
+  exportEndBar: 9999,
 };
 
 const STORAGE_KEY = "studio.settings.v1";

@@ -41,6 +41,7 @@ import { Tip } from "./Tip";
 import {
   useSettings,
   getSettings,
+  setSettings,
   subscribeSettings,
   setAutosaveInterval,
   AUTOSAVE_OPTIONS,
@@ -191,9 +192,15 @@ export function Header() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   type ExportRangeMode = "whole" | "loop" | "custom";
-  const [exportRangeMode, setExportRangeMode] = useState<ExportRangeMode>("whole");
-  const [customStartBar, setCustomStartBar] = useState(1);
-  const [customEndBar, setCustomEndBar] = useState(project.bars);
+  const [exportRangeMode, setExportRangeMode] = useState<ExportRangeMode>(
+    () => getSettings().exportRangeMode,
+  );
+  const [customStartBar, setCustomStartBar] = useState(
+    () => Math.max(1, Math.min(project.bars, getSettings().exportStartBar)),
+  );
+  const [customEndBar, setCustomEndBar] = useState(
+    () => Math.max(1, Math.min(project.bars, getSettings().exportEndBar)),
+  );
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
   const [importSummary, setImportSummary] =
     useState<ProjectImportSummary | null>(null);
@@ -1002,7 +1009,10 @@ export function Header() {
                     name="export-range"
                     value="whole"
                     checked={exportRangeMode === "whole"}
-                    onChange={() => setExportRangeMode("whole")}
+                    onChange={() => {
+                      setExportRangeMode("whole");
+                      setSettings({ exportRangeMode: "whole" });
+                    }}
                   />
                   Whole song ({project.bars} bars)
                 </label>
@@ -1013,7 +1023,10 @@ export function Header() {
                       name="export-range"
                       value="loop"
                       checked={exportRangeMode === "loop"}
-                      onChange={() => setExportRangeMode("loop")}
+                      onChange={() => {
+                        setExportRangeMode("loop");
+                        setSettings({ exportRangeMode: "loop" });
+                      }}
                     />
                     Loop region (bars {Math.floor(project.loopStartBeat / 4) + 1}–{Math.ceil(project.loopEndBeat / 4)})
                   </label>
@@ -1024,7 +1037,10 @@ export function Header() {
                     name="export-range"
                     value="custom"
                     checked={exportRangeMode === "custom"}
-                    onChange={() => setExportRangeMode("custom")}
+                    onChange={() => {
+                      setExportRangeMode("custom");
+                      setSettings({ exportRangeMode: "custom" });
+                    }}
                   />
                   Custom range
                 </label>
@@ -1039,7 +1055,12 @@ export function Header() {
                       onChange={(e) => {
                         const v = Math.max(1, Math.min(project.bars, Number(e.target.value)));
                         setCustomStartBar(v);
-                        if (v >= customEndBar) setCustomEndBar(Math.min(project.bars, v + 1));
+                        setSettings({ exportStartBar: v });
+                        if (v >= customEndBar) {
+                          const newEnd = Math.min(project.bars, v + 1);
+                          setCustomEndBar(newEnd);
+                          setSettings({ exportEndBar: newEnd });
+                        }
                       }}
                       className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
                       data-testid="export-custom-start-bar"
@@ -1053,7 +1074,12 @@ export function Header() {
                       onChange={(e) => {
                         const v = Math.max(1, Math.min(project.bars, Number(e.target.value)));
                         setCustomEndBar(v);
-                        if (v <= customStartBar) setCustomStartBar(Math.max(1, v - 1));
+                        setSettings({ exportEndBar: v });
+                        if (v <= customStartBar) {
+                          const newStart = Math.max(1, v - 1);
+                          setCustomStartBar(newStart);
+                          setSettings({ exportStartBar: newStart });
+                        }
                       }}
                       className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
                       data-testid="export-custom-end-bar"
