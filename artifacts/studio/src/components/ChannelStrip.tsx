@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import * as Icons from "lucide-react";
 import { Volume2, Trash2, Copy, Mic, Sliders } from "lucide-react";
 import { StereoMeter } from "./Meter";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
 import { audio } from "../lib/audio/engine";
+import { useMidiEvents } from "../lib/midi/midi";
 import type { AnyPreset, AutomationParamId, InstrumentKind, MidiTarget, SendBusId, Track, TrackEq } from "../types";
 import { SEND_BUS_IDS, SEND_BUS_LABELS } from "../types";
 import { MidiLearnButton } from "./MidiLearnButton";
@@ -91,6 +92,19 @@ function fxRackEnabledCount(track: Track): number {
 export function ChannelStripsBar() {
   const tracks = useStore((s) => s.project.tracks);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const [midiFlashId, setMidiFlashId] = useState<string | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useMidiEvents((e) => {
+    if (e.type !== "noteon" || !selectedTrackId) return;
+    setMidiFlashId(selectedTrackId);
+    if (flashTimerRef.current !== null) clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setMidiFlashId(null), 200);
+  });
+
+  useEffect(() => () => {
+    if (flashTimerRef.current !== null) clearTimeout(flashTimerRef.current);
+  }, []);
 
   return (
     <div className="border-t border-border bg-graphite">
@@ -100,6 +114,7 @@ export function ChannelStripsBar() {
             key={t.id}
             track={t}
             selected={selectedTrackId === t.id}
+            midiFlash={midiFlashId === t.id}
           />
         ))}
         <MasterStrip />
@@ -115,9 +130,11 @@ export function ChannelStripsBar() {
 const ChannelStrip = memo(function ChannelStrip({
   track,
   selected,
+  midiFlash,
 }: {
   track: Track;
   selected: boolean;
+  midiFlash?: boolean;
 }) {
   const armOther = (armed: boolean) => {
     if (armed) {
@@ -145,8 +162,12 @@ const ChannelStrip = memo(function ChannelStrip({
     <div
       onClick={() => getStore().set({ selectedTrackId: track.id })}
       data-testid={`channel-strip-${track.id}`}
-      className={`flex-none w-48 border-r border-border p-2 flex flex-col gap-1.5 cursor-pointer ${
-        selected ? "bg-primary/5" : ""
+      className={`flex-none w-48 border-r border-border p-2 flex flex-col gap-1.5 cursor-pointer transition-colors duration-75 ${
+        midiFlash
+          ? "bg-primary/15 ring-1 ring-inset ring-primary/40"
+          : selected
+          ? "bg-primary/5"
+          : ""
       }`}
       style={{ borderTop: `2px solid ${color}` }}
     >
