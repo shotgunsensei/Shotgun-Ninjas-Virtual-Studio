@@ -138,9 +138,18 @@ export function TransportBar() {
       <div className="h-8 w-px bg-border" />
 
       <div className="flex flex-col items-center">
-        <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
-          BPM
-        </label>
+        <div className="flex items-center gap-0.5">
+          <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
+            BPM
+          </label>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("studio:open-glossary", { detail: { term: "BPM" } }))}
+            className="inline-flex items-center justify-center w-3 h-3 rounded-full border border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/60 font-mono text-[8px] leading-none transition-colors"
+            aria-label="What is BPM? Open glossary"
+            title="What is BPM?"
+          >?</button>
+        </div>
         <Tip label="Project tempo (40–240)">
           <input
             type="number"
@@ -151,14 +160,27 @@ export function TransportBar() {
               getStore().patchProject({ bpm: Math.max(40, Math.min(240, Number(e.target.value) || 0)) })
             }
             className="bg-background border border-border rounded-md w-16 h-7 text-center font-mono text-sm"
+            aria-label="BPM — project tempo"
+            aria-valuenow={bpm}
+            aria-valuemin={40}
+            aria-valuemax={240}
           />
         </Tip>
       </div>
 
       <div className="flex flex-col items-center min-w-[88px]">
-        <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
-          Swing
-        </label>
+        <div className="flex items-center gap-0.5">
+          <label className="text-[10px] uppercase tracking-widest text-muted-foreground">
+            Swing
+          </label>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("studio:open-glossary", { detail: { term: "Swing" } }))}
+            className="inline-flex items-center justify-center w-3 h-3 rounded-full border border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/60 font-mono text-[8px] leading-none transition-colors"
+            aria-label="What is Swing? Open glossary"
+            title="What is Swing?"
+          >?</button>
+        </div>
         <div className="flex items-center gap-1 w-full">
           <Slider
             value={[Math.round(globalSwing * 100)]}
@@ -167,8 +189,12 @@ export function TransportBar() {
             onValueChange={([v]) =>
               getStore().setGlobalGroove({ swing: (v ?? 0) / 100 })
             }
+            aria-label="Swing amount"
+            aria-valuenow={Math.round(globalSwing * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
           />
-          <span className="font-mono text-[10px] w-6 text-right tabular-nums">
+          <span className="font-mono text-[10px] w-6 text-right tabular-nums" aria-hidden>
             {Math.round(globalSwing * 100)}
           </span>
         </div>

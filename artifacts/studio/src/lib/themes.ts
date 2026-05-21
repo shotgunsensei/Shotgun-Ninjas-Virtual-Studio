@@ -2,7 +2,8 @@ export type ThemeId =
   | "dojo-dark"
   | "neon-control-room"
   | "lo-fi-smoke"
-  | "classic-console";
+  | "classic-console"
+  | "high-contrast";
 
 export interface ThemeDef {
   id: ThemeId;
@@ -130,6 +131,36 @@ export const THEMES: ThemeDef[] = [
       "--border": "215 15% 26%",
       "--input": "215 15% 26%",
       "--ring": "140 70% 45%",
+    },
+  },
+  {
+    id: "high-contrast",
+    name: "High Contrast",
+    description: "Near-white on near-black. WCAG AA compliant — no gradients, bold borders.",
+    vars: {
+      "--background": "0 0% 0%",
+      "--foreground": "0 0% 100%",
+      "--graphite": "0 0% 4%",
+      "--graphite-2": "0 0% 8%",
+      "--blood": "0 100% 60%",
+      "--neon": "60 100% 60%",
+      "--card": "0 0% 3%",
+      "--card-foreground": "0 0% 100%",
+      "--popover": "0 0% 2%",
+      "--popover-foreground": "0 0% 100%",
+      "--primary": "60 100% 60%",
+      "--primary-foreground": "0 0% 0%",
+      "--secondary": "0 0% 10%",
+      "--secondary-foreground": "0 0% 100%",
+      "--muted": "0 0% 8%",
+      "--muted-foreground": "0 0% 80%",
+      "--accent": "0 0% 12%",
+      "--accent-foreground": "0 0% 100%",
+      "--destructive": "0 100% 60%",
+      "--destructive-foreground": "0 0% 0%",
+      "--border": "0 0% 50%",
+      "--input": "0 0% 10%",
+      "--ring": "60 100% 60%",
     },
   },
 ];

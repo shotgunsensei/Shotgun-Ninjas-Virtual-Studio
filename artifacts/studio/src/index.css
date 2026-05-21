@@ -115,6 +115,50 @@
       );
     background-attachment: fixed;
   }
+
+  /* Suppress drifting backdrop gradients in reduced motion mode */
+  [data-reduced-motion="1"] body {
+    background-image: none;
+  }
+
+  /*
+   * Accessible focus ring — visible on keyboard nav, hidden on pointer.
+   * Uses the CSS variable ring color so it always matches the active theme.
+   */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* High-contrast theme: thicker borders on all interactive elements */
+  [data-theme="high-contrast"] button,
+  [data-theme="high-contrast"] input,
+  [data-theme="high-contrast"] select,
+  [data-theme="high-contrast"] [role="button"],
+  [data-theme="high-contrast"] [role="slider"] {
+    border-width: 2px;
+  }
+
+  /* Skip-to-content link — visually hidden until focused by keyboard */
+  .skip-to-content {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+    z-index: 9999;
+    padding: 0.5rem 1rem;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-family: var(--app-font-mono);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-radius: var(--radius);
+    text-decoration: none;
+  }
+  .skip-to-content:focus {
+    top: 0.5rem;
+    left: 0.5rem;
+  }
 }
 
 @layer utilities {
@@ -130,12 +174,22 @@
       inset 0 -1px 0 rgba(0, 0, 0, 0.45);
   }
 
+  /* High-contrast: no gradient panels */
+  [data-theme="high-contrast"] .panel {
+    background: hsl(var(--graphite));
+  }
+
   .panel-inset {
     background: hsl(0 0% 4%);
     @apply border border-border rounded-md;
     box-shadow:
       inset 0 1px 0 rgba(0, 0, 0, 0.5),
       inset 0 -1px 0 hsl(var(--neon) / 0.04);
+  }
+
+  [data-theme="high-contrast"] .panel-inset {
+    background: hsl(var(--card));
+    box-shadow: none;
   }
 
   /*
@@ -165,10 +219,21 @@
       inset 0 0 28px hsl(0 0% 100% / 0.025);
   }
 
+  /* Suppress LED glows in reduced motion mode */
+  [data-reduced-motion="1"] .panel-glow::before {
+    transition: none;
+    box-shadow: none;
+  }
+
   .led {
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.6),
       0 0 6px currentColor;
+  }
+
+  /* Suppress LED glow in reduced motion mode */
+  [data-reduced-motion="1"] .led {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
   }
 
   .glow-red {
@@ -176,6 +241,12 @@
   }
   .glow-neon {
     box-shadow: 0 0 12px hsl(var(--neon) / 0.6);
+  }
+
+  /* Suppress glow in reduced motion mode */
+  [data-reduced-motion="1"] .glow-red,
+  [data-reduced-motion="1"] .glow-neon {
+    box-shadow: none;
   }
 
   .grid-bg {
@@ -209,6 +280,43 @@
   .active-elevate,
   .active-elevate-2 {
     position: relative;
+  }
+
+  /*
+   * Colorblind-safe meter: striped clip-zone overlay and no color-only signalling.
+   * Applied when data-cb-safe="1" on the root.
+   */
+  [data-cb-safe="1"] .meter-clip-zone {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.4) 2px,
+      rgba(255, 255, 255, 0.4) 4px
+    ) !important;
+  }
+
+  /* Lesson highlight pulse — outlines the target element with an animated ring */
+  .lesson-highlight {
+    outline: 3px solid hsl(var(--neon));
+    outline-offset: 3px;
+    animation: lesson-highlight-pulse 1.2s ease-in-out infinite;
+    border-radius: var(--radius);
+  }
+
+  /* Beginner mode badge in footer */
+  .beginner-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-family: var(--app-font-mono);
+    font-size: 0.625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: hsl(var(--muted-foreground));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    padding: 0.125rem 0.5rem;
   }
 }
 
@@ -255,6 +363,17 @@
   }
 }
 
+@keyframes lesson-highlight-pulse {
+  0%, 100% {
+    outline-color: hsl(var(--neon));
+    outline-offset: 3px;
+  }
+  50% {
+    outline-color: hsl(var(--neon) / 0.5);
+    outline-offset: 5px;
+  }
+}
+
 .studio-shuriken {
   /* Static rotation-free fallback when reduced motion is requested */
   transform: rotate(15deg);
@@ -285,6 +404,13 @@ html.studio-reduce-motion *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
+}
+
+/* data-reduced-motion="1" also suppresses all transitions on meters and faders */
+[data-reduced-motion="1"] input[type="range"],
+[data-reduced-motion="1"] [class*="meter"],
+[data-reduced-motion="1"] [class*="fader"] {
+  transition: none !important;
 }
 
 /* Compact mode: tighter chrome for smaller / dense displays. */

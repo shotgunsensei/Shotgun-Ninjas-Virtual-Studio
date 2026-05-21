@@ -5,14 +5,11 @@ import { applyTheme, type ThemeId } from "./themes";
  * Studio-wide user settings. Persisted to localStorage under a single
  * key. Independent of project state so the same preferences carry across
  * every project the user opens.
- *
- * MIDI fields are present even though the MIDI implementation is a
- * separate task — the settings UI exposes them today and the runtime
- * will read from the same store once it ships.
  */
 
 export type LatencyMode = "balanced" | "low" | "playback";
 export type WorkspaceView = "compose" | "mix" | "perform";
+export type UIMode = "beginner" | "expert";
 
 /** Periodic real-autosave cadence options (in seconds; 0 = off). */
 export type AutosaveIntervalSec = 0 | 15 | 30 | 60;
@@ -45,12 +42,6 @@ export interface StudioSettings {
   // Project
   autosaveEnabled: boolean;
   autosaveIntervalMs: number;
-  /**
-   * Periodic real-autosave cadence in seconds for the Phase 3
-   * reliability loop. 0 disables periodic autosave (manual Save still
-   * works). Independent of autosaveIntervalMs, which controls the
-   * legacy debounce window.
-   */
   autosaveIntervalSec: AutosaveIntervalSec;
   restoreLastProjectOnLaunch: boolean;
   confirmBeforeOverwrite: boolean;
@@ -58,17 +49,13 @@ export interface StudioSettings {
   // Keyboard
   showShortcutsButton: boolean;
 
-  // MIDI (UI exposed; consumed once the MIDI task lands)
+  // MIDI
   midiEnabled: boolean;
   midiInputId: string | null;
   midiPassthrough: boolean;
 
   // Phase 6: Pro Audio Engine
-  /** Measured or manually-entered round-trip latency offset in ms.
-   *  The LookaheadScheduler subtracts this when computing AudioContext.currentTime targets. */
   latencyOffsetMs: number;
-  /** Enable 2× oversampling for the master saturation stage.
-   *  Increases CPU usage; shows a warning in the Diagnostics panel at high voice counts. */
   oversampleEnabled: boolean;
 
   // Export dialog — persisted so values survive dialog close / page reload
@@ -80,6 +67,10 @@ export interface StudioSettings {
   // Phase 17: Release Engineering & Trust Layer
   /** Show a backup reminder toast every N sessions. 0 = disabled. */
   backupReminderSessions: number;
+
+  // Phase 16: Accessibility & Learning Mode
+  colorblindSafeMeters: boolean;
+  uiMode: UIMode;
 }
 
 export const DEFAULT_SETTINGS: StudioSettings = {
@@ -115,6 +106,8 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   exportEndBar: 9999,
 
   backupReminderSessions: 5,
+  colorblindSafeMeters: false,
+  uiMode: "expert",
 };
 
 const STORAGE_KEY = "studio.settings.v1";
@@ -146,19 +139,10 @@ export function getSettings(): StudioSettings {
   return state;
 }
 
-/**
- * Convenience helper used by the Phase 3 autosave loop to update the
- * periodic interval without touching unrelated settings.
- */
 export function setAutosaveInterval(value: AutosaveIntervalSec) {
   setSettings({ autosaveIntervalSec: value });
 }
 
-/**
- * Subscribe to any settings change. Alias kept for the Phase 3
- * autosave + recovery code, which only needs a fire-and-forget listener
- * with the latest snapshot.
- */
 export function subscribeSettings(fn: (s: StudioSettings) => void): () => void {
   const wrapper = () => fn(state);
   listeners.add(wrapper);
@@ -211,6 +195,13 @@ export function applySideEffects(s: StudioSettings = state) {
   const root = document.documentElement;
   root.classList.toggle("studio-compact", s.compactMode);
   root.classList.toggle("studio-reduce-motion", s.reduceAnimations);
+  // data-reduced-motion: allows CSS targeting with a single attribute selector
+  // (used to gate pulse, LED glows, drifting backdrops, meter transitions)
+  root.dataset.reducedMotion = s.reduceAnimations ? "1" : "0";
+  // data-cb-safe: colorblind-safe meter mode
+  root.dataset.cbSafe = s.colorblindSafeMeters ? "1" : "0";
+  // data-ui-mode: beginner / expert
+  root.dataset.uiMode = s.uiMode ?? "expert";
   root.dataset.workspaceView = s.defaultWorkspaceView;
 }
 

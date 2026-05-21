@@ -7,6 +7,7 @@ import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
+import { useSettings } from "../lib/settings";
 import { audio } from "../lib/audio/engine";
 import { useMidiEvents } from "../lib/midi/midi";
 import type { AnyPreset, AutomationParamId, InstrumentKind, MidiTarget, SendBusId, Track, TrackEq } from "../types";
@@ -136,6 +137,10 @@ const ChannelStrip = memo(function ChannelStrip({
   selected: boolean;
   midiFlash?: boolean;
 }) {
+  const uiMode = useSettings((s) => s.uiMode);
+  const isBeginnerMode = uiMode === "beginner";
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   const armOther = (armed: boolean) => {
     if (armed) {
       const tracks = getStore().state.project.tracks.map((x) => ({
@@ -295,61 +300,28 @@ const ChannelStrip = memo(function ChannelStrip({
         </button>
       </div>
 
-      {/* 3-band EQ */}
-      <div className="grid grid-cols-3 gap-1">
-        <EqKnob
-          label="LO"
-          value={eq.low}
-          onChange={(v) => getStore().setTrackEq(track.id, { low: v })}
-          learnTarget={{ kind: "track-eq", trackId: track.id, band: "low" }}
-        />
-        <EqKnob
-          label="MID"
-          value={eq.mid}
-          onChange={(v) => getStore().setTrackEq(track.id, { mid: v })}
-          learnTarget={{ kind: "track-eq", trackId: track.id, band: "mid" }}
-        />
-        <EqKnob
-          label="HI"
-          value={eq.high}
-          onChange={(v) => getStore().setTrackEq(track.id, { high: v })}
-          learnTarget={{ kind: "track-eq", trackId: track.id, band: "high" }}
-        />
-      </div>
-
-      {/* HPF */}
-      <div className="flex items-center gap-1">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            getStore().setTrackEq(track.id, { hpfOn: !eq.hpfOn });
-          }}
-          className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
-            eq.hpfOn
-              ? "bg-primary/20 border-primary/60 text-primary"
-              : "border-border text-muted-foreground hover:text-foreground"
-          }`}
-          data-testid={`hpf-toggle-${track.id}`}
-        >
-          HPF
-        </button>
-        <Slider
-          value={[eq.hpfHz]}
-          min={20}
-          max={400}
-          step={1}
-          onValueChange={([v]) => getStore().setTrackEq(track.id, { hpfHz: v ?? 80 })}
-        />
-        <span className="text-[8px] font-mono text-muted-foreground w-7 text-right">{Math.round(eq.hpfHz)}</span>
-        <MidiLearnButton target={{ kind: "track-eq", trackId: track.id, band: "hpf" }} small />
-      </div>
-
-      {/* 4 sends */}
-      <div className="space-y-0.5">
-        {SEND_BUS_IDS.map((id) => (
-          <SendRow key={id} trackId={track.id} busId={id} amount={track.sends?.[id] ?? 0} />
-        ))}
-      </div>
+      {/* Advanced controls — collapsible in Beginner mode */}
+      {isBeginnerMode ? (
+        <div className="border border-border/50 rounded-md overflow-hidden">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setAdvancedOpen((v) => !v); }}
+            className="w-full flex items-center justify-between px-2 py-1 text-[9px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-accent/20"
+            aria-expanded={advancedOpen}
+            aria-controls={`advanced-${track.id}`}
+          >
+            <span>Advanced</span>
+            <span aria-hidden>{advancedOpen ? "▲" : "▼"}</span>
+          </button>
+          {advancedOpen && (
+            <div id={`advanced-${track.id}`} className="px-2 pb-2 space-y-1 border-t border-border/40">
+              <AdvancedChannelControls track={track} eq={eq} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <AdvancedChannelControls track={track} eq={eq} />
+      )}
 
       {/* FX toggle (rack inspector lives in side panel) */}
       <button
@@ -434,6 +406,76 @@ function EqKnob({
         {label}{value !== 0 ? ` ${value > 0 ? "+" : ""}${value.toFixed(0)}` : ""}
       </span>
     </div>
+  );
+}
+
+/**
+ * The EQ bands, HPF filter, and send buses that are grouped as "advanced"
+ * controls. Extracted so they can be rendered inline (Expert mode) or
+ * inside a collapsible expander (Beginner mode).
+ */
+function AdvancedChannelControls({ track, eq }: { track: Track; eq: TrackEq }) {
+  return (
+    <>
+      {/* 3-band EQ */}
+      <div className="grid grid-cols-3 gap-1 mt-1">
+        <EqKnob
+          label="LO"
+          value={eq.low}
+          onChange={(v) => getStore().setTrackEq(track.id, { low: v })}
+          learnTarget={{ kind: "track-eq", trackId: track.id, band: "low" }}
+        />
+        <EqKnob
+          label="MID"
+          value={eq.mid}
+          onChange={(v) => getStore().setTrackEq(track.id, { mid: v })}
+          learnTarget={{ kind: "track-eq", trackId: track.id, band: "mid" }}
+        />
+        <EqKnob
+          label="HI"
+          value={eq.high}
+          onChange={(v) => getStore().setTrackEq(track.id, { high: v })}
+          learnTarget={{ kind: "track-eq", trackId: track.id, band: "high" }}
+        />
+      </div>
+
+      {/* HPF */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            getStore().setTrackEq(track.id, { hpfOn: !eq.hpfOn });
+          }}
+          className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
+            eq.hpfOn
+              ? "bg-primary/20 border-primary/60 text-primary"
+              : "border-border text-muted-foreground hover:text-foreground"
+          }`}
+          data-testid={`hpf-toggle-${track.id}`}
+          aria-pressed={eq.hpfOn}
+          aria-label="High-pass filter toggle"
+        >
+          HPF
+        </button>
+        <Slider
+          value={[eq.hpfHz]}
+          min={20}
+          max={400}
+          step={1}
+          onValueChange={([v]) => getStore().setTrackEq(track.id, { hpfHz: v ?? 80 })}
+          aria-label="HPF cutoff frequency"
+        />
+        <span className="text-[8px] font-mono text-muted-foreground w-7 text-right">{Math.round(eq.hpfHz)}</span>
+        <MidiLearnButton target={{ kind: "track-eq", trackId: track.id, band: "hpf" }} small />
+      </div>
+
+      {/* 4 sends */}
+      <div className="space-y-0.5">
+        {SEND_BUS_IDS.map((id) => (
+          <SendRow key={id} trackId={track.id} busId={id} amount={track.sends?.[id] ?? 0} />
+        ))}
+      </div>
+    </>
   );
 }
 

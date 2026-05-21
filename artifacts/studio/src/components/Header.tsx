@@ -38,6 +38,8 @@ import { ShortcutOverlay } from "./ShortcutOverlay";
 import { SettingsModal } from "./SettingsModal";
 import { AboutDialog } from "./AboutDialog";
 import { Tip } from "./Tip";
+import { GlossaryPanel } from "./GlossaryPanel";
+import { LessonsPanel } from "./LessonsPanel";
 import {
   useSettings,
   getSettings,
@@ -128,6 +130,12 @@ export function Header() {
     const onSaveProj = () => { void onSave(); };
     const onSaveAsProj = () => { void onSaveAs(); };
     const onOpenLoad = () => { void openLoadDialog(); };
+    const onOpenGlossary = (e: Event) => {
+      const term = (e as CustomEvent<{ term?: string }>).detail?.term;
+      setGlossaryTerm(term);
+      setGlossaryOpen(true);
+    };
+    const onOpenLessons = () => setLessonsOpen(true);
     window.addEventListener("studio:open-shortcuts", onOpen);
     window.addEventListener("studio:open-export", onExport);
     window.addEventListener("studio:open-settings", onSettings);
@@ -136,6 +144,8 @@ export function Header() {
     window.addEventListener("studio:save", onSaveProj);
     window.addEventListener("studio:save-as", onSaveAsProj);
     window.addEventListener("studio:open-load", onOpenLoad);
+    window.addEventListener("studio:open-glossary", onOpenGlossary);
+    window.addEventListener("studio:open-lessons", onOpenLessons);
     return () => {
       window.removeEventListener("studio:open-shortcuts", onOpen);
       window.removeEventListener("studio:open-export", onExport);
@@ -145,6 +155,8 @@ export function Header() {
       window.removeEventListener("studio:save", onSaveProj);
       window.removeEventListener("studio:save-as", onSaveAsProj);
       window.removeEventListener("studio:open-load", onOpenLoad);
+      window.removeEventListener("studio:open-glossary", onOpenGlossary);
+      window.removeEventListener("studio:open-lessons", onOpenLessons);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -246,6 +258,9 @@ export function Header() {
   const [stemProgress, setStemProgress] = useState<StemProgress | null>(null);
   const [dawPackExporting, setDawPackExporting] = useState(false);
   const [dawPackProgress, setDawPackProgress] = useState<StemProgress | null>(null);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [glossaryTerm, setGlossaryTerm] = useState<string | undefined>(undefined);
+  const [lessonsOpen, setLessonsOpen] = useState(false);
 
   const fsSaveSupported = canUseFileSystemAccess("save");
   const fsOpenSupported = canUseFileSystemAccess("open");
@@ -932,8 +947,31 @@ export function Header() {
             size="sm"
             onClick={() => getStore().set({ showHelp: true })}
             className="font-mono text-xs"
+            aria-label="Help and onboarding"
           >
             <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
+          </Button>
+        </Tip>
+        <Tip label="Music glossary — definitions for studio terms">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setGlossaryTerm(undefined); setGlossaryOpen(true); }}
+            className="font-mono text-xs"
+            aria-label="Open music glossary"
+          >
+            Glossary
+          </Button>
+        </Tip>
+        <Tip label="Interactive lessons — guided walkthroughs">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLessonsOpen(true)}
+            className="font-mono text-xs"
+            aria-label="Open lessons panel"
+          >
+            Lessons
           </Button>
         </Tip>
         {showShortcutsButton && (
@@ -1604,6 +1642,12 @@ export function Header() {
       <ShortcutOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <GlossaryPanel
+        open={glossaryOpen}
+        onOpenChange={setGlossaryOpen}
+        initialTerm={glossaryTerm}
+      />
+      <LessonsPanel open={lessonsOpen} onOpenChange={setLessonsOpen} />
       <ProjectInfoDialog
         open={projectInfoOpen}
         onOpenChange={setProjectInfoOpen}

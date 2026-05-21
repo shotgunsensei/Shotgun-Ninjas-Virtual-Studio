@@ -1014,6 +1014,12 @@ function Studio() {
 
   return (
     <div className="h-full flex flex-col text-foreground overflow-hidden relative">
+      {/* Skip-to-content link for keyboard-only users */}
+      <a href="#studio-main-content" className="skip-to-content">
+        Skip to main content
+      </a>
+      {/* ARIA live region: announces transport state changes to screen readers */}
+      <TransportAnnouncer />
       <BackgroundFx />
       <Header />
       {draftAvailable && (
@@ -1055,7 +1061,11 @@ function Studio() {
         )}
 
         {/* Center: arrangement timeline + collapsible mixer drawer */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div
+          id="studio-main-content"
+          className="flex-1 flex flex-col overflow-hidden min-w-0"
+          tabIndex={-1}
+        >
           <div className="flex-1 overflow-hidden">
             <Timeline />
           </div>
@@ -1346,6 +1356,37 @@ function PendingSampleHost() {
       recordedTrackId={pending?.recordedTrackId}
       onClose={() => getStore().set({ pendingSample: null })}
     />
+  );
+}
+
+/**
+ * Hidden ARIA live region that announces transport state changes to screen
+ * readers. Renders nothing visible — only the text inside aria-live is heard.
+ */
+function TransportAnnouncer() {
+  const isPlaying = useStore((s) => s.isPlaying);
+  const isRecording = useStore((s) => s.isRecording);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (isRecording) {
+      setMessage("Recording started");
+    } else if (isPlaying) {
+      setMessage("Playback started");
+    } else {
+      setMessage("Stopped");
+    }
+  }, [isPlaying, isRecording]);
+
+  return (
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      className="sr-only absolute w-px h-px overflow-hidden"
+      style={{ clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}
+    >
+      {message}
+    </div>
   );
 }
 

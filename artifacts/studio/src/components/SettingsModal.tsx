@@ -15,7 +15,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, KeyRound, Trash2, Gauge, Globe } from "lucide-react";
+import { RotateCcw, KeyRound, Trash2, Gauge, Globe, Accessibility } from "lucide-react";
 import * as Tone from "tone";
 import {
   DEFAULT_SETTINGS,
@@ -73,9 +73,10 @@ export function SettingsModal({
           </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="audio" className="w-full">
-          <TabsList className="grid grid-cols-6 w-full bg-graphite/60">
+          <TabsList className="grid grid-cols-7 w-full bg-graphite/60">
             <TabsTrigger value="audio">Audio</TabsTrigger>
             <TabsTrigger value="ui">UI</TabsTrigger>
+            <TabsTrigger value="access">Access</TabsTrigger>
             <TabsTrigger value="project">Project</TabsTrigger>
             <TabsTrigger value="keyboard">Keys</TabsTrigger>
             <TabsTrigger value="midi">MIDI</TabsTrigger>
@@ -184,6 +185,7 @@ export function SettingsModal({
                         ? "border-primary bg-primary/10"
                         : "border-border hover:bg-accent/40"
                     }`}
+                    aria-pressed={s.themeId === t.id}
                   >
                     <div className="font-mono text-xs uppercase tracking-wider">
                       {t.name}
@@ -196,7 +198,7 @@ export function SettingsModal({
               </div>
               <p className="text-[10px] text-muted-foreground mt-1">
                 Themes are purely cosmetic — they never change how your music
-                sounds.
+                sounds. The "High Contrast" theme targets WCAG AA contrast ratios.
               </p>
             </div>
             <ToggleRow
@@ -213,7 +215,7 @@ export function SettingsModal({
             />
             <ToggleRow
               label="Reduce animations"
-              hint="Stops the drifting backdrop and meter glow."
+              hint="Stops the drifting backdrop, LED glows, tempo-synced pulse, and all transition effects."
               value={s.reduceAnimations}
               onChange={(v) => setSettings({ reduceAnimations: v })}
             />
@@ -232,6 +234,71 @@ export function SettingsModal({
                 })
               }
             />
+
+            {/* ── UI Mode ─────────────────────────────────────────────── */}
+            <div className="border-t border-border pt-3 mt-1">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                Experience level
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(["beginner", "expert"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSettings({ uiMode: mode })}
+                    aria-pressed={s.uiMode === mode}
+                    className={`text-left border rounded-md p-2 transition-colors ${
+                      s.uiMode === mode
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:bg-accent/40"
+                    }`}
+                  >
+                    <div className="font-mono text-xs uppercase tracking-wider capitalize">
+                      {mode}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground leading-snug">
+                      {mode === "beginner"
+                        ? "Hides EQ bands, sends, swing %, probability & micro-timing behind a 'Show advanced' expander. Tooltips always on."
+                        : "Shows all controls at once — full access to every knob and parameter."}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="access" className="space-y-3 pt-3">
+            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+              <Accessibility className="w-3 h-3" />
+              Accessibility
+            </div>
+            <ToggleRow
+              label="Colorblind-safe meters"
+              hint="Replaces red/green clip indicators with a striped pattern and ⚠ symbol so clipping is visible without relying on color alone."
+              value={s.colorblindSafeMeters}
+              onChange={(v) => setSettings({ colorblindSafeMeters: v })}
+            />
+            <ToggleRow
+              label="Reduce animations"
+              hint="Also found in the UI tab. Suppresses the tempo-synced pulse, LED glows, drifting backdrop, and all CSS transitions."
+              value={s.reduceAnimations}
+              onChange={(v) => setSettings({ reduceAnimations: v })}
+            />
+            <div className="border-t border-border pt-3">
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                <strong className="text-foreground">Keyboard navigation:</strong> Every control is reachable by Tab. Use Space/Enter to activate buttons. Focus rings follow the active theme color.
+              </p>
+            </div>
+            <div className="border-t border-border pt-3">
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                <strong className="text-foreground">Screen reader support:</strong> Transport state, track names, meter levels, and control changes are announced via ARIA live regions and labels.
+              </p>
+            </div>
+            <div className="border-t border-border pt-3">
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                <strong className="text-foreground">High Contrast theme:</strong> Select "High Contrast" in the UI → Theme section for WCAG AA contrast ratios and bold borders on all interactive elements.
+              </p>
+            </div>
           </TabsContent>
 
           <TabsContent value="project" className="space-y-3 pt-3">
