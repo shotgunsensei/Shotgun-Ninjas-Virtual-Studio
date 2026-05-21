@@ -127,6 +127,29 @@ export function MidiPanel() {
     setRenameInput("");
   };
 
+  // ---- mapping label rename state ----
+  const [renamingMappingId, setRenamingMappingId] = useState<string | null>(null);
+  const [renameMappingInput, setRenameMappingInput] = useState("");
+  const renameMappingInputRef = useRef<HTMLInputElement>(null);
+
+  const handleStartMappingRename = (id: string, currentLabel: string) => {
+    setRenamingMappingId(id);
+    setRenameMappingInput(currentLabel);
+    setTimeout(() => renameMappingInputRef.current?.focus(), 0);
+  };
+
+  const handleConfirmMappingRename = () => {
+    if (!renamingMappingId) return;
+    getStore().renameMappingLabel(renamingMappingId, renameMappingInput);
+    setRenamingMappingId(null);
+    setRenameMappingInput("");
+  };
+
+  const handleCancelMappingRename = () => {
+    setRenamingMappingId(null);
+    setRenameMappingInput("");
+  };
+
   return (
     <div className="panel p-3 flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between mb-2">
@@ -201,6 +224,7 @@ export function MidiPanel() {
           const live = liveValues[m.signature];
           const isFlashing = flashIds.has(m.id);
           const pct = live ? Math.round((live.value / 127) * 100) : null;
+          const isRenamingThis = renamingMappingId === m.id;
           return (
             <div
               key={m.id}
@@ -209,10 +233,56 @@ export function MidiPanel() {
               }`}
             >
               <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-mono truncate">
-                  <span className="text-foreground/90">{m.label}</span>{" "}
-                  <span className="text-muted-foreground">{parseMidiSignature(m.signature)}</span>
-                </div>
+                {isRenamingThis ? (
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <input
+                      ref={renameMappingInputRef}
+                      type="text"
+                      value={renameMappingInput}
+                      onChange={(e) => setRenameMappingInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleConfirmMappingRename();
+                        if (e.key === "Escape") handleCancelMappingRename();
+                      }}
+                      className="flex-1 bg-background border border-border rounded px-1.5 py-0.5 text-[11px] font-mono outline-none focus:border-neon/50"
+                    />
+                    <button
+                      onClick={handleConfirmMappingRename}
+                      disabled={!renameMappingInput.trim()}
+                      className="text-neon hover:text-neon/80 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+                      aria-label="Confirm rename"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={handleCancelMappingRename}
+                      className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                      aria-label="Cancel rename"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 truncate">
+                    <span
+                      className="text-[11px] font-mono text-foreground/90 truncate cursor-default"
+                      onDoubleClick={() => handleStartMappingRename(m.id, m.label)}
+                      title="Double-click to rename"
+                    >
+                      {m.label}
+                    </span>
+                    <button
+                      onClick={() => handleStartMappingRename(m.id, m.label)}
+                      className="text-muted-foreground/50 hover:text-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label="Rename mapping"
+                    >
+                      <Pencil className="w-2.5 h-2.5" />
+                    </button>
+                    <span className="text-[11px] font-mono text-muted-foreground truncate flex-shrink-0">
+                      {parseMidiSignature(m.signature)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
                     <div
@@ -235,13 +305,24 @@ export function MidiPanel() {
                   </span>
                 </div>
               </div>
-              <button
-                onClick={() => getStore().removeMapping(m.id)}
-                className="text-muted-foreground hover:text-destructive flex-shrink-0"
-                aria-label="Remove mapping"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              {!isRenamingThis && (
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => handleStartMappingRename(m.id, m.label)}
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label="Rename mapping"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => getStore().removeMapping(m.id)}
+                    className="text-muted-foreground hover:text-destructive"
+                    aria-label="Remove mapping"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}

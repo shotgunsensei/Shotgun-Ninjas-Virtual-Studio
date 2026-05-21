@@ -880,6 +880,15 @@ class Store {
     this.patchProject({ midiMappings: mappings });
   }
 
+  renameMappingLabel(id: string, label: string) {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const mappings = this.state.project.midiMappings.map((m) =>
+      m.id === id ? { ...m, label: trimmed } : m,
+    );
+    this.patchProject({ midiMappings: mappings });
+  }
+
   // ---- midi mapping preset ops ----
 
   /** Save the current midiMappings as a named preset bank. */
