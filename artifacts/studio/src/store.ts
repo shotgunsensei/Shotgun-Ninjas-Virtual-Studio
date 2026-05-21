@@ -80,6 +80,7 @@ class Store {
     midiMonitor: Array<{
       id: string;
       type: string;
+      channel: number;
       data1: number;
       data2: number;
       device: string;
@@ -797,7 +798,7 @@ class Store {
     this.patchProject({ midiMappings: mappings });
   }
 
-  pushMidiMonitor(entry: { type: string; data1: number; data2: number; device: string }) {
+  pushMidiMonitor(entry: { type: string; channel: number; data1: number; data2: number; device: string }) {
     const next = [
       { id: newId(), ts: Date.now(), ...entry },
       ...this.state.midiMonitor,

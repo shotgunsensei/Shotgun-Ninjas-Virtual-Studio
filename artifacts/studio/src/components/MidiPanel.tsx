@@ -108,6 +108,7 @@ export function MidiPanel() {
         {monitor.map((e) => (
           <div key={e.id} className="flex justify-between gap-2">
             <span className="text-neon/90">{e.type}</span>
+            <span className="text-foreground/60">ch{e.channel}</span>
             <span className="text-muted-foreground">
               {e.data1}, {e.data2}
             </span>

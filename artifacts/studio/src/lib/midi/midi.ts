@@ -132,15 +132,16 @@ class MidiBus {
     const channel = status & 0x0f;
     let type: MidiEvent["type"] | null = null;
     let signature = "";
+    const ch = channel + 1; // convert 0-based to 1-based (1-16)
     if (messageType === 0x90 && data2 > 0) {
       type = "noteon";
-      signature = `note:${data1}`;
+      signature = `note:${ch}:${data1}`;
     } else if (messageType === 0x80 || (messageType === 0x90 && data2 === 0)) {
       type = "noteoff";
-      signature = `note:${data1}`;
+      signature = `note:${ch}:${data1}`;
     } else if (messageType === 0xb0) {
       type = "cc";
-      signature = `cc:${data1}`;
+      signature = `cc:${ch}:${data1}`;
     }
     if (!type) return;
     const ev: MidiEvent = {

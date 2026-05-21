@@ -254,6 +254,27 @@ if (typeof document !== "undefined") {
   }
 }
 
+/**
+ * Match a stored mapping signature against an incoming event signature.
+ *
+ * Event signatures always include channel (e.g. "cc:1:74", "note:2:36").
+ * Mapping signatures may be channel-aware ("cc:1:74") or channel-agnostic
+ * ("cc:74") for backward compatibility. A channel-agnostic mapping fires on
+ * any channel; a channel-aware mapping only fires when the channel matches.
+ */
+function midiSigMatch(mappingSig: string, eventSig: string): boolean {
+  if (!mappingSig || !eventSig) return false;
+  const mParts = mappingSig.split(":");
+  const eParts = eventSig.split(":");
+  if (mParts[0] !== eParts[0]) return false;
+  if (mParts.length === 2) {
+    // channel-agnostic: "cc:74" — compare data number only (last part of event)
+    return mParts[1] === eParts[eParts.length - 1];
+  }
+  // channel-aware: "cc:1:74" — must match both channel and data number
+  return mParts[1] === eParts[1] && mParts[2] === eParts[2];
+}
+
 export default function App() {
   const [ready, setReady] = useState<boolean>(bootstrapped);
   useEffect(() => {
@@ -594,6 +615,7 @@ function Studio() {
       // monitor
       getStore().pushMidiMonitor({
         type: e.type,
+        channel: e.channel + 1, // store as 1-based
         data1: e.data1,
         data2: e.data2,
         device: e.device,
@@ -606,8 +628,10 @@ function Studio() {
         return;
       }
       // otherwise: dispatch any matching mapping
-      const matches = store.state.project.midiMappings.filter(
-        (m) => m.signature === e.signature,
+      // signaturesMatch handles both channel-aware ("cc:1:74") and channel-agnostic
+      // ("cc:74") stored signatures for backward compatibility.
+      const matches = store.state.project.midiMappings.filter((m) =>
+        midiSigMatch(m.signature, e.signature),
       );
       for (const m of matches) {
         switch (m.target.kind) {
