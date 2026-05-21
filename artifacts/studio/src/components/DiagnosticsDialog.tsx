@@ -44,7 +44,7 @@ function detectBrowser(ua: string): string {
   return "Unknown";
 }
 
-async function gather(): Promise<DiagnosticsSnapshot> {
+export async function gather(): Promise<DiagnosticsSnapshot> {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
   const ctx = (() => {
     try {
@@ -114,7 +114,7 @@ async function gather(): Promise<DiagnosticsSnapshot> {
   };
 }
 
-function checkBrowserCompat(): CompatResult[] {
+export function checkBrowserCompat(): CompatResult[] {
   const results: CompatResult[] = [];
 
   const hasAudioCtx =

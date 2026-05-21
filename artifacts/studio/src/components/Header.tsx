@@ -20,6 +20,14 @@ import {
   Home,
 } from "lucide-react";
 import { ShareCardModal, type ShareCardData } from "./ShareCardModal";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { gather, checkBrowserCompat } from "./DiagnosticsDialog";
 import { ProjectInfoDialog } from "./ProjectInfoDialog";
 import { ImportSummaryDialog } from "./ImportSummaryDialog";
 import {
@@ -271,6 +279,32 @@ export function Header() {
   const fsOpenSupported = canUseFileSystemAccess("open");
   const webShareSupported = canWebShare();
   const webShareFilesSupported = canWebShareFiles();
+
+  const onExportDiagnostics = async () => {
+    try {
+      const snap = await gather();
+      const compat = checkBrowserCompat();
+      const report = { ...snap, browserCompatibility: compat };
+      const blob = new Blob([JSON.stringify(report, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      a.href = url;
+      a.download = `sn-studio-diagnostics-${ts}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      getStore().setStatus("Diagnostics report exported", "info");
+    } catch (err) {
+      getStore().setStatus(
+        `Diagnostics export failed: ${(err as Error).message}`,
+        "error",
+      );
+    }
+  };
 
   const startExport = async (format: ExportFormat, options: { loopOnly?: boolean } = {}) => {
     const { loopOnly = false } = options;
@@ -946,17 +980,35 @@ export function Header() {
           <Download className="w-3.5 h-3.5 mr-1" /> Export
         </Button>
         <PwaInstallControls />
-        <Tip label="Help & onboarding">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => getStore().set({ showHelp: true })}
-            className="font-mono text-xs"
-            aria-label="Help and onboarding"
-          >
-            <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
-          </Button>
-        </Tip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="font-mono text-xs"
+              aria-label="Help menu"
+            >
+              <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="font-mono text-xs">
+            <DropdownMenuItem
+              onClick={() => getStore().set({ showHelp: true })}
+              className="font-mono text-xs"
+            >
+              <HelpCircle className="w-3.5 h-3.5 mr-1.5" />
+              Help &amp; Onboarding
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => { void onExportDiagnostics(); }}
+              className="font-mono text-xs"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Export Diagnostics
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Tip label="Music glossary — definitions for studio terms">
           <Button
             variant="outline"
