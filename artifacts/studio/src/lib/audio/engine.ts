@@ -1020,29 +1020,30 @@ class AudioEngine {
   private applyAutomationParam(v: TrackVoice, param: AutomationParamId, value: number) {
     try {
       const now = Tone.now();
+      const rampEnd = now + 0.02; // ramp over the full tick interval to eliminate stepping
       switch (param) {
         case "volume": {
           const db = value <= 0.005 ? -60 : 20 * Math.log10(value);
-          v.channel.volume.setValueAtTime(db, now);
+          v.channel.volume.linearRampToValueAtTime(db, rampEnd);
           break;
         }
         case "pan":
-          v.channel.pan.setValueAtTime(Math.max(-1, Math.min(1, value * 2 - 1)), now);
+          v.channel.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, value * 2 - 1)), rampEnd);
           break;
         case "filterCutoff":
-          v.filter.frequency.setValueAtTime(200 + Math.pow(value, 2) * 17800, now);
+          v.filter.frequency.linearRampToValueAtTime(200 + Math.pow(value, 2) * 17800, rampEnd);
           break;
         case "reverbSend":
-          v.reverb.wet.setValueAtTime(value, now);
+          v.reverb.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "delaySend":
-          v.delay.wet.setValueAtTime(value, now);
+          v.delay.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "distortionAmount":
-          if (v.drive) v.drive.wet.setValueAtTime(value, now);
+          if (v.drive) v.drive.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "effectWetDry":
-          if (v.chorus) v.chorus.wet.setValueAtTime(value, now);
+          if (v.chorus) v.chorus.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "pitch":
         case "sampleStart":
