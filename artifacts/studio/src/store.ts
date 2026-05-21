@@ -76,6 +76,10 @@ export interface ChopLabState {
   activeSliceIndex: number | null;
   /** Transient detection sensitivity (0..1). */
   sensitivity: number;
+  /** BPM of the loaded sample (user-set or auto-detected). */
+  sampleBpm: number;
+  /** When true, slices are time-stretched to match the project BPM. */
+  syncToBpm: boolean;
 }
 
 const DEFAULT_CHOP_LAB: ChopLabState = {
@@ -84,6 +88,8 @@ const DEFAULT_CHOP_LAB: ChopLabState = {
   sliceSettings: [],
   activeSliceIndex: null,
   sensitivity: 0.5,
+  sampleBpm: 120,
+  syncToBpm: false,
 };
 
 class Store {

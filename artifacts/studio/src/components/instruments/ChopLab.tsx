@@ -9,7 +9,7 @@
 import * as Tone from "tone";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getStore, useStore } from "../../store";
-import { DEFAULT_SLICE_SETTING, detectTransients, getChopEngine, renderSliceToWav } from "../../lib/audio/chopEngine";
+import { DEFAULT_SLICE_SETTING, detectTransients, estimateBpm, getChopEngine, renderSliceToWav } from "../../lib/audio/chopEngine";
 import type { ChopSliceSetting } from "../../lib/audio/chopEngine";
 import { makeId } from "../../store";
 import { audio } from "../../lib/audio/engine";
@@ -35,7 +35,8 @@ const CHOKE_COLORS: Record<string, string> = {
 
 export function ChopLab({ track }: { track: Track }) {
   const chopLab = useStore((s) => s.chopLab);
-  const { markers, sliceSettings, activeSliceIndex, sensitivity } = chopLab;
+  const projectBpm = useStore((s) => s.project.bpm);
+  const { markers, sliceSettings, activeSliceIndex, sensitivity, sampleBpm, syncToBpm } = chopLab;
 
   // Non-serializable AudioBuffer lives here, not in the store.
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -46,6 +47,11 @@ export function ChopLab({ track }: { track: Track }) {
   const [patternAlgo, setPatternAlgo] = useState<"linear" | "euclidean" | "random">("linear");
 
   const engine = getChopEngine();
+
+  // Keep engine tempo-sync state in sync with store.
+  useEffect(() => {
+    engine.setTempoSync(syncToBpm, sampleBpm, projectBpm);
+  }, [syncToBpm, sampleBpm, projectBpm]);
 
   // Derive slices boundaries from markers + buffer duration.
   const sliceBoundaries = (() => {
@@ -112,11 +118,13 @@ export function ChopLab({ track }: { track: Track }) {
       const decoded = await rawCtx.decodeAudioData(arrayBuffer);
       audioBufferRef.current = decoded;
       setSampleName(file.name);
+      // Auto-estimate BPM from the loaded sample.
+      const detectedBpm = estimateBpm(decoded);
       // Reset markers when a new sample loads.
       getStore().setChopLabMarkers([]);
-      getStore().patchChopLab({ activeSliceIndex: null });
+      getStore().patchChopLab({ activeSliceIndex: null, sampleBpm: detectedBpm });
       engine.loadBuffer(decoded, [], []);
-      getStore().setStatus(`Sample loaded: ${file.name}`, "info");
+      getStore().setStatus(`Sample loaded: ${file.name} · detected ~${detectedBpm} BPM`, "info");
     } catch (err) {
       setLoadError("Failed to decode audio. Try a WAV or MP3 file.");
     }
@@ -272,6 +280,20 @@ export function ChopLab({ track }: { track: Track }) {
             sensitivity={sensitivity}
             onSensitivityChange={(v) => getStore().patchChopLab({ sensitivity: v })}
             onDetect={runTransientDetection}
+          />
+          <TempoSyncControls
+            syncToBpm={syncToBpm}
+            sampleBpm={sampleBpm}
+            projectBpm={projectBpm}
+            onToggleSync={() => getStore().patchChopLab({ syncToBpm: !syncToBpm })}
+            onSampleBpmChange={(v) => getStore().patchChopLab({ sampleBpm: v })}
+            onDetectBpm={() => {
+              const buf = audioBufferRef.current;
+              if (!buf) return;
+              const detected = estimateBpm(buf);
+              getStore().patchChopLab({ sampleBpm: detected });
+              getStore().setStatus(`BPM re-detected: ~${detected}`, "info");
+            }}
           />
         </>
       )}
@@ -627,6 +649,82 @@ function TransientControls({
       <span className="font-mono text-[9px] text-muted-foreground w-6 text-right">
         {Math.round(sensitivity * 100)}
       </span>
+    </div>
+  );
+}
+
+function TempoSyncControls({
+  syncToBpm,
+  sampleBpm,
+  projectBpm,
+  onToggleSync,
+  onSampleBpmChange,
+  onDetectBpm,
+}: {
+  syncToBpm: boolean;
+  sampleBpm: number;
+  projectBpm: number;
+  onToggleSync: () => void;
+  onSampleBpmChange: (v: number) => void;
+  onDetectBpm: () => void;
+}) {
+  const ratio = sampleBpm > 0 ? projectBpm / sampleBpm : 1;
+  const semitoneShiftNum = -(Math.log2(ratio) * 12);
+  const semitoneShiftStr = semitoneShiftNum.toFixed(1);
+
+  return (
+    <div className="panel-inset rounded-md p-2 space-y-1.5 border border-primary/20">
+      {/* Toggle row */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onToggleSync}
+          className={[
+            "text-[10px] font-mono px-2 py-1 rounded border transition-colors whitespace-nowrap",
+            syncToBpm
+              ? "border-primary bg-primary/20 text-primary"
+              : "border-border text-muted-foreground hover:border-primary/50",
+          ].join(" ")}
+        >
+          Sync to BPM
+        </button>
+        {syncToBpm && (
+          <span className="font-mono text-[9px] text-primary ml-auto">
+            ×{ratio.toFixed(3)} rate
+            {Math.abs(semitoneShiftNum) > 0.1 && (
+              <span className="text-muted-foreground ml-1">({semitoneShiftStr}st pitch)</span>
+            )}
+          </span>
+        )}
+      </div>
+
+      {/* BPM inputs row */}
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[9px] text-muted-foreground whitespace-nowrap">
+          Sample BPM
+        </span>
+        <input
+          type="number"
+          min={40}
+          max={300}
+          step={1}
+          value={sampleBpm}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (v >= 40 && v <= 300) onSampleBpmChange(v);
+          }}
+          className="w-14 text-center font-mono text-[10px] bg-background border border-border rounded px-1 py-0.5 focus:border-primary outline-none"
+        />
+        <button
+          onClick={onDetectBpm}
+          className="text-[9px] font-mono px-1.5 py-0.5 border border-border rounded text-muted-foreground hover:border-primary/60 hover:text-primary transition-colors whitespace-nowrap"
+          title="Re-detect BPM from loaded sample"
+        >
+          Detect
+        </button>
+        <span className="font-mono text-[9px] text-muted-foreground ml-auto whitespace-nowrap">
+          Project: <span className="text-foreground">{projectBpm}</span>
+        </span>
+      </div>
     </div>
   );
 }

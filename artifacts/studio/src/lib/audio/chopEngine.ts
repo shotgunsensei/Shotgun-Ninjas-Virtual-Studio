@@ -78,6 +78,9 @@ export class ChopEngine {
   private sourceBuffer: AudioBuffer | null = null;
   private markers: number[] = [];
   private settings: ChopSliceSetting[] = [];
+  private syncToBpm = false;
+  private sampleBpm = 120;
+  private projectBpm = 120;
 
   /** 
    * (Re)load the engine with a new source buffer + current markers + settings.
@@ -102,6 +105,21 @@ export class ChopEngine {
     this.markers = markers.slice();
     this.settings = settings.slice();
     this.buildSlots();
+  }
+
+  /**
+   * Update tempo-sync parameters.  Call whenever the toggle, sampleBpm, or
+   * projectBpm changes.  Immediately re-applies playback rates to live slots.
+   */
+  setTempoSync(enabled: boolean, sampleBpm: number, projectBpm: number) {
+    this.syncToBpm = enabled;
+    this.sampleBpm = sampleBpm > 0 ? sampleBpm : 120;
+    this.projectBpm = projectBpm > 0 ? projectBpm : 120;
+    // Re-apply settings to all live slots so playback rates update immediately.
+    for (let i = 0; i < this.slots.length; i++) {
+      const slot = this.slots[i];
+      if (slot) this.applySettingsToSlot(slot, this.settings[i] ?? DEFAULT_SLICE_SETTING);
+    }
   }
 
   /** Update a single slice's settings without rebuilding all slots. */
@@ -221,7 +239,12 @@ export class ChopEngine {
   private applySettingsToSlot(slot: SlotEntry, s: ChopSliceSetting) {
     const { player, gain } = slot;
     player.reverse = s.reverse;
-    player.playbackRate = Math.pow(2, s.pitch / 12);
+    // Combine pitch-shift rate with tempo-sync ratio.
+    const pitchRate = Math.pow(2, s.pitch / 12);
+    const tempoRatio = this.syncToBpm && this.sampleBpm > 0
+      ? this.projectBpm / this.sampleBpm
+      : 1;
+    player.playbackRate = pitchRate * tempoRatio;
     player.fadeIn = Math.max(0, s.fadeIn / 1000);
     player.fadeOut = Math.max(0, s.fadeOut / 1000);
 
@@ -470,4 +493,85 @@ let _chopEngine: ChopEngine | null = null;
 export function getChopEngine(): ChopEngine {
   if (!_chopEngine) _chopEngine = new ChopEngine();
   return _chopEngine;
+}
+
+/**
+ * Estimate the BPM of an AudioBuffer using an onset-strength autocorrelation
+ * approach.  Returns a value in the range [60, 200], rounded to the nearest
+ * integer.  Falls back to 120 on failure.
+ */
+export function estimateBpm(buffer: AudioBuffer): number {
+  try {
+    const sr = buffer.sampleRate;
+    // Downsample to ~22 050 Hz for speed.
+    const dsRatio = Math.max(1, Math.floor(sr / 22050));
+    const hopSize = 512;
+
+    // Mix down to mono.
+    const mono = new Float32Array(buffer.length);
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      const data = buffer.getChannelData(ch);
+      for (let i = 0; i < mono.length; i++) mono[i] += data[i];
+    }
+    if (buffer.numberOfChannels > 1) {
+      for (let i = 0; i < mono.length; i++) mono[i] /= buffer.numberOfChannels;
+    }
+
+    // Compute RMS energy per hop (downsampled).
+    const numHops = Math.floor(buffer.length / (hopSize * dsRatio));
+    if (numHops < 32) return 120;
+
+    const energy = new Float32Array(numHops);
+    for (let h = 0; h < numHops; h++) {
+      let sum = 0;
+      const base = h * hopSize * dsRatio;
+      for (let i = 0; i < hopSize * dsRatio && base + i < mono.length; i++) {
+        const s = mono[base + i];
+        sum += s * s;
+      }
+      energy[h] = Math.sqrt(sum / (hopSize * dsRatio));
+    }
+
+    // Onset strength: positive half-wave rectified energy flux.
+    const onset = new Float32Array(numHops);
+    for (let h = 1; h < numHops; h++) {
+      onset[h] = Math.max(0, energy[h] - energy[h - 1]);
+    }
+
+    // Autocorrelation of the onset envelope over a BPM range [60..200].
+    const secPerHop = (hopSize * dsRatio) / sr;
+    const bpmMin = 60, bpmMax = 200;
+    const lagMin = Math.floor(60 / (bpmMax * secPerHop));
+    const lagMax = Math.ceil(60 / (bpmMin * secPerHop));
+
+    let bestLag = lagMin;
+    let bestScore = -Infinity;
+
+    for (let lag = lagMin; lag <= lagMax; lag++) {
+      let score = 0;
+      for (let h = 0; h + lag < numHops; h++) {
+        score += onset[h] * onset[h + lag];
+      }
+      // Also add half-lag harmonic boost.
+      const halfLag = Math.round(lag / 2);
+      if (halfLag >= 1) {
+        for (let h = 0; h + halfLag < numHops; h++) {
+          score += 0.5 * onset[h] * onset[h + halfLag];
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestLag = lag;
+      }
+    }
+
+    const bpm = 60 / (bestLag * secPerHop);
+    // Octave-fold into [60..200].
+    let result = bpm;
+    while (result < 60) result *= 2;
+    while (result > 200) result /= 2;
+    return Math.round(result);
+  } catch {
+    return 120;
+  }
 }
