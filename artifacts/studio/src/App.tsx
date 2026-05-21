@@ -28,6 +28,7 @@ import { applyTheme, getStoredThemeId } from "./lib/themes";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
+import { ChopLab } from "./components/instruments/ChopLab";
 import { PianoRoll } from "./components/instruments/PianoRoll";
 import { VocalsPanel } from "./components/instruments/VocalsPanel";
 import { PresetBrowser } from "./components/PresetBrowser";
@@ -979,6 +980,7 @@ function PendingSampleHost() {
 
 function SelectedInstrument({ trackId }: { trackId: string }) {
   const track = useStore((s) => s.project.tracks.find((t) => t.id === trackId));
+  const showChopLab = useStore((s) => s.chopLab.showChopLab);
   if (!track) return null;
   const instrument = (() => {
     switch (track.kind) {
@@ -988,15 +990,45 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
       case "guitar":
         return <GuitarPanel track={track} />;
       case "drums":
-        return <DrumPads track={track} />;
+        return showChopLab ? (
+          <ChopLab track={track} />
+        ) : (
+          <DrumPads track={track} />
+        );
       case "vocals":
         return <VocalsPanel track={track} />;
     }
   })();
   const isMelodic =
     track.kind === "piano" || track.kind === "guitar" || track.kind === "bass";
+  const isDrums = track.kind === "drums";
   return (
     <div className="space-y-3">
+      {isDrums && (
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => getStore().patchChopLab({ showChopLab: false })}
+            className={`text-[10px] font-mono px-2 py-0.5 border rounded transition-colors ${
+              !showChopLab
+                ? "border-primary/60 text-primary bg-primary/10"
+                : "border-border text-muted-foreground hover:border-primary/40"
+            }`}
+          >
+            Drum Pads
+          </button>
+          <button
+            onClick={() => getStore().patchChopLab({ showChopLab: true })}
+            className={`text-[10px] font-mono px-2 py-0.5 border rounded transition-colors ${
+              showChopLab
+                ? "border-red-500 text-red-400 bg-red-500/10"
+                : "border-border text-muted-foreground hover:border-red-500/60 hover:text-red-400"
+            }`}
+            title="Chop Lab — load a sample, slice it, play the pads"
+          >
+            ✂ Chop Lab
+          </button>
+        </div>
+      )}
       {instrument}
       {isMelodic && <PianoRoll track={track} />}
       {isMelodic && <PresetBrowser track={track} />}

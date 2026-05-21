@@ -22,10 +22,33 @@ import type {
 } from "./types";
 import { SEND_BUS_LABELS } from "./types";
 
+import type { ChopSliceSetting } from "./lib/audio/chopEngine";
+export type { ChopSliceSetting };
+
 type Listener = () => void;
 
 const newId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+export interface ChopLabState {
+  showChopLab: boolean;
+  /** Slice marker positions (seconds into the sample), sorted. */
+  markers: number[];
+  /** Per-slice settings — length === number of slices (markers.length + 1). */
+  sliceSettings: ChopSliceSetting[];
+  /** Currently selected pad/slice index (0-based), or null. */
+  activeSliceIndex: number | null;
+  /** Transient detection sensitivity (0..1). */
+  sensitivity: number;
+}
+
+const DEFAULT_CHOP_LAB: ChopLabState = {
+  showChopLab: false,
+  markers: [],
+  sliceSettings: [],
+  activeSliceIndex: null,
+  sensitivity: 0.5,
+};
 
 class Store {
   private listeners = new Set<Listener>();
@@ -75,6 +98,8 @@ class Store {
       defaultName: string;
       recordedTrackId?: string;
     } | null;
+    /** Chop Lab panel state. */
+    chopLab: ChopLabState;
   };
 
   constructor(project: Project) {
@@ -100,6 +125,7 @@ class Store {
       countInTimers: { interval: null, timeout: null },
       trackClipResetKey: 0,
       pendingSample: null,
+      chopLab: { ...DEFAULT_CHOP_LAB },
     };
   }
 
@@ -620,6 +646,49 @@ class Store {
       };
       this.patchTrack(trackId, { audioClips: [...t.audioClips, dup] });
     }
+  }
+
+  // ---- chop lab ops ----
+
+  patchChopLab(patch: Partial<ChopLabState>) {
+    this.set({ chopLab: { ...this.state.chopLab, ...patch } });
+  }
+
+  setChopLabMarkers(markers: number[]) {
+    const sorted = markers.slice().sort((a, b) => a - b);
+    const count = Math.min(15, sorted.length); // max 15 = 16 slices total
+    const trimmed = sorted.slice(0, count);
+    const sliceCount = trimmed.length + 1;
+    const cur = this.state.chopLab.sliceSettings;
+    const DFLT: ChopSliceSetting = { reverse: false, pitch: 0, normalize: false, fadeIn: 0, fadeOut: 0, chokeGroup: "none" };
+    // Pad/trim sliceSettings to match new slice count.
+    const settings = Array.from({ length: sliceCount }, (_, i): ChopSliceSetting => ({
+      ...DFLT,
+      ...(cur[i] ?? {}),
+    }));
+    this.patchChopLab({ markers: trimmed, sliceSettings: settings });
+  }
+
+  addChopLabMarker(timeSec: number) {
+    const markers = [...this.state.chopLab.markers, timeSec];
+    this.setChopLabMarkers(markers);
+  }
+
+  deleteChopLabMarker(index: number) {
+    const markers = this.state.chopLab.markers.filter((_, i) => i !== index);
+    this.setChopLabMarkers(markers);
+  }
+
+  moveChopLabMarker(index: number, timeSec: number) {
+    const markers = this.state.chopLab.markers.slice();
+    markers[index] = timeSec;
+    this.setChopLabMarkers(markers);
+  }
+
+  updateChopSliceSetting(index: number, patch: Partial<import("./lib/audio/chopEngine").ChopSliceSetting>) {
+    const settings = this.state.chopLab.sliceSettings.slice();
+    settings[index] = { ...settings[index], ...patch };
+    this.patchChopLab({ sliceSettings: settings });
   }
 
   // ---- midi mapping ops ----

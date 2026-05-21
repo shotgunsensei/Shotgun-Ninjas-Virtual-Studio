@@ -31,6 +31,7 @@ import { buildKit, cutoffNormToHz, findKit, type KitVoice } from "./sounds/kits"
 import { buildPresetVoice, findPreset } from "./sounds/presets";
 import { tryLoadMelodicSampler } from "./sounds/samples";
 import { applyGroove, getGroove, shouldFlam, shouldGhost } from "./sounds/groove";
+import { getChopEngine } from "./chopEngine";
 
 // Re-export voice primitives so existing call sites that import from
 // `./engine` (export.ts, components) keep compiling without churn.
@@ -115,6 +116,8 @@ class AudioEngine {
 
   private firstQwertyShown = false;
   private firstMidiShown = false;
+  /** Track id that currently has the Chop Lab kit active as its drum voice. */
+  private chopKitTrackId: string | null = null;
 
   constructor() {
     Tone.getTransport().bpm.value = 100;
@@ -890,6 +893,18 @@ class AudioEngine {
     }
   }
 
+  /** Map drum piece names to Chop Lab slice indices (for "Use as Kit"). */
+  private static readonly PIECE_TO_SLICE_INDEX: Partial<Record<DrumPiece, number>> = {
+    kick: 0, snare: 1, hat: 2, ohat: 3, clap: 4,
+    tomLow: 5, tomHigh: 6, crash: 7, fx: 8,
+  };
+
+  /** Activate/deactivate the Chop Lab kit for a track. When active, drum
+   *  triggers are routed to the ChopEngine instead of the synthesized voices. */
+  setChopKitForTrack(trackId: string | null) {
+    this.chopKitTrackId = trackId;
+  }
+
   triggerDrum(trackId: string, piece: DrumPiece, velocity = 0.9) {
     this.triggerDrumAt(trackId, piece, velocity);
   }
@@ -905,6 +920,14 @@ class AudioEngine {
     velocity = 0.9,
     time?: number,
   ) {
+    // Chop Lab "Use as Kit" routing: redirect to ChopEngine slices.
+    if (this.chopKitTrackId === trackId) {
+      const sliceIndex = AudioEngine.PIECE_TO_SLICE_INDEX[piece] ?? 0;
+      getChopEngine().triggerSlice(sliceIndex, time);
+      this.noteEverPlayed = true;
+      return;
+    }
+
     const v = this.voices.get(trackId);
     if (!v) return;
     const t = time ?? Tone.now();
