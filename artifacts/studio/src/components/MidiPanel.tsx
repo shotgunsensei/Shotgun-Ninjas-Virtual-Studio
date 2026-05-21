@@ -3,7 +3,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
-import { useMidi } from "../lib/midi/midi";
+import { useMidi, midiNoteToName } from "../lib/midi/midi";
+
+function parseMidiSignature(sig: string): string {
+  const parts = sig.split(":");
+  if (parts.length === 3) {
+    const [kind, ch, num] = parts;
+    const channel = `Ch ${ch}`;
+    if (kind === "cc") return `CC ${num} · ${channel}`;
+    if (kind === "note") return `Note ${midiNoteToName(Number(num))} · ${channel}`;
+  }
+  if (parts.length === 2) {
+    const [kind, num] = parts;
+    if (kind === "cc") return `CC ${num} · Any Ch`;
+    if (kind === "note") return `Note ${midiNoteToName(Number(num))} · Any Ch`;
+  }
+  return sig;
+}
+
+function formatEventType(type: string): string {
+  if (type === "noteon") return "Note On";
+  if (type === "noteoff") return "Note Off";
+  if (type === "cc") return "CC";
+  return type;
+}
 
 export function MidiPanel() {
   const midi = useMidi();
@@ -188,7 +211,7 @@ export function MidiPanel() {
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] font-mono truncate">
                   <span className="text-foreground/90">{m.label}</span>{" "}
-                  <span className="text-muted-foreground">{m.signature}</span>
+                  <span className="text-muted-foreground">{parseMidiSignature(m.signature)}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
@@ -360,8 +383,8 @@ export function MidiPanel() {
         )}
         {monitor.map((e) => (
           <div key={e.id} className="flex justify-between gap-2">
-            <span className="text-neon/90">{e.type}</span>
-            <span className="text-foreground/60">ch{e.channel}</span>
+            <span className="text-neon/90">{formatEventType(e.type)}</span>
+            <span className="text-foreground/60">Ch {e.channel + 1}</span>
             <span className="text-muted-foreground">
               {e.data1}, {e.data2}
             </span>
