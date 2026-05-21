@@ -15,14 +15,29 @@ import {
   findWorld,
   getStoredWorldId,
 } from "../lib/worlds";
-import { playWorldWelcome } from "../lib/worldAudio";
+import { playWorldWelcome, startAmbientLoop, type AmbientLoop } from "../lib/worldAudio";
+
+const AMBIENT_VOLUME = 0.10;
 
 interface WorldContextValue {
   activeWorld: StudioWorld;
   setWorld: (id: WorldId) => void;
+  ambientEnabled: boolean;
+  setAmbientEnabled: (enabled: boolean) => void;
 }
 
 const WorldContext = createContext<WorldContextValue | null>(null);
+
+/** Returns true when the user or system prefers reduced motion/audio. */
+function _prefersReducedAudio(): boolean {
+  try {
+    if (document.documentElement.classList.contains("studio-reduce-motion")) return true;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
+  } catch {
+    // SSR guard
+  }
+  return false;
+}
 
 export function WorldProvider({ children }: { children: React.ReactNode }) {
   const [activeWorldId, setActiveWorldId] = useState<WorldId>(
@@ -30,6 +45,20 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
   );
 
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const ambientLoopRef = useRef<AmbientLoop | null>(null);
+  // Tracks any pending delayed ambient-start so we can cancel it
+  const ambientStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Per-session ambient toggle — defaults to enabled unless reduced-audio preference
+  const [ambientEnabled, setAmbientEnabledState] = useState<boolean>(
+    () => !_prefersReducedAudio(),
+  );
+
+  // Keep a ref in sync so callbacks closed over stale state can read the latest value
+  const ambientEnabledRef = useRef(ambientEnabled);
+  useEffect(() => {
+    ambientEnabledRef.current = ambientEnabled;
+  }, [ambientEnabled]);
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
@@ -38,11 +67,80 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
     return audioCtxRef.current;
   }, []);
 
+  /** Cancel any pending delayed ambient-start. */
+  const _cancelPendingAmbientStart = useCallback(() => {
+    if (ambientStartTimerRef.current !== null) {
+      clearTimeout(ambientStartTimerRef.current);
+      ambientStartTimerRef.current = null;
+    }
+  }, []);
+
+  /** Stop and clear the current ambient loop. */
+  const _stopAmbient = useCallback(() => {
+    _cancelPendingAmbientStart();
+    if (ambientLoopRef.current) {
+      ambientLoopRef.current.stop();
+      ambientLoopRef.current = null;
+    }
+  }, [_cancelPendingAmbientStart]);
+
+  /** Start the ambient loop for a given world (stops any current one first). */
+  const _startAmbient = useCallback(
+    (worldId: WorldId) => {
+      _stopAmbient();
+      if (_prefersReducedAudio()) return;
+      try {
+        const ctx = getAudioCtx();
+        const doStart = () => {
+          // Re-check the latest enabled state — may have changed during the async resume
+          if (!ambientEnabledRef.current || _prefersReducedAudio()) return;
+          try {
+            // Stop anything that may have started in the gap
+            if (ambientLoopRef.current) {
+              ambientLoopRef.current.stop();
+              ambientLoopRef.current = null;
+            }
+            ambientLoopRef.current = startAmbientLoop(worldId, ctx, AMBIENT_VOLUME);
+          } catch {
+            // Non-critical
+          }
+        };
+        if (ctx.state === "suspended") {
+          ctx.resume().then(doStart).catch(() => {
+            // Audio not unlocked yet — will start on next interaction
+          });
+        } else {
+          doStart();
+        }
+      } catch {
+        // Non-critical
+      }
+    },
+    [getAudioCtx, _stopAmbient],
+  );
+
   // Apply the world theme on mount and whenever it changes
   useEffect(() => {
     const world = findWorld(activeWorldId) ?? WORLDS[0];
     applyWorldTheme(world);
   }, [activeWorldId]);
+
+  // React to ambientEnabled toggle
+  useEffect(() => {
+    if (ambientEnabled) {
+      _startAmbient(activeWorldId);
+    } else {
+      _stopAmbient();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ambientEnabled]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      _stopAmbient();
+    };
+  }, [_stopAmbient]);
 
   const setWorld = useCallback(
     (id: WorldId) => {
@@ -50,19 +148,53 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
       if (!world) return;
       setActiveWorldId(id);
       applyWorldTheme(world);
+
+      // Cancel any in-flight delayed ambient start from a previous world change
+      _cancelPendingAmbientStart();
+      // Stop current loop immediately
+      if (ambientLoopRef.current) {
+        ambientLoopRef.current.stop();
+        ambientLoopRef.current = null;
+      }
+
       // Play welcome cue — resume AudioContext if needed (browsers suspend by default)
       try {
         const ctx = getAudioCtx();
         const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();
-        resume.then(() => playWorldWelcome(world, ctx)).catch(() => {
-          // Ignore — audio may not be unlocked yet
-        });
+        resume
+          .then(() => {
+            playWorldWelcome(world, ctx);
+            // Start ambient after a short delay (let welcome cue breathe)
+            ambientStartTimerRef.current = setTimeout(() => {
+              ambientStartTimerRef.current = null;
+              // Check latest state — user may have toggled off during the delay
+              if (!ambientEnabledRef.current || _prefersReducedAudio()) return;
+              try {
+                if (ambientLoopRef.current) {
+                  ambientLoopRef.current.stop();
+                  ambientLoopRef.current = null;
+                }
+                const audioCtx = audioCtxRef.current;
+                if (!audioCtx || audioCtx.state === "closed") return;
+                ambientLoopRef.current = startAmbientLoop(id, audioCtx, AMBIENT_VOLUME);
+              } catch {
+                // Non-critical
+              }
+            }, 1200);
+          })
+          .catch(() => {
+            // Ignore — audio may not be unlocked yet
+          });
       } catch {
         // Ignore
       }
     },
-    [getAudioCtx],
+    [getAudioCtx, _cancelPendingAmbientStart],
   );
+
+  const setAmbientEnabled = useCallback((enabled: boolean) => {
+    setAmbientEnabledState(enabled);
+  }, []);
 
   const activeWorld = useMemo(
     () => findWorld(activeWorldId) ?? WORLDS[0],
@@ -70,8 +202,8 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ activeWorld, setWorld }),
-    [activeWorld, setWorld],
+    () => ({ activeWorld, setWorld, ambientEnabled, setAmbientEnabled }),
+    [activeWorld, setWorld, ambientEnabled, setAmbientEnabled],
   );
 
   return (

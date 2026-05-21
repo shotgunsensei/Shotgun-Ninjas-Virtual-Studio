@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Globe, Play } from "lucide-react";
+import { Globe, Play, Volume2, VolumeX } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -50,7 +50,7 @@ export function WorldPickerModal({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { activeWorld, setWorld } = useWorld();
+  const { activeWorld, setWorld, ambientEnabled, setAmbientEnabled } = useWorld();
   const [hovered, setHovered] = useState<WorldId | null>(null);
   const isTransient = useStore((s) => s.isTransientProject);
 
@@ -72,6 +72,33 @@ export function WorldPickerModal({
           <DialogTitle className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
             Studio Worlds
+            {/* Ambient audio toggle */}
+            <Tip
+              label={
+                ambientEnabled
+                  ? "Ambient audio on — click to mute"
+                  : "Ambient audio off — click to enable"
+              }
+            >
+              <button
+                type="button"
+                onClick={() => setAmbientEnabled(!ambientEnabled)}
+                className={`ml-auto flex items-center gap-1 h-6 px-2 rounded border font-mono text-[9px] uppercase tracking-widest transition-colors ${
+                  ambientEnabled
+                    ? "border-primary/50 text-primary bg-primary/10 hover:bg-primary/20"
+                    : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                }`}
+                aria-label={ambientEnabled ? "Mute ambient audio" : "Enable ambient audio"}
+                aria-pressed={ambientEnabled}
+              >
+                {ambientEnabled ? (
+                  <Volume2 className="w-3 h-3" />
+                ) : (
+                  <VolumeX className="w-3 h-3" />
+                )}
+                <span>Ambient</span>
+              </button>
+            </Tip>
           </DialogTitle>
           <p className="text-xs text-muted-foreground">
             Each world transforms the atmosphere — visuals, accent colors, and
@@ -105,8 +132,37 @@ export function WorldPickerModal({
                   </span>
                 )}
 
+                {/* Ambient speaker icon — top-left, always visible */}
+                <span
+                  className={`absolute top-2 left-2 transition-opacity ${
+                    isActive && ambientEnabled
+                      ? "opacity-100 text-primary"
+                      : "opacity-20 text-muted-foreground"
+                  }`}
+                  aria-label={
+                    isActive && ambientEnabled
+                      ? "Ambient audio playing"
+                      : ambientEnabled
+                        ? "Ambient audio available"
+                        : "Ambient audio muted"
+                  }
+                  title={
+                    isActive && ambientEnabled
+                      ? "Ambient audio playing"
+                      : ambientEnabled
+                        ? "Ambient audio available"
+                        : "Ambient audio muted"
+                  }
+                >
+                  {ambientEnabled ? (
+                    <Volume2 className="w-2.5 h-2.5" />
+                  ) : (
+                    <VolumeX className="w-2.5 h-2.5" />
+                  )}
+                </span>
+
                 {/* Color swatch strip */}
-                <div className="flex gap-1 mb-2.5">
+                <div className="flex gap-1 mb-2.5 mt-3">
                   {world.swatchColors.map((color, i) => (
                     <div
                       key={i}
@@ -160,6 +216,11 @@ export function WorldPickerModal({
             );
           })}
         </div>
+
+        {/* Footer note about ambient volume */}
+        <p className="text-[10px] text-muted-foreground text-center mt-3 font-mono opacity-60">
+          Ambient loops play at 10% volume and never interfere with your session audio.
+        </p>
       </DialogContent>
     </Dialog>
   );
