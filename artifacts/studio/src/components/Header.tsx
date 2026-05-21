@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import {
   Save,
@@ -201,6 +201,43 @@ export function Header() {
   const [customEndBar, setCustomEndBar] = useState(
     () => Math.max(1, Math.min(project.bars, getSettings().exportEndBar)),
   );
+
+  const exportEstimate = useMemo(() => {
+    const SAMPLE_RATE = 44100;
+    const CHANNELS = 2;
+    const BYTES_PER_SAMPLE = 2;
+    const MP3_BYTES_PER_SEC = 192000 / 8;
+
+    let beats: number;
+    if (exportRangeMode === "loop" && project.loopEnabled && project.loopEndBeat > project.loopStartBeat) {
+      beats = project.loopEndBeat - project.loopStartBeat;
+    } else if (exportRangeMode === "custom") {
+      beats = customEndBar * 4 - (customStartBar - 1) * 4;
+    } else {
+      beats = project.bars * 4;
+    }
+
+    const durationSec = Math.max(0, beats * 60 / project.bpm);
+    const wavBytes = durationSec * SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE + 44;
+    const mp3Bytes = durationSec * MP3_BYTES_PER_SEC;
+
+    const fmtSize = (bytes: number) => {
+      if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(bytes / 1024).toFixed(0)} KB`;
+    };
+    const fmtDur = (sec: number) => {
+      if (sec < 60) return `${sec.toFixed(1)} s`;
+      const m = Math.floor(sec / 60);
+      const s = Math.round(sec % 60);
+      return `${m}:${String(s).padStart(2, "0")}`;
+    };
+
+    return {
+      durationSec,
+      label: `~${fmtDur(durationSec)} · WAV ~${fmtSize(wavBytes)} · MP3 ~${fmtSize(mp3Bytes)}`,
+    };
+  }, [exportRangeMode, customStartBar, customEndBar, project.bars, project.bpm, project.loopEnabled, project.loopStartBeat, project.loopEndBeat]);
+
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
   const [importSummary, setImportSummary] =
     useState<ProjectImportSummary | null>(null);
@@ -1090,6 +1127,17 @@ export function Header() {
                   </div>
                 )}
               </div>
+
+              {exportEstimate.durationSec > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-muted/50 border border-border font-mono text-xs text-muted-foreground">
+                  <span className="text-foreground font-semibold">{exportEstimate.label}</span>
+                </div>
+              )}
+              {exportEstimate.durationSec === 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/30 font-mono text-xs text-destructive">
+                  Range is empty — nothing to export.
+                </div>
+              )}
 
               <ExportSamplesWarning />
 
