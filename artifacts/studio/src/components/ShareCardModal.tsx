@@ -7,8 +7,9 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, X } from "lucide-react";
+import { Download, Share2, X } from "lucide-react";
 import { downloadBlob } from "../lib/audio/export";
+import { shareCardBlob } from "../lib/share";
 
 export interface ShareCardData {
   projectName: string;
@@ -196,11 +197,19 @@ export function ShareCardModal({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [downloading, setDownloading] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareResult, setShareResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !data || !canvasRef.current) return;
     renderShareCard(canvasRef.current, data);
   }, [open, data]);
+
+  const getSafeFilename = () => {
+    if (!data) return "sn-studio-beat.png";
+    const safe = data.projectName.replace(/[^a-z0-9_-]/gi, "_").slice(0, 40);
+    return `sn-studio-${safe}.png`;
+  };
 
   const handleDownload = async () => {
     if (!canvasRef.current || !data) return;
@@ -209,8 +218,7 @@ export function ShareCardModal({
       canvasRef.current.toBlob(
         (blob) => {
           if (!blob) return;
-          const safe = data.projectName.replace(/[^a-z0-9_-]/gi, "_").slice(0, 40);
-          downloadBlob(blob, `sn-studio-${safe}.png`);
+          downloadBlob(blob, getSafeFilename());
           setDownloading(false);
         },
         "image/png",
@@ -218,6 +226,28 @@ export function ShareCardModal({
     } catch {
       setDownloading(false);
     }
+  };
+
+  const handleShare = () => {
+    if (!canvasRef.current || !data) return;
+    setSharing(true);
+    setShareResult(null);
+    canvasRef.current.toBlob(
+      async (blob) => {
+        if (!blob) { setSharing(false); return; }
+        try {
+          const result = await shareCardBlob(blob, getSafeFilename(), data.projectName);
+          if (result === "copied") {
+            setShareResult("Link copied to clipboard!");
+          } else if (result === "unsupported") {
+            setShareResult("Sharing not supported — try Download.");
+          }
+        } finally {
+          setSharing(false);
+        }
+      },
+      "image/png",
+    );
   };
 
   if (!data) return null;
@@ -240,25 +270,42 @@ export function ShareCardModal({
             style={{ aspectRatio: "1200/630" }}
           />
         </div>
-        <div className="flex gap-3 justify-end pt-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            className="font-mono text-xs"
-          >
-            <X className="w-3.5 h-3.5 mr-1" />
-            Skip
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleDownload}
-            disabled={downloading}
-            className="font-mono text-xs"
-          >
-            <Download className="w-3.5 h-3.5 mr-1" />
-            {downloading ? "Saving…" : "Download Card"}
-          </Button>
+        <div className="flex items-center gap-3 justify-between pt-1">
+          <div className="flex-1">
+            {shareResult && (
+              <p className="font-mono text-xs text-muted-foreground">{shareResult}</p>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              className="font-mono text-xs"
+            >
+              <X className="w-3.5 h-3.5 mr-1" />
+              Skip
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleShare}
+              disabled={sharing || downloading}
+              className="font-mono text-xs"
+            >
+              <Share2 className="w-3.5 h-3.5 mr-1" />
+              {sharing ? "Sharing…" : "Share"}
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleDownload}
+              disabled={downloading || sharing}
+              className="font-mono text-xs"
+            >
+              <Download className="w-3.5 h-3.5 mr-1" />
+              {downloading ? "Saving…" : "Download Card"}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -176,6 +176,49 @@ export async function shareAppLink(
   }
 }
 
+/** Share a beat card image blob via the Web Share API (with file) when
+ *  supported, otherwise copy a text + URL blurb to the clipboard.
+ *  Returns the outcome so the caller can show an appropriate toast. */
+export async function shareCardBlob(
+  blob: Blob,
+  filename: string,
+  projectName: string,
+): Promise<"shared" | "copied" | "cancelled" | "unsupported"> {
+  const url = liveAppUrl();
+  const title = `${projectName} — ${APP_NAME}`;
+  const text = `Made this in SN Studio: ${url}`;
+
+  if (canWebShareFiles()) {
+    const file = new File([blob], filename, { type: blob.type });
+    const data: ShareData = { title, text, files: [file] };
+    try {
+      const nav = navigator as NavigatorWithShare;
+      if (!nav.canShare || nav.canShare(data)) {
+        await nav.share!(data);
+        return "shared";
+      }
+    } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") return "cancelled";
+    }
+  }
+
+  if (canWebShare()) {
+    try {
+      await (navigator as NavigatorWithShare).share!({ title, text, url });
+      return "shared";
+    } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") return "cancelled";
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "unsupported";
+  }
+}
+
 /** Share a generated file (WAV or project JSON) via the Web Share sheet
  *  when the platform allows it. Returns "unsupported" when the browser
  *  can't share files — callers should fall back to a download. */
