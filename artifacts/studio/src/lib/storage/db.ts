@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from "idb";
-import type { Project, SampleLibraryItem } from "../../types";
+import type { ChopLabPersistedState, Project, SampleLibraryItem } from "../../types";
 import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
 import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
 
@@ -28,7 +28,10 @@ interface Schema {
   };
 }
 
-interface SerializedProject extends Omit<Project, "tracks" | "samples"> {
+/** ChopLab state as stored in IDB — sampleBlob is excluded; only the key is kept. */
+type SerializedChopLab = Omit<ChopLabPersistedState, "sampleBlob">;
+
+interface SerializedProject extends Omit<Project, "tracks" | "samples" | "chopLab"> {
   tracks: Array<
     Omit<Project["tracks"][number], "audioClips"> & {
       audioClips: Array<{
@@ -42,6 +45,7 @@ interface SerializedProject extends Omit<Project, "tracks" | "samples"> {
     }
   >;
   samples?: Array<Omit<SampleLibraryItem, "blob">>;
+  chopLab?: SerializedChopLab;
 }
 
 export interface DraftSnapshot {
@@ -113,11 +117,25 @@ async function serializeAndFlushBlobs(
       };
     }),
   );
+  // Flush chopLab sample blob if present.
+  let serializedChopLab: SerializedChopLab | undefined;
+  if (project.chopLab) {
+    const cl = project.chopLab;
+    if (cl.sampleBlob && cl.sampleBlobKey) {
+      await blobs.put(cl.sampleBlob, cl.sampleBlobKey);
+    }
+    // Strip the in-memory blob from the serialized form.
+    const { sampleBlob: _sb, ...clRest } = cl;
+    void _sb;
+    serializedChopLab = clRest;
+  }
+
   return {
     ...project,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     updatedAt: Date.now(),
     samples: serializedSamples,
+    chopLab: serializedChopLab,
     tracks: await Promise.all(
       project.tracks.map(async (t) => ({
         ...t,
@@ -196,7 +214,16 @@ async function hydrateSerialized(
       return { ...s, blob } as SampleLibraryItem;
     }),
   );
-  return { ...migrated, tracks, samples };
+  // Re-attach the chopLab sample blob if a key is stored.
+  let chopLab = migrated.chopLab;
+  if (chopLab?.sampleBlobKey) {
+    const sampleBlob = (await db.get(
+      BLOBS_STORE,
+      chopLab.sampleBlobKey,
+    )) as Blob | undefined;
+    chopLab = { ...chopLab, sampleBlob };
+  }
+  return { ...migrated, tracks, samples, chopLab };
 }
 
 export async function listProjects(): Promise<
@@ -348,6 +375,25 @@ export async function duplicateProject(
       return { ...s, blob, blobKey: newKey };
     }),
   );
+  // Copy the ChopLab sample blob under the new project's key.
+  let dupChopLab = source.chopLab;
+  if (source.chopLab) {
+    let sampleBlob = source.chopLab.sampleBlob;
+    if (!sampleBlob && source.chopLab.sampleBlobKey) {
+      sampleBlob = (await tx.objectStore(BLOBS_STORE).get(
+        source.chopLab.sampleBlobKey,
+      )) as Blob | undefined;
+    }
+    const newChopKey = `${newId}:choplab:sample`;
+    if (sampleBlob) {
+      await tx.objectStore(BLOBS_STORE).put(sampleBlob, newChopKey);
+    }
+    dupChopLab = {
+      ...source.chopLab,
+      sampleBlobKey: sampleBlob ? newChopKey : source.chopLab.sampleBlobKey,
+      sampleBlob,
+    };
+  }
   await tx.done;
 
   const dup: Project = {
@@ -356,6 +402,7 @@ export async function duplicateProject(
     name: newName,
     tracks,
     samples,
+    chopLab: dupChopLab,
     updatedAt: Date.now(),
     schemaVersion: CURRENT_SCHEMA_VERSION,
   };

@@ -9,6 +9,7 @@ import type {
   AutomationInterpolation,
   AutomationLane,
   AutomationParamId,
+  ChopLabPersistedState,
   FxModuleId,
   FxModuleSettings,
   InstrumentKind,
@@ -80,6 +81,12 @@ export interface ChopLabState {
   sampleBpm: number;
   /** When true, slices are time-stretched to match the project BPM. */
   syncToBpm: boolean;
+  /** Original filename of the loaded sample. */
+  sampleName?: string;
+  /** IDB blob key for the sample audio data. */
+  sampleBlobKey?: string;
+  /** In-memory blob (not persisted to project JSON; flushed to IDB on save). */
+  sampleBlob?: Blob;
 }
 
 const DEFAULT_CHOP_LAB: ChopLabState = {
@@ -745,7 +752,53 @@ class Store {
   // ---- chop lab ops ----
 
   patchChopLab(patch: Partial<ChopLabState>) {
-    this.set({ chopLab: { ...this.state.chopLab, ...patch } });
+    const next = { ...this.state.chopLab, ...patch };
+    // Sync serializable fields back to project.chopLab so they are
+    // included in the next save / autosave without extra steps.
+    const persisted: ChopLabPersistedState = {
+      markers: next.markers,
+      sliceSettings: next.sliceSettings,
+      sensitivity: next.sensitivity,
+      sampleName: next.sampleName,
+      sampleBlobKey: next.sampleBlobKey,
+      sampleBlob: next.sampleBlob,
+    };
+    this.state = {
+      ...this.state,
+      chopLab: next,
+      project: { ...this.state.project, chopLab: persisted, updatedAt: Date.now() },
+    };
+    this.listeners.forEach((l) => l());
+  }
+
+  /**
+   * Record a newly-loaded sample file on both the runtime chopLab state
+   * and project.chopLab so that the next save persists the blob to IDB.
+   * Call this after decoding the AudioBuffer in ChopLab.tsx.
+   */
+  setChopLabSample(blob: Blob, sampleName: string, detectedBpm?: number) {
+    const blobKey = `${this.state.project.id}:choplab:sample`;
+    this.patchChopLab({
+      sampleName,
+      sampleBlobKey: blobKey,
+      sampleBlob: blob,
+      markers: [],
+      sliceSettings: [],
+      activeSliceIndex: null,
+      ...(detectedBpm !== undefined ? { sampleBpm: detectedBpm } : {}),
+    });
+  }
+
+  /** Clear the ChopLab sample and all markers/settings. */
+  clearChopLabSample() {
+    this.patchChopLab({
+      sampleName: undefined,
+      sampleBlobKey: undefined,
+      sampleBlob: undefined,
+      markers: [],
+      sliceSettings: [],
+      activeSliceIndex: null,
+    });
   }
 
   setChopLabMarkers(markers: number[]) {
@@ -1104,9 +1157,34 @@ export function resetStore(project: Project) {
     // important for in-place project swaps like `loadDemo` that don't
     // trigger a full page reload.
     const fresh = new Store(project).state;
+    // Seed chopLab runtime state from the project's persisted chopLab field
+    // so markers, slice settings, and sample name are available immediately.
+    if (project.chopLab) {
+      fresh.chopLab = {
+        ...fresh.chopLab,
+        markers: project.chopLab.markers,
+        sliceSettings: project.chopLab.sliceSettings,
+        sensitivity: project.chopLab.sensitivity,
+        sampleName: project.chopLab.sampleName,
+        sampleBlobKey: project.chopLab.sampleBlobKey,
+        sampleBlob: project.chopLab.sampleBlob,
+      };
+    }
     storeInstance.set(fresh);
   } else {
     storeInstance = new Store(project);
+    // Seed chopLab from project on first init too.
+    if (project.chopLab) {
+      storeInstance.state.chopLab = {
+        ...storeInstance.state.chopLab,
+        markers: project.chopLab.markers,
+        sliceSettings: project.chopLab.sliceSettings,
+        sensitivity: project.chopLab.sensitivity,
+        sampleName: project.chopLab.sampleName,
+        sampleBlobKey: project.chopLab.sampleBlobKey,
+        sampleBlob: project.chopLab.sampleBlob,
+      };
+    }
   }
   // Re-seed engine-level globals from the freshly loaded project so
   // persisted humanization is active immediately, not on next user edit.

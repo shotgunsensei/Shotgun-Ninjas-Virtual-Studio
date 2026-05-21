@@ -36,6 +36,7 @@ const CHOKE_COLORS: Record<string, string> = {
 export function ChopLab({ track }: { track: Track }) {
   const chopLab = useStore((s) => s.chopLab);
   const projectBpm = useStore((s) => s.project.bpm);
+  const project = useStore((s) => s.project);
   const { markers, sliceSettings, activeSliceIndex, sensitivity, sampleBpm, syncToBpm } = chopLab;
 
   // Non-serializable AudioBuffer lives here, not in the store.
@@ -45,6 +46,10 @@ export function ChopLab({ track }: { track: Track }) {
   const [isExporting, setIsExporting] = useState(false);
   const [playingPads, setPlayingPads] = useState<Set<number>>(new Set());
   const [patternAlgo, setPatternAlgo] = useState<"linear" | "euclidean" | "random">("linear");
+  // "needs-relink" is shown when the project has chopLab state but the
+  // blob couldn't be found in IDB (e.g. the project was imported without
+  // the blob embedded, or IDB was cleared).
+  const [relinkNeeded, setRelinkNeeded] = useState(false);
 
   const engine = getChopEngine();
 
@@ -52,6 +57,46 @@ export function ChopLab({ track }: { track: Track }) {
   useEffect(() => {
     engine.setTempoSync(syncToBpm, sampleBpm, projectBpm);
   }, [syncToBpm, sampleBpm, projectBpm]);
+
+  // Restore persisted ChopLab state when the project loads.  We decode
+  // the sample blob from IDB back into an AudioBuffer so the waveform
+  // and engine come back to life without the user doing anything.
+  const restoredForProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const cl = project.chopLab;
+    if (!cl || restoredForProjectRef.current === project.id) return;
+    restoredForProjectRef.current = project.id;
+
+    if (!cl.sampleBlob) {
+      // Markers/settings exist but blob is gone — prompt the user to relink.
+      if (cl.sampleBlobKey) {
+        setRelinkNeeded(true);
+        setSampleName(cl.sampleName ?? null);
+      }
+      return;
+    }
+
+    // Decode the stored blob back to an AudioBuffer.
+    (async () => {
+      try {
+        const arrayBuffer = await cl.sampleBlob!.arrayBuffer();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawCtx: AudioContext = (Tone.getContext().rawContext as any);
+        const decoded = await rawCtx.decodeAudioData(arrayBuffer);
+        audioBufferRef.current = decoded;
+        setSampleName(cl.sampleName ?? null);
+        setRelinkNeeded(false);
+        // Re-seed the engine with the restored markers + settings.
+        engine.loadBuffer(decoded, cl.markers, cl.sliceSettings);
+        getStore().setStatus(`Chop Lab restored: ${cl.sampleName ?? "sample"}`, "info");
+      } catch {
+        setRelinkNeeded(true);
+        setSampleName(cl.sampleName ?? null);
+      }
+    })();
+  // Only run when the project id changes (i.e. a new project was loaded).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
 
   // Derive slices boundaries from markers + buffer duration.
   const sliceBoundaries = (() => {
@@ -111,18 +156,19 @@ export function ChopLab({ track }: { track: Track }) {
   async function loadFile(file: File) {
     setLoadError(null);
     setSampleName(null);
+    setRelinkNeeded(false);
     try {
       const arrayBuffer = await file.arrayBuffer();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rawCtx: AudioContext = (Tone.getContext().rawContext as any);
-      const decoded = await rawCtx.decodeAudioData(arrayBuffer);
+      const decoded = await rawCtx.decodeAudioData(arrayBuffer.slice(0));
       audioBufferRef.current = decoded;
       setSampleName(file.name);
       // Auto-estimate BPM from the loaded sample.
       const detectedBpm = estimateBpm(decoded);
-      // Reset markers when a new sample loads.
-      getStore().setChopLabMarkers([]);
-      getStore().patchChopLab({ activeSliceIndex: null, sampleBpm: detectedBpm });
+      // Persist the raw Blob + name on the project so the next save stores it.
+      // Also resets markers and records the detected BPM.
+      getStore().setChopLabSample(file, file.name, detectedBpm);
       engine.loadBuffer(decoded, [], []);
       getStore().setStatus(`Sample loaded: ${file.name} · detected ~${detectedBpm} BPM`, "info");
     } catch (err) {
@@ -259,14 +305,25 @@ export function ChopLab({ track }: { track: Track }) {
         </span>
       </div>
 
-      {/* Sample Loader */}
-      <SampleLoader
-        onDrop={onDrop}
-        onFileInput={onFileInput}
-        hasBuffer={hasBuffer}
-        error={loadError}
-        sampleName={sampleName}
-      />
+      {/* Re-link prompt — shown when markers exist but the sample blob is missing */}
+      {relinkNeeded && !hasBuffer && (
+        <RelinkPrompt
+          sampleName={sampleName}
+          onFileInput={onFileInput}
+          onDrop={onDrop}
+        />
+      )}
+
+      {/* Sample Loader — hidden while relink prompt is active */}
+      {!relinkNeeded && (
+        <SampleLoader
+          onDrop={onDrop}
+          onFileInput={onFileInput}
+          hasBuffer={hasBuffer}
+          error={loadError}
+          sampleName={sampleName}
+        />
+      )}
 
       {/* Waveform + Transient Controls */}
       {hasBuffer && (
@@ -452,6 +509,61 @@ function SampleLoader({
           Drop WAV / MP3 or click to browse
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Shown when the project remembers a chopped kit but the sample audio
+ * blob couldn't be found in IndexedDB (e.g. the browser storage was
+ * cleared, or the project was exported without embedding samples).
+ * The user can drop / pick the original file to relink it.
+ */
+function RelinkPrompt({
+  sampleName,
+  onDrop,
+  onFileInput,
+}: {
+  sampleName: string | null;
+  onDrop: (e: React.DragEvent) => void;
+  onFileInput: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3 space-y-1.5">
+      <p className="font-mono text-[10px] text-yellow-400 font-semibold">
+        Sample unavailable
+      </p>
+      <p className="font-mono text-[9px] text-muted-foreground leading-relaxed">
+        This project has a saved Chop Lab kit
+        {sampleName ? ` (${sampleName})` : ""} but the audio file could not be
+        found. Re-link the original sample to restore the waveform and pads.
+      </p>
+      <div
+        onDrop={onDrop}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onClick={() => inputRef.current?.click()}
+        className={[
+          "border-2 border-dashed rounded p-2 text-center cursor-pointer transition-colors mt-1",
+          dragOver
+            ? "border-yellow-400 bg-yellow-400/10"
+            : "border-yellow-500/40 hover:border-yellow-400/70 bg-background/20",
+        ].join(" ")}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".wav,.mp3,audio/wav,audio/mpeg"
+          className="hidden"
+          onChange={onFileInput}
+        />
+        <p className="font-mono text-[10px] text-yellow-400/80">
+          Drop file or click to re-link sample
+        </p>
+      </div>
     </div>
   );
 }

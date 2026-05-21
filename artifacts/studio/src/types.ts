@@ -548,6 +548,27 @@ export interface PerformanceSettings {
   gamepadMappings?: GamepadMapping[];
 }
 
+/**
+ * Serializable subset of ChopLab state — stored inside the Project so
+ * markers and slice settings survive save/reload.  The sample blob is
+ * kept in IndexedDB under `sampleBlobKey` (same pattern as audio clips).
+ */
+export interface ChopLabPersistedState {
+  /** Slice marker positions (seconds), sorted ascending. */
+  markers: number[];
+  /** Per-slice settings — length === markers.length + 1. */
+  sliceSettings: import("./lib/audio/chopEngine").ChopSliceSetting[];
+  /** Transient detection sensitivity (0..1). */
+  sensitivity: number;
+  /** Original filename of the loaded sample, shown in the UI. */
+  sampleName?: string;
+  /** IndexedDB blob key for the sample audio data. */
+  sampleBlobKey?: string;
+  /** In-memory blob (not serialized to JSON; flushed to IDB on save,
+   *  same pattern as AudioClip.blob). */
+  sampleBlob?: Blob;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -596,4 +617,7 @@ export interface Project {
   modulationSources?: ModulationSource[];
   /** Phase 11: Modulation routings (source → track param). */
   modulationRoutings?: ModulationRouting[];
+  /** Chop Lab kit — markers, slice settings, and sample reference.
+   *  Persisted so the kit survives save/reload alongside the project. */
+  chopLab?: ChopLabPersistedState;
 }
