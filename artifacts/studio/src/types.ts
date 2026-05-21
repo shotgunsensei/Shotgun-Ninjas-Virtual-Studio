@@ -437,7 +437,8 @@ export type MidiTarget =
   | { kind: "drum-piece-decay"; trackId: string; pieceId: string }
   | { kind: "drum-piece-cutoff"; trackId: string; pieceId: string }
   | { kind: "drum-piece-reverb"; trackId: string; pieceId: string }
-  | { kind: "drum-piece-delay"; trackId: string; pieceId: string };
+  | { kind: "drum-piece-delay"; trackId: string; pieceId: string }
+  | { kind: "chop-pad"; padIndex: number };
 
 export interface MidiMapping {
   id: string;

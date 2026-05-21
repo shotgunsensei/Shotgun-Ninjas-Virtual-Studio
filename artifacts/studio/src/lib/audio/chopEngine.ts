@@ -40,6 +40,7 @@ interface SlotEntry {
   player: Tone.Player;
   gain: Tone.Gain;
   sliceIndex: number;
+  baseGain: number;
 }
 
 /** Compute peak amplitude of a Float32Array (channel data). */
@@ -131,12 +132,20 @@ export class ChopEngine {
     this.applySettingsToSlot(slot, s);
   }
 
-  /** Trigger a slice by pad index (0-based). Accepts optional scheduled time. */
-  triggerSlice(index: number, time?: number) {
+  /**
+   * Trigger a slice by pad index (0-based).
+   * @param index - Slice index (0–15)
+   * @param time  - Optional scheduled Tone.js time
+   * @param velocity - Optional MIDI velocity 0..1 (default 1); scales playback gain
+   */
+  triggerSlice(index: number, time?: number, velocity: number = 1) {
     if (index < 0 || index >= this.slots.length) return;
     const slot = this.slots[index];
     if (!slot) return;
     const s = this.settings[index] ?? DEFAULT_SLICE_SETTING;
+
+    // Apply velocity scaling on top of the normalized base gain.
+    slot.gain.gain.value = slot.baseGain * Math.max(0, Math.min(1, velocity));
 
     // Choke group: stop all other players in the same group.
     if (s.chokeGroup !== "none") {
@@ -230,9 +239,10 @@ export class ChopEngine {
       const player = new Tone.Player(toneBuf).connect(gain);
 
       const s = this.settings[i] ?? DEFAULT_SLICE_SETTING;
-      this.applySettingsToSlot({ player, gain, sliceIndex: i }, s);
+      const entry: SlotEntry = { player, gain, sliceIndex: i, baseGain: 1 };
+      this.applySettingsToSlot(entry, s);
 
-      this.slots.push({ player, gain, sliceIndex: i });
+      this.slots.push(entry);
     }
   }
 
@@ -266,10 +276,11 @@ export class ChopEngine {
           if (abs > peak) peak = abs;
         }
       }
-      gain.gain.value = peak > 0.001 ? Math.min(4, 1 / peak) : 1;
+      slot.baseGain = peak > 0.001 ? Math.min(4, 1 / peak) : 1;
     } else {
-      gain.gain.value = 1;
+      slot.baseGain = 1;
     }
+    gain.gain.value = slot.baseGain;
   }
 
   private disposeSlots() {

@@ -18,6 +18,7 @@ function targetMatches(a: MidiTarget, b: MidiTarget): boolean {
   if (a.kind === "drum-piece-volume" && b.kind === "drum-piece-volume") return a.trackId === b.trackId && a.pieceId === b.pieceId;
   if (a.kind === "drum-piece-pan" && b.kind === "drum-piece-pan") return a.trackId === b.trackId && a.pieceId === b.pieceId;
   if (a.kind === "drum-piece-pitch" && b.kind === "drum-piece-pitch") return a.trackId === b.trackId && a.pieceId === b.pieceId;
+  if (a.kind === "chop-pad" && b.kind === "chop-pad") return a.padIndex === b.padIndex;
   return true;
 }
 

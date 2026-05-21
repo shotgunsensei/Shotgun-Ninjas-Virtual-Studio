@@ -1138,6 +1138,8 @@ export function midiTargetLabel(target: MidiTarget, project: Project): string {
       const t = project.tracks.find((tr) => tr.id === target.trackId);
       return `${t?.name ?? "Drums"} · ${target.pieceId} Delay Send`;
     }
+    case "chop-pad":
+      return `Chop Lab Pad ${target.padIndex + 1}`;
   }
 }
 

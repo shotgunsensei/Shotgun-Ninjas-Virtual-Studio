@@ -45,6 +45,7 @@ import { MelodicParams } from "./components/MelodicParams";
 import { EffectsRack } from "./components/EffectsRack";
 import { useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
+import { getChopEngine } from "./lib/audio/chopEngine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
 import { defaultProject, flushMixToEngine, getStore, resetStore, useStore } from "./store";
 import {
@@ -781,6 +782,12 @@ function Studio() {
             const next = { ...cur, [t.pieceId]: { ...(cur[t.pieceId] ?? {}), delaySend } };
             audio.setPieceSetting(t.trackId, t.pieceId as DrumPiece, { delaySend }, next);
             store.patchTrack(t.trackId, { pieceSettings: next });
+            break;
+          }
+          case "chop-pad": {
+            if (e.type !== "noteon") break;
+            const velocity = e.data2 / 127;
+            getChopEngine().triggerSlice(m.target.padIndex, undefined, velocity);
             break;
           }
         }

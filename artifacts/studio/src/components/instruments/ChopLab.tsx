@@ -14,6 +14,7 @@ import type { ChopSliceSetting } from "../../lib/audio/chopEngine";
 import { makeId } from "../../store";
 import { audio } from "../../lib/audio/engine";
 import type { Track, NoteEvent, NoteClip } from "../../types";
+import { MidiLearnButton } from "../MidiLearnButton";
 
 // ---- keyboard map: 1-8 = pads 0-7, q-i = pads 8-15 ----
 const PAD_KEYS: Record<string, number> = {
@@ -363,37 +364,49 @@ export function ChopLab({ track }: { track: Track }) {
           const isPlaying = playingPads.has(i);
           const choke = sliceSettings[i]?.chokeGroup ?? "none";
           return (
-            <button
-              key={i}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                if (!hasSlice) return;
-                triggerPad(i);
-              }}
-              className={[
-                "aspect-square rounded-md border-2 flex flex-col items-center justify-center transition-all",
-                hasSlice
-                  ? isPlaying
-                    ? "border-primary bg-primary/40 glow-red scale-95"
-                    : isActive
-                    ? "border-primary/70 bg-primary/10"
-                    : "border-border hover:border-primary/50 bg-background/30 hover:bg-accent/20"
-                  : "border-border/30 bg-background/10 opacity-30 cursor-not-allowed",
-              ].join(" ")}
-            >
-              <span className="font-mono text-[10px] font-bold leading-none">
-                {i + 1}
-              </span>
-              <span className="font-mono text-[8px] text-muted-foreground mt-0.5">
-                {PAD_KEY_LABELS[i]}
-              </span>
-              {hasSlice && choke !== "none" && (
+            <div key={i} className="relative">
+              <button
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  if (!hasSlice) return;
+                  triggerPad(i);
+                }}
+                className={[
+                  "w-full aspect-square rounded-md border-2 flex flex-col items-center justify-center transition-all",
+                  hasSlice
+                    ? isPlaying
+                      ? "border-primary bg-primary/40 glow-red scale-95"
+                      : isActive
+                      ? "border-primary/70 bg-primary/10"
+                      : "border-border hover:border-primary/50 bg-background/30 hover:bg-accent/20"
+                    : "border-border/30 bg-background/10 opacity-30 cursor-not-allowed",
+                ].join(" ")}
+              >
+                <span className="font-mono text-[10px] font-bold leading-none">
+                  {i + 1}
+                </span>
+                <span className="font-mono text-[8px] text-muted-foreground mt-0.5">
+                  {PAD_KEY_LABELS[i]}
+                </span>
+                {hasSlice && choke !== "none" && (
+                  <div
+                    className="w-1.5 h-1.5 rounded-full mt-0.5"
+                    style={{ background: CHOKE_COLORS[choke] ?? "#888" }}
+                  />
+                )}
+              </button>
+              {hasSlice && (
                 <div
-                  className="w-1.5 h-1.5 rounded-full mt-0.5"
-                  style={{ background: CHOKE_COLORS[choke] ?? "#888" }}
-                />
+                  className="absolute top-0.5 right-0.5 z-10"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <MidiLearnButton
+                    target={{ kind: "chop-pad", padIndex: i }}
+                    small
+                  />
+                </div>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
