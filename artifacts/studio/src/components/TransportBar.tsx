@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2, Activity } from "lucide-react";
+import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2, Activity, History, Trash2, ExternalLink } from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { useStore, getStore } from "../store";
+import type { ClipHistoryEntry } from "../store";
 import { audio } from "../lib/audio/engine";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { useTransport } from "../hooks/useTransport";
@@ -438,14 +439,17 @@ function MidiActivityIndicator() {
  * Project-wide latching CLIP LED in the transport bar.
  *
  * Polls every track's Tone.Meter at ~30 Hz. As soon as any track peaks
- * at or above 0 dBFS the LED latches red. Clicking it:
- *   1. Scrolls into view and highlights every channel strip that clipped.
- *   2. Resets all per-track clip indicators (via store.resetAllTrackClips).
- *   3. Clears this transport LED.
+ * at or above 0 dBFS the LED latches red and records a ClipHistoryEntry.
+ * Clicking the LED toggles the clip history popover. The history log
+ * persists for the session and can be cleared manually.
  */
 function ProjectClipBadge() {
   const [clippedIds, setClippedIds] = useState<Set<string>>(new Set());
+  const [historyOpen, setHistoryOpen] = useState(false);
   const lastWarnRef = useRef(0);
+  // Per-track throttle: don't log the same track more than once per 2 s.
+  const lastClipLogRef = useRef<Map<string, number>>(new Map());
+  const clipHistory = useStore((s) => s.clipHistory);
 
   useEffect(() => {
     let raf = 0;
@@ -454,25 +458,31 @@ function ProjectClipBadge() {
     const tick = (ts: number) => {
       if (ts - lastFrame >= FRAME_MS && !document.hidden) {
         lastFrame = ts;
-        const trackIds = getStore().state.project.tracks.map((t) => t.id);
-        const newClips: string[] = [];
-        for (const id of trackIds) {
-          const meter = audio.getTrackMeter(id);
+        const tracks = getStore().state.project.tracks;
+        const newClips: Array<{ id: string; name: string }> = [];
+        for (const t of tracks) {
+          const meter = audio.getTrackMeter(t.id);
           if (!meter) continue;
           const v = meter.getValue();
           const dbL = typeof v === "number" ? v : (v[0] ?? -Infinity);
           const dbR = typeof v === "number" ? v : (v[1] ?? dbL);
-          if (dbL >= 0 || dbR >= 0) newClips.push(id);
+          if (dbL >= 0 || dbR >= 0) newClips.push({ id: t.id, name: t.name });
         }
         if (newClips.length > 0) {
+          const now = performance.now();
           setClippedIds((prev) => {
             const next = new Set(prev);
             let changed = false;
-            for (const id of newClips) {
+            for (const { id, name } of newClips) {
               if (!next.has(id)) { next.add(id); changed = true; }
+              // Throttle per-track history entries to once per 2 s.
+              const lastLogged = lastClipLogRef.current.get(id) ?? 0;
+              if (now - lastLogged > 2000) {
+                lastClipLogRef.current.set(id, now);
+                getStore().addClipEvent(id, name);
+              }
             }
             if (!changed) return prev;
-            const now = performance.now();
             if (now - lastWarnRef.current > 5000) {
               lastWarnRef.current = now;
               getStore().setStatus(
@@ -491,34 +501,173 @@ function ProjectClipBadge() {
   }, []);
 
   const anyClipped = clippedIds.size > 0;
+  const hasHistory = clipHistory.length > 0;
 
-  const handleClick = () => {
-    const ids = Array.from(clippedIds);
-    for (const id of ids) {
-      const el = document.querySelector(`[data-testid="channel-strip-${id}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-        el.classList.add("ring-2", "ring-red-500", "ring-offset-1");
-        setTimeout(() => el.classList.remove("ring-2", "ring-red-500", "ring-offset-1"), 2000);
+  const handleLedClick = () => {
+    if (anyClipped) {
+      // Highlight clipped channel strips.
+      const ids = Array.from(clippedIds);
+      for (const id of ids) {
+        const el = document.querySelector(`[data-testid="channel-strip-${id}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+          el.classList.add("ring-2", "ring-red-500", "ring-offset-1");
+          setTimeout(() => el.classList.remove("ring-2", "ring-red-500", "ring-offset-1"), 2000);
+        }
       }
+      getStore().resetAllTrackClips();
+      setClippedIds(new Set());
     }
-    getStore().resetAllTrackClips();
-    setClippedIds(new Set());
+    setHistoryOpen((o) => !o);
   };
 
-  if (!anyClipped) return null;
+  if (!anyClipped && !hasHistory) return null;
+
   return (
-    <Tip label={`${clippedIds.size} track(s) clipped — click to locate & reset`}>
-      <button
-        type="button"
-        onClick={handleClick}
-        className="flex items-center gap-1 px-2 h-7 rounded-md border border-red-500/60 bg-red-500/15 text-red-300 font-mono text-[10px] uppercase tracking-widest studio-clip-led animate-pulse"
-        aria-label="Track clipping detected, click to locate and reset"
-      >
-        <RadioTower className="w-3 h-3" />
-        Clip ({clippedIds.size})
-      </button>
-    </Tip>
+    <div className="relative">
+      <Tip label={anyClipped ? `${clippedIds.size} track(s) clipped — click to locate & open log` : "Clip history — click to view"}>
+        <button
+          type="button"
+          onClick={handleLedClick}
+          className={`flex items-center gap-1 px-2 h-7 rounded-md border font-mono text-[10px] uppercase tracking-widest studio-clip-led ${
+            anyClipped
+              ? "border-red-500/60 bg-red-500/15 text-red-300 animate-pulse"
+              : "border-orange-500/40 bg-orange-500/10 text-orange-300"
+          }`}
+          aria-label="Clip history, click to open"
+          aria-expanded={historyOpen}
+        >
+          {anyClipped ? <RadioTower className="w-3 h-3" /> : <History className="w-3 h-3" />}
+          {anyClipped ? `Clip (${clippedIds.size})` : "Clip Log"}
+          {hasHistory && !anyClipped && (
+            <span className="ml-0.5 text-[9px] opacity-70">{clipHistory.length}</span>
+          )}
+        </button>
+      </Tip>
+
+      {historyOpen && (
+        <ClipHistoryPanel onClose={() => setHistoryOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Popover panel that shows the session clip history log.
+ * Appears above the transport bar, anchored to the CLIP LED.
+ */
+function ClipHistoryPanel({ onClose }: { onClose: () => void }) {
+  const clipHistory = useStore((s) => s.clipHistory);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  const scrollToTrack = (trackId: string) => {
+    const el = document.querySelector(`[data-testid="channel-strip-${trackId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      el.classList.add("ring-2", "ring-red-500", "ring-offset-1");
+      setTimeout(() => el.classList.remove("ring-2", "ring-red-500", "ring-offset-1"), 2000);
+    }
+    onClose();
+  };
+
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  };
+
+  // Show most-recent entries first.
+  const sorted = [...clipHistory].reverse();
+
+  return (
+    <div
+      ref={panelRef}
+      className="absolute bottom-full right-0 mb-2 w-72 rounded-lg border border-red-500/30 bg-graphite shadow-2xl z-50 overflow-hidden"
+      role="dialog"
+      aria-label="Clip history log"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background/50">
+        <div className="flex items-center gap-1.5">
+          <History className="w-3.5 h-3.5 text-red-400" />
+          <span className="font-mono text-[11px] uppercase tracking-widest text-foreground">
+            Clip History
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            ({clipHistory.length})
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Tip label="Clear clip history">
+            <button
+              type="button"
+              onClick={() => getStore().clearClipHistory()}
+              className="flex items-center gap-1 h-6 px-1.5 rounded border border-border text-muted-foreground hover:text-red-400 hover:border-red-500/40 font-mono text-[10px] transition-colors"
+              aria-label="Clear clip history"
+            >
+              <Trash2 className="w-3 h-3" />
+              Clear
+            </button>
+          </Tip>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-6 w-6 flex items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground text-xs transition-colors"
+            aria-label="Close clip history"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Log entries */}
+      <div className="max-h-64 overflow-y-auto">
+        {sorted.length === 0 ? (
+          <div className="px-3 py-4 text-center font-mono text-[11px] text-muted-foreground">
+            No clip events this session.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {sorted.map((entry: ClipHistoryEntry) => (
+              <li
+                key={entry.id}
+                className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-500/5 group"
+              >
+                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-red-500/60" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-[11px] text-foreground truncate">
+                    {entry.trackName}
+                  </div>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    {formatTime(entry.timestamp)}
+                  </div>
+                </div>
+                <Tip label={`Go to ${entry.trackName} channel strip`}>
+                  <button
+                    type="button"
+                    onClick={() => scrollToTrack(entry.trackId)}
+                    className="shrink-0 opacity-0 group-hover:opacity-100 h-6 w-6 flex items-center justify-center rounded border border-border text-muted-foreground hover:text-red-400 hover:border-red-500/40 transition-all"
+                    aria-label={`Scroll to ${entry.trackName}`}
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </button>
+                </Tip>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 

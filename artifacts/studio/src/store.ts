@@ -32,6 +32,14 @@ import { AUTOMATION_PARAM_DEFAULTS, SEND_BUS_LABELS } from "./types";
 import type { ChopSliceSetting } from "./lib/audio/chopEngine";
 export type { ChopSliceSetting };
 
+/** A single clipping event recorded during the session. */
+export interface ClipHistoryEntry {
+  id: string;
+  trackId: string;
+  trackName: string;
+  timestamp: number;
+}
+
 type Listener = () => void;
 
 const newId = () =>
@@ -107,6 +115,8 @@ class Store {
     } | null;
     /** Chop Lab panel state. */
     chopLab: ChopLabState;
+    /** Accumulated clip events for the session log. */
+    clipHistory: ClipHistoryEntry[];
   };
 
   constructor(project: Project) {
@@ -133,6 +143,7 @@ class Store {
       trackClipResetKey: 0,
       pendingSample: null,
       chopLab: { ...DEFAULT_CHOP_LAB },
+      clipHistory: [],
     };
   }
 
@@ -267,6 +278,22 @@ class Store {
 
   resetAllTrackClips() {
     this.set({ trackClipResetKey: this.state.trackClipResetKey + 1 });
+  }
+
+  /** Record a clip event for a track into the session history log. */
+  addClipEvent(trackId: string, trackName: string) {
+    const entry: ClipHistoryEntry = {
+      id: newId(),
+      trackId,
+      trackName,
+      timestamp: Date.now(),
+    };
+    this.set({ clipHistory: [...this.state.clipHistory, entry] });
+  }
+
+  /** Clear all accumulated clip history for this session. */
+  clearClipHistory() {
+    this.set({ clipHistory: [] });
   }
 
   setStatus(message: string | null, variant: "info" | "warn" | "error" | null = "info") {
