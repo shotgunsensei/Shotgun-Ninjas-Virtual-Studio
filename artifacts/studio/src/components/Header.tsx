@@ -191,16 +191,11 @@ export function Header() {
   });
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  type ExportRangeMode = "whole" | "loop" | "custom";
-  const [exportRangeMode, setExportRangeMode] = useState<ExportRangeMode>(
-    () => getSettings().exportRangeMode,
-  );
-  const [customStartBar, setCustomStartBar] = useState(
-    () => Math.max(1, Math.min(project.bars, getSettings().exportStartBar)),
-  );
-  const [customEndBar, setCustomEndBar] = useState(
-    () => Math.max(1, Math.min(project.bars, getSettings().exportEndBar)),
-  );
+  // Export range state lives in the store so the timeline drag-region and
+  // the Export dialog stay in sync automatically.
+  const exportRangeMode = useStore((s) => s.exportRangeMode);
+  const customStartBar = useStore((s) => s.exportStartBar);
+  const customEndBar = useStore((s) => s.exportEndBar);
 
   const exportEstimate = useMemo(() => {
     const SAMPLE_RATE = 44100;
@@ -257,7 +252,8 @@ export function Header() {
   const webShareSupported = canWebShare();
   const webShareFilesSupported = canWebShareFiles();
 
-  const startExport = async (format: ExportFormat) => {
+  const startExport = async (format: ExportFormat, options: { loopOnly?: boolean } = {}) => {
+    const { loopOnly = false } = options;
     if (exporting) return;
     audio.stop();
     setExportFormat(format);
@@ -333,7 +329,7 @@ export function Header() {
       setShareCardData({
         projectName: proj.name,
         bpm: proj.bpm,
-        genre: (proj as Record<string, unknown>).genre as string | undefined,
+        genre: (proj as any).genre as string | undefined,
         exportDate: new Date(),
       });
       setShareCardOpen(true);
@@ -547,7 +543,7 @@ export function Header() {
     getStore().setStatus(`Duplicated to “${dup.name}”`, "info");
   };
 
-  const onMidiExport = () => {
+  const onMidiExport = (options: RenderOptions = {}) => {
     try {
       const proj = getStore().state.project;
       const exportTracks = proj.tracks.filter((t) => t.kind !== "vocals");
@@ -555,8 +551,28 @@ export function Header() {
         getStore().setStatus("No exportable tracks for MIDI.", "warn");
         return;
       }
-      const startBeat = loopOnly && proj.loopEnabled ? proj.loopStartBeat : 0;
-      const endBeat = loopOnly && proj.loopEnabled ? proj.loopEndBeat : proj.bars * 4;
+
+      let startBeat: number;
+      let endBeat: number;
+      if (
+        options.customStartBeat !== undefined &&
+        options.customEndBeat !== undefined &&
+        options.customEndBeat > options.customStartBeat
+      ) {
+        startBeat = Math.max(0, options.customStartBeat);
+        endBeat = Math.min(proj.bars * 4, options.customEndBeat);
+      } else if (
+        options.loopOnly &&
+        proj.loopEnabled &&
+        proj.loopEndBeat > proj.loopStartBeat
+      ) {
+        startBeat = proj.loopStartBeat;
+        endBeat = proj.loopEndBeat;
+      } else {
+        startBeat = 0;
+        endBeat = proj.bars * 4;
+      }
+
       const bytes = encodeMidiFile(proj, exportTracks, { startBeat, endBeat });
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/midi" });
       const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
@@ -568,11 +584,31 @@ export function Header() {
     }
   };
 
-  const onMusicXmlExport = () => {
+  const onMusicXmlExport = (options: RenderOptions = {}) => {
     try {
       const proj = getStore().state.project;
-      const startBeat = loopOnly && proj.loopEnabled ? proj.loopStartBeat : 0;
-      const endBeat = loopOnly && proj.loopEnabled ? proj.loopEndBeat : proj.bars * 4;
+
+      let startBeat: number;
+      let endBeat: number;
+      if (
+        options.customStartBeat !== undefined &&
+        options.customEndBeat !== undefined &&
+        options.customEndBeat > options.customStartBeat
+      ) {
+        startBeat = Math.max(0, options.customStartBeat);
+        endBeat = Math.min(proj.bars * 4, options.customEndBeat);
+      } else if (
+        options.loopOnly &&
+        proj.loopEnabled &&
+        proj.loopEndBeat > proj.loopStartBeat
+      ) {
+        startBeat = proj.loopStartBeat;
+        endBeat = proj.loopEndBeat;
+      } else {
+        startBeat = 0;
+        endBeat = proj.bars * 4;
+      }
+
       const xml = encodeMusicXml(proj, { startBeat, endBeat });
       const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
       const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
@@ -584,7 +620,7 @@ export function Header() {
     }
   };
 
-  const onStemsExport = async () => {
+  const onStemsExport = async (options: RenderOptions = {}) => {
     if (stemsExporting || dawPackExporting) return;
     audio.stop();
     setStemsExporting(true);
@@ -592,7 +628,6 @@ export function Header() {
     setExportModalOpen(false);
     try {
       const proj = getStore().state.project;
-      const options = { loopOnly };
       const blob = await exportStemsZip(proj, options, (p) => setStemProgress(p));
       const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
       downloadBlob(blob, `${safe}_stems.zip`);
@@ -605,7 +640,7 @@ export function Header() {
     }
   };
 
-  const onDawPackExport = async () => {
+  const onDawPackExport = async (options: RenderOptions = {}) => {
     if (stemsExporting || dawPackExporting) return;
     audio.stop();
     setDawPackExporting(true);
@@ -613,9 +648,29 @@ export function Header() {
     setExportModalOpen(false);
     try {
       const proj = getStore().state.project;
-      const options = { loopOnly };
-      const startBeat = loopOnly && proj.loopEnabled ? proj.loopStartBeat : 0;
-      const endBeat = loopOnly && proj.loopEnabled ? proj.loopEndBeat : proj.bars * 4;
+
+      let startBeat: number;
+      let endBeat: number;
+      if (
+        options.customStartBeat !== undefined &&
+        options.customEndBeat !== undefined &&
+        options.customEndBeat > options.customStartBeat
+      ) {
+        startBeat = Math.max(0, options.customStartBeat);
+        endBeat = Math.min(proj.bars * 4, options.customEndBeat);
+      } else if (
+        options.loopOnly &&
+        proj.loopEnabled &&
+        proj.loopEndBeat > proj.loopStartBeat
+      ) {
+        startBeat = proj.loopStartBeat;
+        endBeat = proj.loopEndBeat;
+      } else {
+        startBeat = 0;
+        endBeat = proj.bars * 4;
+      }
+
+
       const projectJson = await projectToJson(proj, "project-only");
       const melodicTracks = proj.tracks.filter(
         (t) => t.kind !== "vocals" && t.noteClips.some((c) => c.notes.length > 0),
@@ -624,11 +679,11 @@ export function Header() {
         name: t.name,
         bytes: encodeSingleTrackMidi(proj, t, { startBeat, endBeat }),
       }));
-      const blob = await exportDawPack(proj, projectJson, midiFiles, options, (p) =>
+      const blob = await exportDawPack(proj, projectJson, midiFiles, { loopOnly: options.loopOnly }, (p) =>
         setDawPackProgress(p),
       );
       const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
-      downloadBlob(blob, `${safe}_daw_pack.zip`);
+      downloadBlob(blob, `${safe}_dawpack.zip`);
       getStore().setStatus("DAW Pack exported", "info");
     } catch (err) {
       getStore().setStatus(`DAW Pack export failed: ${(err as Error).message}`, "error");
@@ -1046,10 +1101,7 @@ export function Header() {
                     name="export-range"
                     value="whole"
                     checked={exportRangeMode === "whole"}
-                    onChange={() => {
-                      setExportRangeMode("whole");
-                      setSettings({ exportRangeMode: "whole" });
-                    }}
+                    onChange={() => getStore().setExportRangeMode("whole")}
                   />
                   Whole song ({project.bars} bars)
                 </label>
@@ -1060,10 +1112,7 @@ export function Header() {
                       name="export-range"
                       value="loop"
                       checked={exportRangeMode === "loop"}
-                      onChange={() => {
-                        setExportRangeMode("loop");
-                        setSettings({ exportRangeMode: "loop" });
-                      }}
+                      onChange={() => getStore().setExportRangeMode("loop")}
                     />
                     Loop region (bars {Math.floor(project.loopStartBeat / 4) + 1}–{Math.ceil(project.loopEndBeat / 4)})
                   </label>
@@ -1074,12 +1123,14 @@ export function Header() {
                     name="export-range"
                     value="custom"
                     checked={exportRangeMode === "custom"}
-                    onChange={() => {
-                      setExportRangeMode("custom");
-                      setSettings({ exportRangeMode: "custom" });
-                    }}
+                    onChange={() => getStore().setExportRangeMode("custom")}
                   />
                   Custom range
+                  {exportRangeMode !== "custom" && (
+                    <span className="text-[10px] text-muted-foreground/70">
+                      — or drag the Export strip on the timeline
+                    </span>
+                  )}
                 </label>
                 {exportRangeMode === "custom" && (
                   <div className="flex items-center gap-2 ml-5 mt-1">
@@ -1091,13 +1142,8 @@ export function Header() {
                       value={customStartBar}
                       onChange={(e) => {
                         const v = Math.max(1, Math.min(project.bars, Number(e.target.value)));
-                        setCustomStartBar(v);
-                        setSettings({ exportStartBar: v });
-                        if (v >= customEndBar) {
-                          const newEnd = Math.min(project.bars, v + 1);
-                          setCustomEndBar(newEnd);
-                          setSettings({ exportEndBar: newEnd });
-                        }
+                        const end = v >= customEndBar ? Math.min(project.bars, v + 1) : customEndBar;
+                        getStore().setExportRangeBars(v, end);
                       }}
                       className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
                       data-testid="export-custom-start-bar"
@@ -1110,13 +1156,8 @@ export function Header() {
                       value={customEndBar}
                       onChange={(e) => {
                         const v = Math.max(1, Math.min(project.bars, Number(e.target.value)));
-                        setCustomEndBar(v);
-                        setSettings({ exportEndBar: v });
-                        if (v <= customStartBar) {
-                          const newStart = Math.max(1, v - 1);
-                          setCustomStartBar(newStart);
-                          setSettings({ exportStartBar: newStart });
-                        }
+                        const start = v <= customStartBar ? Math.max(1, v - 1) : customStartBar;
+                        getStore().setExportRangeBars(start, v);
                       }}
                       className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
                       data-testid="export-custom-end-bar"
@@ -1177,7 +1218,7 @@ export function Header() {
                 <button
                   type="button"
                   data-testid="export-wav"
-                  onClick={() => startExport("wav")}
+                  onClick={() => startExport("wav", { loopOnly: false })}
                   className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                 >
                   <div className="font-mono text-sm">Export audio (WAV)</div>
@@ -1188,7 +1229,7 @@ export function Header() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => startExport("mp3")}
+                  onClick={() => startExport("mp3", { loopOnly: false })}
                   className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                 >
                   <div className="font-mono text-sm">Export MP3</div>
@@ -1204,7 +1245,7 @@ export function Header() {
                 </div>
                 <button
                   type="button"
-                  onClick={onDawPackExport}
+                  onClick={() => onDawPackExport({ loopOnly: false })}
                   className="w-full text-left border border-primary/50 rounded-md p-3 bg-primary/5 hover:bg-primary/10 transition-colors"
                 >
                   <div className="font-mono text-sm flex items-center gap-1 text-primary">
@@ -1217,7 +1258,7 @@ export function Header() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={onMidiExport}
+                    onClick={() => onMidiExport({ loopOnly: false })}
                     className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                   >
                     <div className="font-mono text-sm">Export MIDI</div>
@@ -1227,7 +1268,7 @@ export function Header() {
                   </button>
                   <button
                     type="button"
-                    onClick={onStemsExport}
+                    onClick={() => onStemsExport({ loopOnly: false })}
                     className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                   >
                     <div className="font-mono text-sm">Export Stems (ZIP)</div>
@@ -1238,7 +1279,7 @@ export function Header() {
                   {hasMelodicTracks(project) && (
                     <button
                       type="button"
-                      onClick={onMusicXmlExport}
+                      onClick={() => onMusicXmlExport({ loopOnly: false })}
                       className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                     >
                       <div className="font-mono text-sm">Export MusicXML</div>

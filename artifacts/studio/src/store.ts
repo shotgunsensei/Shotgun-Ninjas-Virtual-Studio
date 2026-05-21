@@ -117,6 +117,11 @@ class Store {
     chopLab: ChopLabState;
     /** Accumulated clip events for the session log. */
     clipHistory: ClipHistoryEntry[];
+    /** Export range — shared between the timeline drag-region and the
+     *  Export dialog so both stay in sync without prop drilling. */
+    exportRangeMode: "whole" | "loop" | "custom";
+    exportStartBar: number;
+    exportEndBar: number;
   };
 
   constructor(project: Project) {
@@ -144,6 +149,9 @@ class Store {
       pendingSample: null,
       chopLab: { ...DEFAULT_CHOP_LAB },
       clipHistory: [],
+      exportRangeMode: "whole",
+      exportStartBar: 1,
+      exportEndBar: project.bars,
     };
   }
 
@@ -294,6 +302,28 @@ class Store {
   /** Clear all accumulated clip history for this session. */
   clearClipHistory() {
     this.set({ clipHistory: [] });
+  }
+
+  /** Set the export region to a bar range and switch to "custom" mode. */
+  setExportRange(startBar: number, endBar: number) {
+    const bars = this.state.project.bars;
+    const s = Math.max(1, Math.min(bars, startBar));
+    const e = Math.max(s + 1, Math.min(bars, endBar));
+    this.set({ exportRangeMode: "custom", exportStartBar: s, exportEndBar: e });
+  }
+
+  /** Switch export range mode (whole / loop / custom). */
+  setExportRangeMode(mode: "whole" | "loop" | "custom") {
+    this.set({ exportRangeMode: mode });
+  }
+
+  /** Update the custom start/end bars without switching mode. */
+  setExportRangeBars(startBar: number, endBar: number) {
+    const bars = this.state.project.bars;
+    const s = Math.max(1, Math.min(bars, startBar));
+    const e = Math.max(s + 1, Math.min(bars, endBar));
+    this.set({ exportStartBar: s, exportEndBar: e });
+  }
   }
 
   setStatus(message: string | null, variant: "info" | "warn" | "error" | null = "info") {

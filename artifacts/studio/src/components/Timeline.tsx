@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { Flag, MoreVertical, Plus, X } from "lucide-react";
+import { Download, Flag, MoreVertical, Plus, X } from "lucide-react";
 import { useStore, getStore, canDropClipOnTrack } from "../store";
 import { audio } from "../lib/audio/engine";
 import type { Section, Track } from "../types";
@@ -72,6 +72,9 @@ export function Timeline() {
   const loopEndBeat = useStore((s) => s.project.loopEndBeat);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const selectedClipId = useStore((s) => s.selectedClipId);
+  const exportRangeMode = useStore((s) => s.exportRangeMode);
+  const exportStartBar = useStore((s) => s.exportStartBar);
+  const exportEndBar = useStore((s) => s.exportEndBar);
 
   const totalBeats = bars * 4;
   const width = totalBeats * PX_PER_BEAT;
@@ -159,6 +162,15 @@ export function Timeline() {
           </div>
         </div>
 
+        {/* export region strip (h-5 = 20px) — dedicated drag zone below the ruler */}
+        <ExportRegionStrip
+          bars={bars}
+          totalBeats={totalBeats}
+          exportRangeMode={exportRangeMode}
+          exportStartBar={exportStartBar}
+          exportEndBar={exportEndBar}
+        />
+
         {/* tracks */}
         <div>
           {tracks.map((t) => (
@@ -178,10 +190,24 @@ export function Timeline() {
             className="absolute left-0 right-0 bg-neon/10 border-l border-r border-neon/40 pointer-events-none"
             data-testid="loop-region-overlay"
             style={{
-              top: 56,
+              top: 76,
               bottom: 0,
               left: loopStartBeat * PX_PER_BEAT,
               width: (loopEndBeat - loopStartBeat) * PX_PER_BEAT,
+            }}
+          />
+        )}
+
+        {/* export region overlay across track lanes — visible only in custom mode */}
+        {exportRangeMode === "custom" && (
+          <div
+            className="absolute left-0 right-0 bg-amber-500/10 border-l border-r border-amber-500/40 pointer-events-none"
+            data-testid="export-region-overlay"
+            style={{
+              top: 76,
+              bottom: 0,
+              left: (exportStartBar - 1) * 4 * PX_PER_BEAT,
+              width: (exportEndBar - exportStartBar + 1) * 4 * PX_PER_BEAT,
             }}
           />
         )}
@@ -312,6 +338,166 @@ function RulerLoopOverlay({
                 0,
                 (loopEndBeat - loopStartBeat) * PX_PER_BEAT - 8,
               ),
+            }}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Thin strip rendered below the ruler. It shows the current export range
+ * as an amber region and lets the user drag to set a custom export range.
+ * Dragging anywhere on the strip switches the export dialog to "custom" mode.
+ */
+function ExportRegionStrip({
+  bars,
+  totalBeats,
+  exportRangeMode,
+  exportStartBar,
+  exportEndBar,
+}: {
+  bars: number;
+  totalBeats: number;
+  exportRangeMode: "whole" | "loop" | "custom";
+  exportStartBar: number;
+  exportEndBar: number;
+}) {
+  const width = totalBeats * PX_PER_BEAT;
+  const isCustom = exportRangeMode === "custom";
+
+  const startBeat = (exportStartBar - 1) * 4;
+  const endBeat = exportEndBar * 4;
+
+  const beginHandleDrag = (mode: "start" | "end" | "move") => (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const origStartBeat = startBeat;
+    const origEndBeat = endBeat;
+    const snapToBar = (b: number) =>
+      Math.max(0, Math.min(totalBeats, Math.round(b / 4) * 4));
+    const onMove = (ev: MouseEvent) => {
+      const dxBeats = (ev.clientX - startX) / PX_PER_BEAT;
+      if (mode === "start") {
+        const newS = snapToBar(origStartBeat + dxBeats);
+        const newStartBar = Math.floor(newS / 4) + 1;
+        const newEndBar = Math.ceil(origEndBeat / 4);
+        if (newStartBar < newEndBar) getStore().setExportRange(newStartBar, newEndBar);
+      } else if (mode === "end") {
+        const newE = snapToBar(origEndBeat + dxBeats);
+        const newStartBar = Math.floor(origStartBeat / 4) + 1;
+        const newEndBar = Math.ceil(newE / 4);
+        if (newEndBar > newStartBar) getStore().setExportRange(newStartBar, newEndBar);
+      } else {
+        const rangeBeats = origEndBeat - origStartBeat;
+        let newS = snapToBar(origStartBeat + dxBeats);
+        newS = Math.max(0, Math.min(totalBeats - rangeBeats, newS));
+        const newStartBar = Math.floor(newS / 4) + 1;
+        const newEndBar = Math.ceil((newS + rangeBeats) / 4);
+        getStore().setExportRange(newStartBar, newEndBar);
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  // Drag on empty strip area to draw a new export region
+  const onStripMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("[data-export-handle]")) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const startPx = e.clientX - rect.left;
+    const startBeatRaw = Math.max(0, Math.min(totalBeats, Math.round(startPx / PX_PER_BEAT / 4) * 4));
+    const anchorBar = Math.floor(startBeatRaw / 4) + 1;
+    getStore().setExportRange(anchorBar, Math.min(bars, anchorBar + 1));
+
+    const onMove = (ev: MouseEvent) => {
+      const px = ev.clientX - rect.left;
+      const beat = Math.max(0, Math.min(totalBeats, Math.round(px / PX_PER_BEAT / 4) * 4));
+      const barAt = Math.ceil(beat / 4);
+      if (barAt > anchorBar) {
+        getStore().setExportRange(anchorBar, barAt);
+      } else if (barAt < anchorBar) {
+        getStore().setExportRange(Math.max(1, barAt), anchorBar);
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  return (
+    <div
+      className="h-5 sticky top-14 z-[9] bg-graphite/90 border-b border-border/50 relative cursor-crosshair select-none"
+      style={{ width }}
+      onMouseDown={onStripMouseDown}
+      data-testid="export-region-strip"
+      title="Drag to set export range · handles to adjust · opens Export dialog on click"
+    >
+      {/* label */}
+      <div className="absolute left-1 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
+        <Download className="w-2.5 h-2.5 text-muted-foreground/60" />
+        <span className="font-mono text-[8px] uppercase tracking-widest text-muted-foreground/60">
+          Export
+        </span>
+      </div>
+
+      {/* export region fill + handles */}
+      {isCustom && (
+        <>
+          {/* filled region */}
+          <div
+            className="absolute top-0 bottom-0 bg-amber-500/25 border-l-2 border-r-2 border-amber-500/70"
+            style={{
+              left: startBeat * PX_PER_BEAT,
+              width: Math.max(0, (endBeat - startBeat) * PX_PER_BEAT),
+            }}
+          >
+            {/* centre label */}
+            <span className="absolute inset-0 flex items-center justify-center font-mono text-[8px] uppercase tracking-widest text-amber-400/80 pointer-events-none select-none overflow-hidden whitespace-nowrap">
+              {exportEndBar - exportStartBar + 1 > 0
+                ? `${exportStartBar}–${exportEndBar}`
+                : ""}
+            </span>
+          </div>
+
+          {/* start handle */}
+          <div
+            data-export-handle="start"
+            onMouseDown={beginHandleDrag("start")}
+            aria-label="Export region start handle"
+            className="absolute top-0 bottom-0 w-2.5 -ml-1 cursor-ew-resize bg-amber-500/70 hover:bg-amber-400 z-10"
+            style={{ left: startBeat * PX_PER_BEAT }}
+          />
+
+          {/* end handle */}
+          <div
+            data-export-handle="end"
+            onMouseDown={beginHandleDrag("end")}
+            aria-label="Export region end handle"
+            className="absolute top-0 bottom-0 w-2.5 -ml-1 cursor-ew-resize bg-amber-500/70 hover:bg-amber-400 z-10"
+            style={{ left: endBeat * PX_PER_BEAT }}
+          />
+
+          {/* body move handle */}
+          <div
+            data-export-handle="move"
+            onMouseDown={beginHandleDrag("move")}
+            aria-label="Move export region"
+            className="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-[9]"
+            style={{
+              left: startBeat * PX_PER_BEAT + 6,
+              width: Math.max(0, (endBeat - startBeat) * PX_PER_BEAT - 12),
             }}
           />
         </>
