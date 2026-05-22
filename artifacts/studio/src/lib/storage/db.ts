@@ -63,6 +63,18 @@ export interface LastSavedInfo {
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 
+// ── blob fingerprint cache ────────────────────────────────────────────────
+// Tracks which blob keys have already been written to IDB in this session
+// (key → "size:type:lastModified"). If the fingerprint has not changed
+// we skip the IDB put, avoiding redundant re-serialization of large audio
+// blobs on every autosave tick when nothing has changed.
+const blobFpCache = new Map<string, string>();
+
+function blobFingerprint(blob: Blob): string {
+  const lm = (blob as unknown as { lastModified?: number }).lastModified ?? 0;
+  return `${blob.size}:${blob.type}:${lm}`;
+}
+
 function getDb() {
   if (!dbPromise) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
@@ -106,7 +118,11 @@ async function serializeAndFlushBlobs(
   const serializedSamples = await Promise.all(
     (project.samples ?? []).map(async (s) => {
       if (s.blob) {
-        await blobs.put(s.blob, s.blobKey);
+        const fp = blobFingerprint(s.blob);
+        if (blobFpCache.get(s.blobKey) !== fp) {
+          await blobs.put(s.blob, s.blobKey);
+          blobFpCache.set(s.blobKey, fp);
+        }
       }
       return {
         id: s.id,
@@ -122,7 +138,11 @@ async function serializeAndFlushBlobs(
   if (project.chopLab) {
     const cl = project.chopLab;
     if (cl.sampleBlob && cl.sampleBlobKey) {
-      await blobs.put(cl.sampleBlob, cl.sampleBlobKey);
+      const fp = blobFingerprint(cl.sampleBlob);
+      if (blobFpCache.get(cl.sampleBlobKey) !== fp) {
+        await blobs.put(cl.sampleBlob, cl.sampleBlobKey);
+        blobFpCache.set(cl.sampleBlobKey, fp);
+      }
     }
     // Strip the in-memory blob from the serialized form.
     const { sampleBlob: _sb, ...clRest } = cl;
@@ -146,7 +166,11 @@ async function serializeAndFlushBlobs(
               blobKey = `${project.id}:${t.id}:${c.id}`;
             }
             if (c.blob && blobKey) {
-              await blobs.put(c.blob, blobKey);
+              const fp = blobFingerprint(c.blob);
+              if (blobFpCache.get(blobKey) !== fp) {
+                await blobs.put(c.blob, blobKey);
+                blobFpCache.set(blobKey, fp);
+              }
             }
             return {
               id: c.id,

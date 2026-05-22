@@ -525,7 +525,17 @@ class AudioEngine {
 
   setMetronome(on: boolean) {
     this.metronomeEnabled = on;
-    if (on && this.metronomeId === null) {
+    if (!on) {
+      // Explicitly remove the repeating Transport event so it stops consuming
+      // scheduling CPU instead of just being silenced by the boolean guard.
+      if (this.metronomeId !== null) {
+        try { Tone.getTransport().clear(this.metronomeId); } catch { /* ignore */ }
+        this.metronomeId = null;
+      }
+      return;
+    }
+    if (this.metronomeId !== null) return; // already scheduled — don't stack
+    {
       let beat = 0;
       this.metronomeId = Tone.getTransport().scheduleRepeat((time) => {
         if (!this.metronomeEnabled) return;

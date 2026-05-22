@@ -269,6 +269,9 @@ export class MasterChain {
   private startClipWatcher() {
     if (typeof window === "undefined") return;
     const tick = () => {
+      // Skip when tab is hidden — the user cannot observe a clip indicator
+      // in a hidden tab, so there is no value in burning CPU for it.
+      if (document.hidden) return;
       const peak = this.peakMeter.getValue();
       const p = typeof peak === "number" ? peak : Math.max(peak[0] ?? -Infinity, peak[1] ?? -Infinity);
       if (p > -0.1) this.clipped = true;

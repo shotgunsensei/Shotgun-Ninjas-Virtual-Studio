@@ -837,7 +837,7 @@ function Studio() {
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
       draftTimerRef.current = window.setTimeout(() => {
         saveDraft(next).catch(() => { /* ignore quota / serialization errors */ });
-      }, 800);
+      }, 4000);
     });
   }, []);
 

@@ -25,6 +25,17 @@ const SAMPLE_RATE = 44100;
 const CHANNELS = 2;
 const TAIL_SEC = 2;
 
+// ── export concurrency guard ─────────────────────────────────────────────
+// Prevents a second export from launching while one is already rendering.
+// The OfflineAudioContext render is CPU-intensive; stacking two would cause
+// severe main-thread jank and likely page-unresponsive errors.
+let _exportInProgress = false;
+
+/** True while a renderProject call is still pending. */
+export function isExportInProgress(): boolean {
+  return _exportInProgress;
+}
+
 export type RenderPhase = "decoding" | "rendering" | "encoding";
 export interface RenderProgress {
   phase: RenderPhase;
@@ -69,6 +80,25 @@ export interface RenderOptions {
 }
 
 export async function renderProject(
+  project: Project,
+  format: ExportFormat,
+  onProgress?: (p: RenderProgress) => void,
+  options: RenderOptions = {},
+): Promise<ExportResult> {
+  if (_exportInProgress) {
+    throw new Error(
+      "An export is already in progress. Please wait for it to complete before starting another.",
+    );
+  }
+  _exportInProgress = true;
+  try {
+    return await _renderProjectInner(project, format, onProgress, options);
+  } finally {
+    _exportInProgress = false;
+  }
+}
+
+async function _renderProjectInner(
   project: Project,
   format: ExportFormat,
   onProgress?: (p: RenderProgress) => void,
@@ -129,20 +159,39 @@ export async function renderProject(
 
 async function decodeAudioClips(project: Project): Promise<Map<string, AudioBuffer>> {
   const out = new Map<string, AudioBuffer>();
-  const hasAny = project.tracks.some((t) => t.audioClips.some((c) => !!c.blob));
-  if (!hasAny) return out;
+
+  // Collect all clips that need decoding up-front.
+  const pending: Array<{ clipId: string; blob: Blob }> = [];
+  for (const t of project.tracks) {
+    for (const c of t.audioClips) {
+      if (c.blob) pending.push({ clipId: c.id, blob: c.blob });
+    }
+  }
+  if (pending.length === 0) return out;
+
   const ac = new AudioContext();
   try {
-    for (const t of project.tracks) {
-      for (const c of t.audioClips) {
-        if (!c.blob) continue;
-        try {
-          const ab = await c.blob.arrayBuffer();
-          const decoded = await ac.decodeAudioData(ab.slice(0));
-          out.set(c.id, decoded);
-        } catch {
-          // skip undecodable clip
-        }
+    // Decode in batches of 4 to prevent simultaneous decodeAudioData calls
+    // from spiking memory/CPU and triggering page-unresponsive warnings on
+    // projects with many large audio clips.
+    const BATCH = 4;
+    for (let i = 0; i < pending.length; i += BATCH) {
+      const batch = pending.slice(i, i + BATCH);
+      await Promise.all(
+        batch.map(async ({ clipId, blob }) => {
+          try {
+            const ab = await blob.arrayBuffer();
+            const decoded = await ac.decodeAudioData(ab.slice(0));
+            out.set(clipId, decoded);
+          } catch {
+            // skip undecodable clip — continue export without it
+          }
+        }),
+      );
+      // Yield to the UI thread between batches so progress indicators
+      // can update and the page remains interactive during long exports.
+      if (i + BATCH < pending.length) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     }
   } finally {

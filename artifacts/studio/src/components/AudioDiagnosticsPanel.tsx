@@ -201,14 +201,22 @@ export function AudioDiagnosticsPanel({
   const rafRef = useRef<number>(0);
   const oversampleOn = useStore((s) => !!(s.project.masterBus?.oversample));
 
-  // rAF dropped-frame monitor — runs independently
+  // rAF dropped-frame monitor — runs independently.
+  // Uses document.hidden guard so tab-backgrounding doesn't falsely inflate
+  // the dropped-frame counter or waste CPU when invisible.
   useEffect(() => {
     let running = true;
     const tick = (ts: number) => {
       if (!running) return;
-      const last = lastRafTsRef.current;
-      if (last !== null && ts - last > 33) droppedFramesRef.current++;
-      lastRafTsRef.current = ts;
+      if (!document.hidden) {
+        const last = lastRafTsRef.current;
+        if (last !== null && ts - last > 33) droppedFramesRef.current++;
+        lastRafTsRef.current = ts;
+      } else {
+        // Reset timestamp on returning from hidden so the first visible frame
+        // is not counted as a dropped frame.
+        lastRafTsRef.current = null;
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);

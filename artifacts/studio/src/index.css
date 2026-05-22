@@ -625,3 +625,41 @@ html.studio-reduce-motion .studio-clip-led {
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(0 0% 24%);
 }
+
+/* ── Performance Mode (body[data-perf="true"]) ─────────────────────────────
+   Strips expensive GPU-compositing effects (box-shadow glows, particle
+   animations) when the user enables Performance Mode in Settings → UI.
+   These rules never affect layout — geometry is unchanged.
+   ──────────────────────────────────────────────────────────────────────── */
+
+body[data-perf="true"] .glow-red,
+body[data-perf="true"] .glow-neon {
+  box-shadow: none;
+}
+
+body[data-perf="true"] .panel-glow::before {
+  box-shadow: none;
+  opacity: 0;
+}
+
+body[data-perf="true"] .studio-clip-led {
+  animation: none;
+}
+
+/* Suppress all CSS particle / FX animations in performance mode */
+body[data-perf="true"] .studio-spark,
+body[data-perf="true"] .studio-rain-drop,
+body[data-perf="true"] .studio-smoke-drift,
+body[data-perf="true"] .studio-circuit-node,
+body[data-perf="true"] .studio-pixel-blink,
+body[data-perf="true"] .studio-crt-flicker,
+body[data-perf="true"] .studio-shuriken,
+body[data-perf="true"] .studio-twinkle {
+  animation: none;
+  opacity: 0;
+}
+
+/* Suppress the master bus pulse LED in performance mode */
+body[data-perf="true"] .master-pulse-active {
+  animation: none;
+}

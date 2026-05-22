@@ -222,6 +222,12 @@ export function SettingsModal({
               value={s.reduceAnimations}
               onChange={(v) => setSettings({ reduceAnimations: v })}
             />
+            <ToggleRow
+              label="Performance mode"
+              hint="Reduces meter update rate to 15 fps, hides background particle effects, and strips expensive CSS glows. Recommended on older or lower-powered devices."
+              value={s.performanceMode}
+              onChange={(v) => setSettings({ performanceMode: v })}
+            />
             <SelectRow
               label="Default workspace view"
               value={s.defaultWorkspaceView}

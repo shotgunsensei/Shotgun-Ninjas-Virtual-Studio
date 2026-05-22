@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { applyTheme, type ThemeId } from "./themes";
+import { visualTicker } from "./visualTicker";
 
 /**
  * Studio-wide user settings. Persisted to localStorage under a single
@@ -76,6 +77,10 @@ export interface StudioSettings {
   // Phase 16: Accessibility & Learning Mode
   colorblindSafeMeters: boolean;
   uiMode: UIMode;
+
+  // Performance Stabilization Pass
+  /** When true: reduces meter FPS, disables background FX, strips CSS glows. */
+  performanceMode: boolean;
 }
 
 export const DEFAULT_SETTINGS: StudioSettings = {
@@ -114,6 +119,8 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   backupReminderSessions: 5,
   colorblindSafeMeters: false,
   uiMode: "expert",
+
+  performanceMode: false,
 };
 
 const STORAGE_KEY = "studio.settings.v1";
@@ -209,6 +216,11 @@ export function applySideEffects(s: StudioSettings = state) {
   // data-ui-mode: beginner / expert
   root.dataset.uiMode = s.uiMode ?? "expert";
   root.dataset.workspaceView = s.defaultWorkspaceView;
+  // Performance Mode: data-perf="true" activates CSS overrides that strip
+  // expensive box-shadow, blur, and glow effects from dense grids.
+  document.body.dataset.perf = s.performanceMode ? "true" : "";
+  // Throttle the shared visual ticker to 15 fps in performance mode.
+  visualTicker.setFpsCap(s.performanceMode ? 15 : 25);
 }
 
 // Apply once at module-load so the first paint already reflects the

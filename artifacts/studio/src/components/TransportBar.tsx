@@ -19,6 +19,7 @@ import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
 import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
 import { useGamepad } from "../lib/performance/gamepad";
 import { AudioDiagnosticsPanel } from "./AudioDiagnosticsPanel";
+import { visualTicker } from "../lib/visualTicker";
 
 export function TransportBar() {
   const bpm = useStore((s) => s.project.bpm);
@@ -326,7 +327,7 @@ function PositionReadout({ isPlaying }: { isPlaying: boolean }) {
     let raf = 0;
     let last = 0;
     const tick = (ts: number) => {
-      if (ts - last > 60) {
+      if (ts - last > 60 && !document.hidden) {
         last = ts;
         if (spanRef.current) {
           const beats = audio.positionBeats();
@@ -364,13 +365,14 @@ function MasterClipBadge() {
   const [clipped, setClipped] = useState(false);
   const lastWarnRef = useRef(0);
   useEffect(() => {
-    let raf = 0;
-    const tick = () => {
+    // Use the shared visualTicker so this loop pauses automatically when the
+    // tab is hidden and shares one rAF with all other meters.
+    return visualTicker.subscribe(() => {
       const lv = audio.getMasterLevels().peakDb;
       const peak = Math.max(lv[0], lv[1]);
       if (peak >= -0.1 && Number.isFinite(peak)) {
         setClipped(true);
-        // Surface a toast at most once every 5s so the user notices
+        // Surface a toast at most once every 5 s so the user notices
         // without getting spammed during a long loud section.
         const now = performance.now();
         if (now - lastWarnRef.current > 5000) {
@@ -381,10 +383,7 @@ function MasterClipBadge() {
           );
         }
       }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    });
   }, []);
   if (!clipped) return null;
   return (
