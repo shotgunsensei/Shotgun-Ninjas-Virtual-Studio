@@ -201,10 +201,15 @@ export function AudioDiagnosticsPanel({
   const rafRef = useRef<number>(0);
   const oversampleOn = useStore((s) => !!(s.project.masterBus?.oversample));
 
-  // rAF dropped-frame monitor — runs independently.
-  // Uses document.hidden guard so tab-backgrounding doesn't falsely inflate
-  // the dropped-frame counter or waste CPU when invisible.
+  // rAF dropped-frame monitor — only runs while the panel is open.
+  // Gated on `open` so no rAF loop is active when the panel is closed;
+  // also guarded by document.hidden so tab-backgrounding doesn't falsely
+  // inflate the counter or waste CPU when invisible.
   useEffect(() => {
+    if (!open) {
+      lastRafTsRef.current = null;
+      return;
+    }
     let running = true;
     const tick = (ts: number) => {
       if (!running) return;
@@ -224,7 +229,7 @@ export function AudioDiagnosticsPanel({
       running = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [open]);
 
   // 4 Hz polling loop
   useEffect(() => {

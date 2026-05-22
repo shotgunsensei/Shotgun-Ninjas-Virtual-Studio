@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import * as Tone from "tone";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Header } from "./components/Header";
 import { StudioFooter } from "./components/Footer";
@@ -836,8 +837,12 @@ function Studio() {
       dirtyRef.current = true;
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
       draftTimerRef.current = window.setTimeout(() => {
-        saveDraft(next).catch(() => { /* ignore quota / serialization errors */ });
-      }, 4000);
+        // Skip serialization during active playback — IDB writes compete with
+        // audio scheduling and can cause xrun/jitter on slower devices.
+        // The next store change after playback stops will reschedule this.
+        if (Tone.getTransport().state === "started") return;
+        saveDraft(projectRef.current).catch(() => { /* ignore quota / serialization errors */ });
+      }, 8000);
     });
   }, []);
 

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useWorld } from "../contexts/WorldContext";
+import { useSettings } from "../lib/settings";
 
 /**
  * Atmospheric backdrop layer. Branches on the active Studio World's
@@ -8,10 +9,19 @@ import { useWorld } from "../contexts/WorldContext";
  * All animations are gated on `prefers-reduced-motion: no-preference` in the
  * stylesheet and the existing `studio-reduce-motion` toggle, so users with
  * motion sensitivity see a calm, static backdrop.
+ *
+ * When Performance Mode is active the entire layer is unmounted — this removes
+ * all particle DOM nodes and stops their CSS animations rather than merely
+ * hiding them, which is more effective than CSS `opacity:0` for reducing
+ * compositing pressure.
  */
 export function BackgroundFx() {
   const { activeWorld } = useWorld();
+  const performanceMode = useSettings((s) => s.performanceMode);
   const variant = activeWorld.visualizerVariant;
+
+  // Unmount completely in Performance Mode to remove animated DOM nodes.
+  if (performanceMode) return null;
 
   return (
     <div

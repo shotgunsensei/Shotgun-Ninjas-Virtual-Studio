@@ -324,23 +324,17 @@ function PositionReadout({ isPlaying }: { isPlaying: boolean }) {
   const spanRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!isPlaying) return;
-    let raf = 0;
-    let last = 0;
-    const tick = (ts: number) => {
-      if (ts - last > 60 && !document.hidden) {
-        last = ts;
-        if (spanRef.current) {
-          const beats = audio.positionBeats();
-          const bar = Math.floor(beats / 4) + 1;
-          const beat = Math.floor(beats % 4) + 1;
-          const step = Math.floor((beats * 4) % 4) + 1;
-          spanRef.current.textContent = `${bar}.${beat}.${step}`;
-        }
+    // Use the shared visualTicker so this loop pauses automatically when the
+    // tab is hidden and shares one rAF with all other subscribers.
+    return visualTicker.subscribe(() => {
+      if (spanRef.current) {
+        const beats = audio.positionBeats();
+        const bar = Math.floor(beats / 4) + 1;
+        const beat = Math.floor(beats % 4) + 1;
+        const step = Math.floor((beats * 4) % 4) + 1;
+        spanRef.current.textContent = `${bar}.${beat}.${step}`;
       }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    });
   }, [isPlaying]);
   return (
     <Tip label="Bar . beat . sixteenth (musical position)">
