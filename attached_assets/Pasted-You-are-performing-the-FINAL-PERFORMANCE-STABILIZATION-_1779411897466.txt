@@ -1,0 +1,565 @@
+You are performing the FINAL PERFORMANCE STABILIZATION PASS for Shotgun Ninjas Virtual Studio.
+
+Current problem:
+The application has become laggy, high-latency, and sometimes causes page unresponsive errors after recent DAW feature upgrades. Stop adding new creative features. This pass is strictly for deep code audit, performance profiling, latency reduction, memory leak elimination, audio stability, render optimization, and app responsiveness.
+
+Critical instruction:
+DO NOT ADD NEW FEATURES.
+DO NOT REDESIGN THE UI.
+DO NOT REWRITE THE APP FROM SCRATCH.
+DO NOT HIDE THE PROBLEM WITH SPINNERS OR TIMEOUTS.
+DO NOT DISABLE major existing features unless absolutely necessary and documented.
+
+Your job is to inspect the codebase with a fine-tooth comb, identify the true causes of lag/page unresponsive behavior, and fix them surgically.
+
+Primary goals:
+1. Eliminate page unresponsive errors.
+2. Reduce audio latency and playback stutter.
+3. Stop runaway React re-renders.
+4. Stop memory leaks from audio nodes, event listeners, timers, animation loops, waveform instances, and scheduled Tone.js events.
+5. Reduce CPU usage during playback.
+6. Reduce main-thread blocking during project load, sample import, waveform rendering, export, and visualizer updates.
+7. Make the app stable enough to use for long sessions.
+
+Business rule:
+Shotgun Ninjas Virtual Studio remains a free product. Do not add Stripe, subscriptions, paid tiers, account gates, ads, artificial limits, or upgrade prompts.
+
+A. Create a Performance Audit Document First
+
+Before changing code, create:
+
+PERFORMANCE_AUDIT.md
+
+Include these sections:
+
+1. Current architecture summary
+   - Audio engine files
+   - Tone.js usage
+   - Web Audio usage
+   - React state management
+   - Mixer components
+   - Sequencer components
+   - Arrangement components
+   - Visualizer/meter components
+   - Sample import/waveform components
+   - Project storage components
+   - PWA/service worker components
+
+2. Reproduction steps
+   Document how to reproduce lag:
+   - app load
+   - enable audio
+   - load demo project
+   - start playback
+   - open mixer
+   - open visualizer
+   - import sample
+   - save/load project
+   - export WAV/JSON
+   - leave playback running for 5-10 minutes
+
+3. Suspected bottlenecks
+   For each suspected bottleneck, list:
+   - file/component
+   - symptom
+   - likely cause
+   - fix plan
+   - risk level
+
+4. Confirmed fixes
+   Update this as fixes are completed.
+
+5. Remaining limitations
+   Be honest. If something still needs future work, document it.
+
+B. Mandatory Profiling and Measurement
+
+Run the app locally and inspect performance before making major changes.
+
+Use available tooling:
+- browser devtools performance profiling
+- React Profiler if available
+- console instrumentation
+- memory snapshots if practical
+- build analysis if practical
+- manual timing logs around expensive functions
+
+Create lightweight internal performance marks using performance.mark() and performance.measure() around:
+- app startup
+- audio engine initialization
+- demo project load
+- project save
+- project restore
+- sample import
+- waveform generation
+- WAV export
+- sequencer playback start
+- mixer render
+- visualizer render
+- IndexedDB read/write operations
+
+Add a development-only diagnostics helper if needed:
+src/utils/performanceDiagnostics.ts
+
+Do not spam production console logs. Gate logs behind:
+import.meta.env.DEV
+or equivalent.
+
+C. Production Build Reality Check
+
+Make sure performance is tested against a production build, not only the dev server.
+
+Tasks:
+1. Run npm run build.
+2. Fix build errors.
+3. Run production preview if available.
+4. Compare dev vs production behavior.
+5. Document whether lag exists in both.
+
+If the app is only laggy in development due to StrictMode or dev tooling, document that, but still fix real inefficient code.
+
+D. React Render Audit
+
+Find and fix excessive re-renders.
+
+Inspect:
+- Studio root component
+- Transport component
+- Mixer
+- Sequencer grid
+- Piano roll
+- Arrangement timeline
+- Visualizer
+- Meters
+- Sample browser
+- Project browser
+- Inspector panel
+- Settings modal
+- Any context providers
+
+Common problems to find:
+- transport position stored in global React state updating too often
+- meter values updating React state every animation frame
+- visualizer data triggering whole-app re-renders
+- large project object passed through context causing every child to re-render
+- inline objects/functions causing memoized children to re-render
+- arrays rebuilt every tick
+- useEffect dependencies causing loops
+- timers or animation frames not cleaned up
+- state updates during render
+- parent component storing too much rapidly-changing state
+- sequencer cells all re-rendering every step
+
+Required fixes:
+- Keep high-frequency audio timing out of React state.
+- Use refs for fast-changing transport/playhead/meter internals.
+- Throttle UI updates for meters/playhead.
+- Use React.memo on expensive child components.
+- Use useMemo/useCallback only where it prevents real expensive rerenders.
+- Split large context into smaller contexts or stores.
+- Ensure sequencer step playback does not rerender the entire app.
+- Ensure visual meters update at controlled FPS, not unlimited.
+- Prevent panels not visible from rendering heavy content.
+- Lazy-load heavy panels if practical.
+
+Target:
+- During playback, React should not rerender the entire studio every tick.
+- Mixer meters should not force mixer controls to rerender.
+- Playhead animation should not force arrangement clips to rerender.
+- Sequencer active-step highlight should be isolated.
+
+E. Audio Engine and Tone.js Audit
+
+Inspect all Tone.js and Web Audio usage.
+
+Find:
+- multiple AudioContexts being created accidentally
+- multiple Tone.Transport schedules stacking after project reload
+- duplicate event scheduling on every render
+- Tone nodes created inside React render functions
+- Tone nodes created repeatedly without dispose()
+- samplers/synths/effects never disposed
+- analyser nodes never disconnected
+- meters never stopped
+- audio graph rebuilt too often
+- transport event IDs not stored/cancelled
+- stuck notes after stop
+- old project tracks still scheduled after loading new project
+- sample buffers duplicated in memory
+- effects chains recreated unnecessarily
+- master bus duplicated
+- metronome scheduled multiple times
+
+Required fixes:
+- AudioEngine must be singleton-like for the app session.
+- Only one AudioContext/Tone context should exist unless there is a documented reason.
+- Store all scheduled Transport event IDs.
+- Clear/cancel old scheduled events before rescheduling.
+- Dispose deleted synths, samplers, effects, analysers, meters, and gain nodes.
+- Add a full panicStopAll() that:
+  - stops transport
+  - cancels scheduled events
+  - releases all notes
+  - disconnects temporary nodes
+  - clears active voices
+- Add cleanup methods for:
+  - unloadProject()
+  - removeTrack()
+  - replaceInstrument()
+  - replaceKit()
+  - destroyAudioEngine()
+- Avoid creating Tone nodes inside React component render bodies.
+- Avoid reinitializing audio on every route/modal/open-close event.
+
+F. Scheduler and Playback Stabilization
+
+Audit playback scheduling.
+
+Find:
+- setInterval-based audio triggers
+- requestAnimationFrame-based audio triggers
+- React state-driven note triggering
+- duplicate Tone.Transport callbacks
+- unsafely rescheduling during playback
+- pattern changes causing full reschedule storms
+- unbounded event queues
+
+Required fixes:
+- Use Tone.Transport or a dedicated scheduler correctly.
+- Use the exact scheduled time argument when triggering notes.
+- Batch pattern rescheduling.
+- Debounce expensive reschedule operations.
+- Avoid rescheduling entire project for tiny UI changes unless necessary.
+- If live editing during playback is supported, make it incremental.
+- Keep visual playhead separate from actual audio schedule.
+- Add guardrails so playback cannot start twice.
+- Add state machine:
+  - stopped
+  - starting
+  - playing
+  - paused
+  - stopping
+  - error
+
+G. Visualizer and Meter Optimization
+
+Visualizers and meters are common lag monsters. Audit them aggressively.
+
+Find:
+- multiple requestAnimationFrame loops
+- animation loops running while panel hidden
+- canvas drawing at full speed unnecessarily
+- huge FFT sizes
+- React state updates from every analyzer frame
+- waveform/spectrum components not cleaned up
+- visualizer rendering during export/import when unnecessary
+- meter components causing parent rerenders
+
+Required fixes:
+- Centralize animation frame management.
+- Stop animation loops when components unmount or are hidden.
+- Cap visualizer FPS:
+  - meters: 20-30 FPS
+  - spectrum/oscilloscope: 30 FPS max
+  - background effects: 15-30 FPS
+- Use canvas drawing directly instead of React state for high-frequency visuals.
+- Reduce analyser FFT size if excessive.
+- Avoid creating new typed arrays every frame when reusable buffers work.
+- Throttle meter calculations.
+- Turn off nonessential visuals during heavy operations.
+- Add “Reduce Motion / Performance Mode” setting.
+
+H. Waveform and Sample Import Optimization
+
+Sample import and waveform rendering can freeze the page.
+
+Audit:
+- wavesurfer instances
+- audio decoding
+- waveform generation
+- sample trimming
+- normalization
+- reverse processing
+- IndexedDB blob writes
+- drag/drop file handling
+- large sample import behavior
+
+Required fixes:
+- Do not decode huge files on the main thread without guardrails.
+- Add file size warnings.
+- Chunk long-running sample operations where possible.
+- Use async operations and yield control to the browser during heavy work.
+- Destroy old wavesurfer instances properly.
+- Do not render multiple large waveforms at once.
+- Lazy-render waveform previews only when visible.
+- Store imported samples efficiently.
+- Reuse decoded buffers where practical.
+- Avoid duplicating blobs and decoded AudioBuffers unnecessarily.
+- Add cancellation if user imports another file while previous import is processing.
+
+Add limits:
+- Warn for files over a reasonable threshold.
+- Do not crash if user imports a very large MP3/WAV.
+- Show progress state for sample processing.
+
+I. IndexedDB and Project Storage Audit
+
+Inspect local storage and IndexedDB usage.
+
+Find:
+- massive project object saved on every tiny state change
+- autosave firing too often
+- blobs duplicated per save
+- JSON serialization blocking main thread
+- save/load operations causing UI freeze
+- project migration loops
+- corrupted project causing crash
+
+Required fixes:
+- Debounce autosave.
+- Save only when meaningful changes occur.
+- Separate project metadata from large sample blobs.
+- Avoid writing identical blobs repeatedly.
+- Add safe project load with try/catch.
+- Add project validation before applying.
+- Add migration guard so it cannot loop forever.
+- Add restore fallback if project load fails.
+- Move heavy serialization to async helper.
+- If practical, use a Web Worker for heavy import/export/serialization work.
+
+J. Web Workers for Heavy Non-Audio Work
+
+Add Web Workers only where they solve real blocking problems.
+
+Good worker candidates:
+- project JSON validation
+- project JSON serialization
+- sample metadata extraction
+- waveform peak generation
+- export packaging
+- large pattern transformations
+- visualizer image/card generation
+
+Do not move live audio scheduling to a normal Web Worker unless the architecture already supports it safely. For audio DSP, document future AudioWorklet work separately.
+
+Implement:
+src/workers/projectWorker.ts
+src/workers/waveformWorker.ts
+or equivalent, only if needed.
+
+Add graceful fallback if workers fail.
+
+K. Bundle and Dependency Audit
+
+Inspect bundle size and dependency usage.
+
+Find:
+- large libraries imported globally
+- icons imported as entire package
+- waveform/audio libraries loaded on initial app load unnecessarily
+- demo data or sample metadata bundled too aggressively
+- duplicate packages
+- unused dependencies
+- large JSON files imported directly into main bundle
+
+Required fixes:
+- Lazy-load heavy modules:
+  - waveform editor
+  - visualizer studio
+  - export modal
+  - MIDI panel
+  - diagnostics panel
+  - tutorial/onboarding if heavy
+- Use dynamic imports where safe.
+- Remove unused dependencies.
+- Avoid bundling large audio samples directly.
+- Keep samples in public assets or lazy-loaded manifests.
+- Ensure service worker is not caching huge assets recklessly.
+
+L. Service Worker and PWA Cache Audit
+
+Since PWA/offline support may have been added, audit it.
+
+Find:
+- service worker caching too much
+- stale app shell causing broken versions
+- repeated update reload loops
+- caching large imported samples unintentionally
+- offline cache bloating
+- mismatched app versions
+- service worker errors causing hangs
+
+Required fixes:
+- Cache only core app shell and essential assets.
+- Do not cache user imports through service worker unless intentionally designed.
+- Keep user project data in IndexedDB.
+- Add safe service worker update flow.
+- Add cache versioning.
+- Add old cache cleanup.
+- Add user-facing “Update Available” without forced reload loops.
+
+M. CSS and Layout Performance Audit
+
+Find:
+- expensive shadows/glows on hundreds of elements
+- backdrop-filter abuse
+- animated box-shadows
+- layout thrashing
+- measuring layout repeatedly
+- huge DOM grids
+- too many animated elements
+- CSS transitions on properties that trigger layout
+
+Required fixes:
+- Reduce heavy glow effects in dense grids.
+- Prefer transform/opacity animations.
+- Avoid animating width/height/top/left where possible.
+- Add performance mode that reduces glow/blur/shadows.
+- Avoid expensive CSS filters on large panels.
+- Ensure sequencer grid does not create excessive layout thrash.
+
+N. Emergency Performance Mode
+
+Add a real Performance Mode setting.
+
+When enabled:
+- disable decorative background animation
+- reduce meter FPS
+- reduce visualizer FPS
+- disable heavy glow effects
+- pause hidden visualizers
+- use simpler waveform previews
+- reduce analyser FFT size
+- disable nonessential transitions
+- keep audio engine and core DAW features working
+
+Add UI label:
+“Performance Mode reduces visuals to keep playback stable.”
+
+This must not remove core music-making functions.
+
+O. Error and Freeze Protection
+
+Add guardrails:
+- Global error boundary around studio
+- User-facing recovery screen
+- Try/catch around import/export/project loading
+- Timeout guard for long sample processing
+- AbortController or cancellation pattern for imports where possible
+- Prevent multiple simultaneous exports
+- Prevent multiple simultaneous sample imports
+- Prevent multiple simultaneous project loads
+- Lock buttons during critical async operations
+
+Add watchdog-style diagnostics:
+- If a task exceeds expected duration, log dev warning.
+- If audio engine init fails, show recovery action.
+- If project load fails, offer to open blank project.
+- If export fails, keep project intact.
+
+P. Acceptance Criteria
+
+The pass is not complete until these conditions are met:
+
+1. npm install succeeds.
+2. npm run build succeeds.
+3. App loads without console errors in production preview.
+4. Enable Audio works.
+5. Playback starts without noticeable UI freeze.
+6. Stop releases all audio.
+7. Panic button stops all audio.
+8. Loading demo project does not make page unresponsive.
+9. Opening mixer does not make page unresponsive.
+10. Opening visualizer does not make page unresponsive.
+11. Importing a normal audio sample does not make page unresponsive.
+12. Saving project does not freeze the app.
+13. Loading saved project does not freeze the app.
+14. Export JSON works.
+15. WAV export either works without freezing or is safely disabled/documented until optimized.
+16. App can play for 10 minutes without steadily increasing memory usage.
+17. Repeatedly switching kits/tracks does not leak obvious audio nodes.
+18. Visual meters do not update React state every frame.
+19. Hidden panels do not keep heavy animation loops running.
+20. React does not rerender the entire studio on every transport tick.
+21. No page unresponsive browser dialog appears during normal use.
+
+Q. Required Deliverables
+
+When finished, provide:
+
+1. PERFORMANCE_AUDIT.md
+2. PERFORMANCE_FIXES.md
+3. Updated code with targeted fixes
+4. Summary of changed files
+5. Before/after observations
+6. Known remaining bottlenecks
+7. Recommended next steps
+
+PERFORMANCE_FIXES.md must include:
+
+- Root causes found
+- Fixes applied
+- Files changed
+- Tests performed
+- Performance mode behavior
+- Remaining risks
+- Features temporarily disabled, if any, and why
+
+R. Strong Guidance on Likely Fix Areas
+
+Pay special attention to these likely offenders:
+
+1. Transport/playhead state
+   If playhead position updates global React state 30-60 times per second, isolate it.
+
+2. Mixer meters
+   If each meter update rerenders the mixer or track components, move meter drawing to canvas or refs.
+
+3. Visualizers
+   If multiple requestAnimationFrame loops exist, centralize and stop hidden loops.
+
+4. Audio node lifecycle
+   If Tone nodes are created repeatedly and not disposed, fix immediately.
+
+5. Scheduled events
+   If Tone.Transport events are stacking after every edit/load/play, store IDs and clear them.
+
+6. Waveform rendering
+   If all waveforms render at once, lazy render visible ones only.
+
+7. Autosave
+   If autosave serializes the full project too frequently, debounce and split blobs from metadata.
+
+8. Sample import
+   If decoding/processing blocks the main thread, chunk it or move preprocessing to a worker.
+
+9. Service worker
+   If stale caching causes old code/assets to fight new code/assets, fix versioning and cleanup.
+
+10. CSS effects
+   If dense grids use heavy shadows, blur, filters, or animated glows, simplify them.
+
+S. Implementation Rules
+
+- Make small, targeted commits/changes.
+- After each major fix, run the app.
+- Do not pile speculative refactors on top of each other.
+- Prefer proven stability over fancy architecture.
+- Keep feature behavior intact where possible.
+- If a feature is too unstable, gate it behind Performance Mode or temporarily disable with clear notes.
+- Do not claim fixed unless tested.
+- Do not leave TODOs for critical bugs without documenting them.
+- Do not add new UI features beyond diagnostics/performance controls needed for stability.
+
+T. Final Replit Response Format
+
+When done, respond with:
+
+1. “Root causes found”
+2. “Fixes completed”
+3. “Files changed”
+4. “How to test”
+5. “Known limitations”
+6. “Recommended next pass”
+
+Recommended next pass should not add features until this performance pass is stable.

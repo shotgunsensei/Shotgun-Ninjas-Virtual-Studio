@@ -1,0 +1,113 @@
+ADDITIONAL PERFORMANCE STABILIZATION REQUIREMENTS
+
+Before starting code changes, add a hard baseline step.
+
+Create PERF_BASELINE.md before touching code. It must include:
+- production build status
+- dev-server behavior
+- production-preview behavior
+- Chrome Performance recording notes
+- approximate long task count over a 60-second playback test
+- worst main-thread task duration observed
+- React render/commit observations if React Profiler is available
+- memory/heap observations at load and after 10 minutes playback
+- whether lag happens with mixer closed/open
+- whether lag happens with visualizer closed/open
+- whether lag happens after loading demo projects
+- whether lag happens after importing a sample
+
+Do not claim a fix unless there is a before/after note in PERFORMANCE_FIXES.md.
+
+Important correction:
+Do not create one requestAnimationFrame loop per meter if there are many meters. Refactor toward a centralized visual update loop or shared meter ticker where practical. Canvas-based meters are good, but many independent rAF loops can still become a performance problem. The preferred architecture is:
+- one shared visual ticker
+- subscribers for visible meters/visualizers only
+- FPS cap controlled globally
+- document.hidden guard
+- Performance Mode cap
+- cleanup/unsubscribe on unmount
+
+Important correction:
+document.hidden should pause visual rendering, polling, diagnostics, particles, and nonessential UI loops. It must not automatically stop audio playback, Tone.Transport, or intentionally playing projects unless the user explicitly presses stop/panic.
+
+Autosave correction:
+Do not rely only on a shallow hash of non-blob fields if nested tracks, patterns, mixer settings, arrangement clips, or effect settings can change. Use a project revision/dirty flag system where project mutations mark the project dirty. Autosave should:
+- debounce to at least 8 seconds
+- skip when not dirty
+- write metadata separately from large sample blobs
+- avoid re-writing unchanged blobs
+- clear dirty flag only after successful save
+- never serialize massive blobs repeatedly during playback
+
+Blob-storage correction:
+A blob key + size check is not enough if a sample can be replaced with different content of the same size. Prefer a stable imported sample ID plus fingerprint using name, size, type, lastModified when available, and/or a content hash computed once at import time if practical. Do not compute expensive content hashes repeatedly during autosave.
+
+WAV export correction:
+Sequential/small-batch decoding is good, but export must also avoid locking the UI. Add:
+- exportInProgress guard
+- cancel/abort option if practical
+- progress updates
+- yield points between batches
+- hard user-facing warning for huge projects
+- graceful failure that leaves the project intact
+If full WAV export remains unstable, keep JSON export working and document WAV export limitations honestly.
+
+Waveform/sample import correction:
+Do not render every waveform at once. Waveforms should be lazy-rendered only when visible. Destroy old wavesurfer instances on unmount or sample replacement. Add cancellation so starting a new import cancels or safely ignores the previous import.
+
+React render correction:
+Memoization is not enough by itself. Replit must identify state ownership problems. Specifically:
+- transport tick must not update global app state at high frequency
+- meters must not update React state every frame
+- playhead movement must not rerender arrangement clips
+- active sequencer step must not rerender the whole grid
+- diagnostics must not poll while hidden
+- invisible panels must not render heavy children
+
+Tone.js/audio correction:
+Create a clear ownership model for Tone nodes. Add a registry of created audio resources where practical:
+- instruments
+- samplers
+- players
+- effects
+- gain nodes
+- analysers/meters
+- scheduled Transport IDs
+- temporary export nodes
+Project unload, kit replacement, track deletion, and panicStopAll must clear schedules and dispose or disconnect owned nodes.
+
+Metronome correction:
+Store the actual Tone.Transport.scheduleRepeat ID and explicitly clear it. Also prevent duplicate metronome schedules when toggling metronome, changing BPM, loading projects, or hot reloading in development.
+
+Performance Mode correction:
+Performance Mode must be persistent and safe to toggle during a session. It should reduce visuals without tearing down the active audio graph. It should:
+- disable decorative background FX
+- reduce meter FPS
+- reduce visualizer FPS
+- reduce analyser FFT size where safe
+- strip expensive CSS glow/shadow effects
+- pause hidden panel visual loops
+- not disable playback, save, load, import, or export
+
+Lazy-loading correction:
+Lazy-load heavy panels, but make sure their imports do not accidentally instantiate audio nodes or heavy data at module import time. Heavy initialization should happen only when the panel is opened or explicitly enabled.
+
+Service worker correction:
+If a PWA/service worker exists, ensure performance testing includes a fresh cache and an updated-cache scenario. Service worker cache bugs can make it look like fixes failed because the browser is still running stale assets.
+
+Acceptance hardening:
+Do not mark this pass complete unless:
+- npm run build passes
+- production preview is tested
+- app runs 10 minutes with playback without page unresponsive dialog
+- loading a demo does not freeze the page
+- opening mixer during playback does not freeze the page
+- opening visualizer during playback does not freeze the page
+- normal sample import does not freeze the page
+- autosave does not fire when the project is unchanged
+- repeated project load/unload does not stack Tone.Transport events
+- repeated kit/instrument switching does not visibly grow memory forever
+- Performance Mode visibly reduces visual load
+- PERFORMANCE_AUDIT.md and PERFORMANCE_FIXES.md are both completed
+
+Do not add new creative features during this pass. This is a stabilization release only.
