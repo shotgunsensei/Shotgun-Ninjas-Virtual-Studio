@@ -839,3 +839,61 @@ interactive browser.
   and Tone/standardized-audio-context nodes do not always connect cleanly.
 - Playwright's test command needs cleanup because it reported all tests passing
   but left the command alive until the wrapper timeout.
+
+---
+
+## Worklet Fallback Cleanup Patch
+
+Date: 2026-06-14
+
+### Root Causes Confirmed
+
+- The remaining console warnings came from the master worklet rewire path
+  failing after nodes were created, then falling back without detailed error
+  metadata or explicit partial-node cleanup.
+- `AudioEngine.unlock()` could attempt worklet setup again if the first attempt
+  failed before the engine reached the unlocked state.
+- Message usage in app code is limited to service-worker lifecycle messages and
+  AudioWorklet ports. There is no visualizer/diagnostics `message` stream in
+  the app code. The risky paths are therefore AudioWorklet node ports and
+  sample-player PCM transfers.
+- The unlock button flipped React store state immediately after `audio.unlock()`,
+  putting UI rerender/layout in the same click task as Tone startup.
+
+### Fixes Applied
+
+- Added structured worklet error logging with `err.name`, `err.message`, and
+  `err.stack`, while still passing the original exception to `console.warn`.
+- Added one-shot worklet initialization state in `AudioEngine`; failed worklet
+  setup marks worklets unavailable for the runtime session.
+- Added `WorkletManager.markUnavailable()` and `disposeNode()` to close ports,
+  null `port.onmessage`, disconnect nodes, and stop probe state.
+- On master worklet rewire failure, cleanup now clears pending param timers,
+  disposes partial AudioWorkletNodes, restores the Tone fallback chain, and
+  marks worklets unavailable.
+- Capped sample-player worklet PCM transfers to short/small samples and skipped
+  the worklet path once worklets are unavailable.
+- Added abortable PWA runtime listeners and interval cleanup for service-worker
+  message/controller listeners.
+- Deferred noncritical `audioUnlocked` store updates to `requestAnimationFrame`
+  after audio unlock.
+- Enabled production sourcemaps in `vite.config.ts` so Chrome violation stack
+  locations can map back to TypeScript during profiling.
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Build completed and emitted sourcemaps. Existing dynamic/static import overlap, source location, and large chunk warnings remain. |
+| `corepack pnpm --dir artifacts/studio exec playwright test --reporter=line --workers=1` | Blocked by local command resolution | `pnpm exec` did not resolve `playwright` on PATH in this Windows shell. |
+| `.\node_modules\.bin\playwright.CMD test --reporter=line --workers=1` | Partial / timeout | The 4 test names started, but the command did not exit before the 240 s wrapper timeout. No failure lines were printed before timeout. |
+
+### Remaining Risks
+
+- A fresh Chrome trace is still required to prove the 5.9 s and 45.4 s
+  `message` handler violations are gone.
+- Production sourcemaps add a large `.map` artifact for the main bundle; keep
+  them only if profiling builds are acceptable, or gate them behind an env var
+  after the next trace is captured.
+- Playwright command exit behavior still needs a separate cleanup pass.

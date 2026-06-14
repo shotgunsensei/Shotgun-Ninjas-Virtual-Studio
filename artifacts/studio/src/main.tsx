@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Router } from "wouter";
 import { AppRouter } from "./router";
 import "./index.css";
-import { initPwa } from "./lib/pwa";
+import { disposePwaRuntime, initPwa } from "./lib/pwa";
 import { perfMark } from "./utils/performanceDiagnostics";
 
 perfMark("app-startup:main-entry");
@@ -29,6 +29,7 @@ createRoot(document.getElementById("root")!).render(
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
+    disposePwaRuntime();
     void import("./lib/audio/engine").then(({ audio }) => audio.dispose());
   });
 }

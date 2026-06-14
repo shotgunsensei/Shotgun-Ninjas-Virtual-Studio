@@ -43,6 +43,8 @@ let waitingWorker: ServiceWorker | null = null;
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
 let registration: ServiceWorkerRegistration | null = null;
 let updateReloadPending = false;
+let pwaAbortController: AbortController | null = null;
+let updatePollId: number | null = null;
 
 function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
@@ -93,7 +95,7 @@ export function applyUpdate() {
     if (reloaded) return;
     reloaded = true;
     window.location.reload();
-  });
+  }, { once: true });
   patch({ updateAvailable: false });
   waitingWorker.postMessage({ type: "SKIP_WAITING" });
 }
@@ -131,6 +133,8 @@ let initialized = false;
 export function initPwa() {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
+  pwaAbortController = new AbortController();
+  const { signal } = pwaAbortController;
 
   patch({ installed: isStandalone() });
   if (isIos() && !isStandalone()) patch({ iosInstallHint: true });
@@ -139,12 +143,12 @@ export function initPwa() {
     e.preventDefault();
     deferredInstallPrompt = e as BeforeInstallPromptEvent;
     patch({ installAvailable: true, iosInstallHint: false });
-  });
+  }, { signal });
 
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
     patch({ installAvailable: false, installed: true, iosInstallHint: false });
-  });
+  }, { signal });
 
   if (!("serviceWorker" in navigator)) return;
 
@@ -174,7 +178,7 @@ export function initPwa() {
     if (event.data?.type === "SW_ACTIVATED") {
       patch({ offlineReady: true });
     }
-  });
+  }, { signal });
 
   navigator.serviceWorker.ready
     .then(() => patch({ offlineReady: true }))
@@ -183,7 +187,17 @@ export function initPwa() {
   // Periodically poll for an updated SW so long-lived sessions discover
   // new builds without requiring a manual reload.
   const POLL_MS = 60 * 60 * 1000; // 1 hour
-  window.setInterval(() => {
+  updatePollId = window.setInterval(() => {
     registration?.update().catch(() => undefined);
   }, POLL_MS);
+}
+
+export function disposePwaRuntime() {
+  pwaAbortController?.abort();
+  pwaAbortController = null;
+  if (updatePollId !== null) {
+    window.clearInterval(updatePollId);
+    updatePollId = null;
+  }
+  initialized = false;
 }

@@ -47,7 +47,9 @@ export function useTransport() {
   const ensureUnlocked = useCallback(async () => {
     if (!audioUnlocked) {
       await audio.unlock();
-      getStore().set({ audioUnlocked: true });
+      window.requestAnimationFrame(() => {
+        getStore().set({ audioUnlocked: true });
+      });
     }
   }, [audioUnlocked]);
 

@@ -1,7 +1,7 @@
 import * as Tone from "tone";
 import type { MasterBusSettings, SendBusId } from "../../types";
 import { SEND_BUS_IDS } from "../../types";
-import { workletManager } from "./worklet-manager";
+import { describeError, workletManager } from "./worklet-manager";
 import { trackInterval } from "../../utils/performanceDiagnostics";
 
 /**
@@ -136,7 +136,13 @@ export class MasterChain {
     const sat  = workletManager.createNode("saturation",   toneCtx);
     const lim  = workletManager.createNode("limiter",      toneCtx);
 
-    if (!clip || !sat || !lim) return;
+    if (!clip || !sat || !lim) {
+      workletManager.disposeNode(clip);
+      workletManager.disposeNode(sat);
+      workletManager.disposeNode(lim);
+      workletManager.markUnavailable("Master worklet node creation returned null");
+      return;
+    }
 
     this.softClipperWorklet = clip;
     this.saturationWorklet  = sat;
@@ -172,11 +178,62 @@ export class MasterChain {
       // Sync initial settings to worklet parameters.
       this._applyWorkletParams();
     } catch (err) {
-      console.warn("[MasterChain] Worklet rewire failed — keeping Tone.js chain:", err);
-      this.softClipperWorklet = null;
-      this.saturationWorklet  = null;
-      this.limiterWorklet     = null;
+      const details = describeError(err);
+      console.warn("[MasterChain] Worklet rewire failed — keeping Tone.js chain.", details, err);
+      this.cleanupFailedWorklets();
+      this.restoreToneFallbackChain();
+      workletManager.markUnavailable(
+        `MasterChain worklet rewire failed: ${details.name}: ${details.message}`,
+      );
     }
+  }
+
+  private cleanupFailedWorklets(): void {
+    this.workletsActive = false;
+    if (this.workletParamTimer !== null && typeof window !== "undefined") {
+      window.clearTimeout(this.workletParamTimer);
+      this.workletParamTimer = null;
+    }
+    workletManager.disposeNode(this.softClipperWorklet);
+    workletManager.disposeNode(this.saturationWorklet);
+    workletManager.disposeNode(this.limiterWorklet);
+    this.softClipperWorklet = null;
+    this.saturationWorklet = null;
+    this.limiterWorklet = null;
+  }
+
+  private restoreToneFallbackChain(): void {
+    const nodes: Tone.ToneAudioNode[] = [
+      this.input,
+      this.glueComp,
+      this.softClipper,
+      this.widener,
+      this.safetyComp,
+      this.limiter,
+      this.makeup,
+    ];
+    for (const node of nodes) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    this.limiter.threshold.value = this.settings.limiterThresholdDb;
+    this.softClipper.curve = this.settings.softClip
+      ? makeSoftClipCurve()
+      : makeIdentityCurve();
+    this.input.chain(
+      this.glueComp,
+      this.softClipper,
+      this.widener,
+      this.safetyComp,
+      this.limiter,
+      this.makeup,
+      Tone.getDestination(),
+    );
+    this.makeup.connect(this.meter);
+    this.makeup.connect(this.peakMeter);
   }
 
   /** Sync current settings to worklet AudioParams. */
@@ -388,15 +445,7 @@ export class MasterChain {
       window.clearTimeout(this.workletParamTimer);
       this.workletParamTimer = null;
     }
-    // Disconnect worklet nodes safely.
-    for (const node of [this.softClipperWorklet, this.saturationWorklet, this.limiterWorklet]) {
-      if (node) {
-        try { node.disconnect(); } catch { /* ignore */ }
-      }
-    }
-    this.softClipperWorklet = null;
-    this.saturationWorklet  = null;
-    this.limiterWorklet     = null;
+    this.cleanupFailedWorklets();
   }
 }
 

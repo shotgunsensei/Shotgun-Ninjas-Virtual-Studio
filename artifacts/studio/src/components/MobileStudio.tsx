@@ -199,7 +199,9 @@ export function MobileStudio() {
             className="w-full h-11 rounded-md bg-primary text-primary-foreground font-mono text-xs uppercase tracking-widest glow-red"
             onClick={async () => {
               await audio.unlock();
-              getStore().set({ audioUnlocked: true });
+              window.requestAnimationFrame(() => {
+                getStore().set({ audioUnlocked: true });
+              });
             }}
           >
             Tap to Enable Audio

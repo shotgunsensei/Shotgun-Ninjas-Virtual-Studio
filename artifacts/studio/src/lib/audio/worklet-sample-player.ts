@@ -26,6 +26,8 @@ import type { DrumVoice } from "./voices";
 // ── A/B module-level toggle ────────────────────────────────────────────────
 
 let _workletPlayerEnabled = true;
+const MAX_WORKLET_SAMPLE_SECONDS = 5;
+const MAX_WORKLET_SAMPLE_BYTES = 8 * 1024 * 1024;
 
 /** Enable or disable the AudioWorklet sample player path globally.
  *  When disabled every voice falls back to Tone.Player (main-thread scheduling). */
@@ -90,7 +92,14 @@ export function makeWorkletSampledDrum(
   // ── Create AudioWorkletNode and upload PCM data to audio thread ──
   function initWorkletNode(): void {
     if (workletNode) return;
-    if (!workletManager.ready || !decodedBuffer) return;
+    if (!workletManager.ready || workletManager.fallback || !decodedBuffer) return;
+    if (
+      decodedBuffer.duration > MAX_WORKLET_SAMPLE_SECONDS ||
+      decodedBuffer.length * decodedBuffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT >
+        MAX_WORKLET_SAMPLE_BYTES
+    ) {
+      return;
+    }
     try {
       const rawCtx = Tone.getContext().rawContext as AudioContext;
       const node = workletManager.createNode("sample-player", rawCtx);
@@ -108,9 +117,14 @@ export function makeWorkletSampledDrum(
         channels.push(copy);
         transfers.push(copy.buffer);
       }
-      node.port.postMessage({ type: "load", channels }, transfers);
-      workletNode = node;
-      maybeConnectWorklet();
+      try {
+        node.port.postMessage({ type: "load", channels }, transfers);
+        workletNode = node;
+        maybeConnectWorklet();
+      } catch (err) {
+        workletManager.disposeNode(node);
+        throw err;
+      }
     } catch (err) {
       console.warn("[WorkletSampledDrum] Failed to create worklet node:", err);
     }
@@ -135,11 +149,11 @@ export function makeWorkletSampledDrum(
   return {
     trigger: (time: number, velocity: number) => {
       // Lazy worklet init: worklets may have become ready after buffer decoded.
-      if (!workletNode && workletManager.ready && decodedBuffer) {
+      if (!workletNode && workletManager.ready && !workletManager.fallback && decodedBuffer) {
         initWorkletNode();
       }
 
-      if (_workletPlayerEnabled && workletNode) {
+      if (_workletPlayerEnabled && workletNode && !workletManager.fallback) {
         // ── Worklet path: audio-thread-accurate trigger ──
         workletNode.port.postMessage({
           type: "play",
@@ -174,10 +188,10 @@ export function makeWorkletSampledDrum(
       if (workletNode) {
         try {
           workletNode.port.postMessage({ type: "stop" });
-          workletNode.disconnect();
         } catch {
           // ignore
         }
+        workletManager.disposeNode(workletNode);
         workletNode = null;
       }
     },

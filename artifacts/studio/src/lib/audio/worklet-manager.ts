@@ -377,6 +377,7 @@ class WorkletManager {
   private _registered    = false;
   private _registering   = false;
   private _fallback      = false;
+  private _unavailableReason: string | null = null;
   private _blobUrl: string | null = null;
 
   // CPU round-trip probe state
@@ -399,6 +400,10 @@ class WorkletManager {
     return this._fallback;
   }
 
+  get unavailableReason(): string | null {
+    return this._unavailableReason;
+  }
+
   /** True when the worklet module has been successfully registered. */
   get ready(): boolean {
     return this._registered;
@@ -409,7 +414,11 @@ class WorkletManager {
    * Safe to call multiple times — idempotent once registered.
    */
   async register(context: AudioContext): Promise<boolean> {
-    if (!this.supported) { this._fallback = true; return false; }
+    if (this._fallback) return false;
+    if (!this.supported) {
+      this.markUnavailable("AudioWorkletNode is not supported");
+      return false;
+    }
     if (this._registered) return true;
     if (this._registering) {
       // Spin-wait for concurrent registration.
@@ -435,8 +444,9 @@ class WorkletManager {
       this._registered = true;
       return true;
     } catch (err) {
-      console.warn('[WorkletManager] AudioWorklet registration failed — using Tone.js fallback.', err);
-      this._fallback = true;
+      const details = describeError(err);
+      console.warn('[WorkletManager] AudioWorklet registration failed — using Tone.js fallback.', details, err);
+      this.markUnavailable(details.message);
       return false;
     } finally {
       this._registering = false;
@@ -445,7 +455,7 @@ class WorkletManager {
 
   /** Create a typed AudioWorkletNode or null if not registered. */
   createNode(kind: WorkletNodeKind, context: AudioContext, options?: AudioWorkletNodeOptions): AudioWorkletNode | null {
-    if (!this._registered) return null;
+    if (!this._registered || this._fallback) return null;
     try {
       const nativeContext = resolveNativeContext(context);
       if (nativeContext) {
@@ -457,7 +467,7 @@ class WorkletManager {
       }
       throw new TypeError("AudioWorkletNode requires a native or Tone worklet context");
     } catch (err) {
-      console.warn(`[WorkletManager] Failed to create ${kind} node:`, err);
+      console.warn(`[WorkletManager] Failed to create ${kind} node:`, describeError(err), err);
       return null;
     }
   }
@@ -465,6 +475,33 @@ class WorkletManager {
   /** Send a typed message to a worklet node's message port. */
   postMessage(node: AudioWorkletNode, msg: Record<string, unknown>): void {
     try { node.port.postMessage(msg); } catch { /* ignore */ }
+  }
+
+  disposeNode(node: AudioWorkletNode | null): void {
+    if (!node) return;
+    try {
+      node.port.onmessage = null;
+    } catch {
+      // ignore
+    }
+    try {
+      node.port.close();
+    } catch {
+      // ignore
+    }
+    try {
+      node.disconnect();
+    } catch {
+      // ignore
+    }
+  }
+
+  markUnavailable(reason: string): void {
+    this._fallback = true;
+    this._unavailableReason = reason;
+    this.disposeNode(this._probeNode);
+    this._probeNode = null;
+    this._pingPendingAt = null;
   }
 
   /**
@@ -518,8 +555,28 @@ class WorkletManager {
       URL.revokeObjectURL(this._blobUrl);
       this._blobUrl = null;
     }
+    this.disposeNode(this._probeNode);
     this._probeNode = null;
+    this._pingPendingAt = null;
   }
 }
 
 export const workletManager = WorkletManager.instance;
+
+export function describeError(err: unknown): {
+  name: string;
+  message: string;
+  stack?: string;
+} {
+  if (err instanceof Error) {
+    return {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    };
+  }
+  return {
+    name: typeof err,
+    message: String(err),
+  };
+}

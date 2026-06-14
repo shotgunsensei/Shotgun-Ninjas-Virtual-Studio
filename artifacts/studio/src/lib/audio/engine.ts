@@ -22,7 +22,7 @@ import type {
 } from "../../types";
 import { SEND_BUS_IDS } from "../../types";
 import { MasterChain } from "./master";
-import { workletManager } from "./worklet-manager";
+import { describeError, workletManager } from "./worklet-manager";
 import {
   getWorkletPlayerEnabled,
   setWorkletPlayerEnabled,
@@ -182,6 +182,8 @@ class AudioEngine {
   private soloSet = new Set<string>();
   unlocked = false;
   private disposed = false;
+  private workletInitAttempted = false;
+  private workletUnavailable = false;
   private noteEverPlayed = false;
 
   private firstQwertyShown = false;
@@ -230,31 +232,7 @@ class AudioEngine {
     try {
       await Tone.start();
 
-      // Phase 6: register AudioWorklet processors then wire them into the master chain.
-      try {
-        const toneCtx = Tone.getContext();
-        const rawCtx = toneCtx.rawContext as AudioContext;
-        await workletManager.register(toneCtx as unknown as AudioContext);
-        this.masterChain.initWorklets();
-
-        // Create the MetronomeProcessor node on the audio thread.
-        if (workletManager.ready) {
-          const node = workletManager.createNode("metronome", toneCtx as unknown as AudioContext);
-          if (node) {
-            // Bridge the AudioWorkletNode (native) to the Tone.js metronomeGain node.
-            const gainAny = this.metronomeGain as unknown as { input?: AudioNode };
-            if (gainAny.input instanceof AudioNode) {
-              node.connect(gainAny.input);
-            } else {
-              // Fallback: connect to Tone destination directly (lower precedence than master chain).
-              node.connect(rawCtx.destination);
-            }
-            this.metronomeWorkletNode = node;
-          }
-        }
-      } catch (err) {
-        console.warn("[AudioEngine] Worklet init failed — Tone.js fallback active.", err);
-      }
+      await this.tryInitWorkletsOnce();
 
       // Phase 6: start the lookahead scheduler.
       lookaheadScheduler.start();
@@ -268,6 +246,50 @@ class AudioEngine {
   /** Alias for `unlock()` — part of the documented v2 facade surface. */
   async initAudio() {
     return this.unlock();
+  }
+
+  private async tryInitWorkletsOnce(): Promise<void> {
+    if (this.workletInitAttempted || this.workletUnavailable || workletManager.fallback) return;
+    this.workletInitAttempted = true;
+    try {
+      const toneCtx = Tone.getContext();
+      const rawCtx = toneCtx.rawContext as AudioContext;
+      const registered = await workletManager.register(toneCtx as unknown as AudioContext);
+      if (!registered || workletManager.fallback) {
+        this.workletUnavailable = true;
+        return;
+      }
+
+      this.masterChain.initWorklets();
+      if (workletManager.fallback) {
+        this.workletUnavailable = true;
+        return;
+      }
+
+      const node = workletManager.createNode("metronome", toneCtx as unknown as AudioContext);
+      if (!node) return;
+      try {
+        const gainAny = this.metronomeGain as unknown as { input?: AudioNode };
+        if (gainAny.input instanceof AudioNode) {
+          node.connect(gainAny.input);
+        } else {
+          node.connect(rawCtx.destination);
+        }
+        this.metronomeWorkletNode = node;
+      } catch (err) {
+        workletManager.disposeNode(node);
+        throw err;
+      }
+    } catch (err) {
+      const details = describeError(err);
+      console.warn("[AudioEngine] Worklet init failed — Tone.js fallback active.", details, err);
+      this.workletUnavailable = true;
+      workletManager.markUnavailable(
+        `AudioEngine worklet init failed: ${details.name}: ${details.message}`,
+      );
+      workletManager.disposeNode(this.metronomeWorkletNode);
+      this.metronomeWorkletNode = null;
+    }
   }
 
   dispose() {
@@ -291,7 +313,7 @@ class AudioEngine {
     this.masterAnalyser = null;
     this.masterAnalyserSize = 0;
     try {
-      this.metronomeWorkletNode?.disconnect();
+      workletManager.disposeNode(this.metronomeWorkletNode);
     } catch {
       // ignore
     }

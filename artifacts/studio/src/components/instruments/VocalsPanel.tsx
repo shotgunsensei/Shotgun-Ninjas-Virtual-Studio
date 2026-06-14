@@ -79,7 +79,9 @@ export function VocalsPanel({ track }: { track: Track }) {
     setPermError(null);
     try {
       await audio.unlock();
-      getStore().set({ audioUnlocked: true });
+      window.requestAnimationFrame(() => {
+        getStore().set({ audioUnlocked: true });
+      });
       await audio.startVocalMonitor(track.id, deviceId || undefined);
       setMonitoring(true);
       // After permission, device labels become available
