@@ -85,12 +85,12 @@ interface TrackVoice {
   filter: Tone.Filter;
   /** v2 sound-shaping nodes inserted in the per-track chain after the
    *  filter so per-voice sound params (drive, chorus, width) are
-   *  audible without rebuilding the voice. Wet defaults to 0 (bypass). */
+   *  audible without rebuilding the voice. Created lazily when enabled. */
   drive?: Tone.Distortion;
   chorus?: Tone.Chorus;
   widener?: Tone.StereoWidener;
   /** v2 mixer nodes: high-pass + 3-band EQ inserted between filter and
-   *  drive; compressor + bitcrusher inserted later in the chain. */
+   *  drive; compressor + bitcrusher inserted later in the chain. Created lazily. */
   hpf?: Tone.Filter;
   eq3?: Tone.EQ3;
   comp?: Tone.Compressor;
@@ -181,6 +181,7 @@ class AudioEngine {
   private playbackState: PlaybackState = "stopped";
   private soloSet = new Set<string>();
   unlocked = false;
+  private disposed = false;
   private noteEverPlayed = false;
 
   private firstQwertyShown = false;
@@ -189,6 +190,13 @@ class AudioEngine {
   private chopKitTrackId: string | null = null;
 
   constructor() {
+    const globalKey = "__SN_STUDIO_AUDIO_ENGINE_ACTIVE__";
+    const scope = globalThis as typeof globalThis & Record<string, boolean | undefined>;
+    if (scope[globalKey] && import.meta.env.DEV) {
+      console.warn("[AudioEngine] Duplicate AudioEngine construction detected; retaining singleton export.");
+    }
+    scope[globalKey] = true;
+
     Tone.getTransport().bpm.value = 100;
     Tone.getTransport().timeSignature = [4, 4];
 
@@ -216,6 +224,7 @@ class AudioEngine {
    * button is what calls this. Safe to call repeatedly.
    */
   async unlock() {
+    if (this.disposed) throw new Error("AudioEngine has been disposed");
     if (this.unlocked) return;
     const endInit = startPerfTimer("audio-engine-init");
     try {
@@ -259,6 +268,48 @@ class AudioEngine {
   /** Alias for `unlock()` — part of the documented v2 facade surface. */
   async initAudio() {
     return this.unlock();
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    try {
+      this.panicStopAll();
+    } catch {
+      // ignore
+    }
+    try {
+      this.disposeAllTracks();
+    } catch {
+      // ignore
+    }
+    try {
+      this.masterAnalyser?.dispose();
+    } catch {
+      // ignore
+    }
+    this.masterAnalyser = null;
+    this.masterAnalyserSize = 0;
+    try {
+      this.metronomeWorkletNode?.disconnect();
+    } catch {
+      // ignore
+    }
+    this.metronomeWorkletNode = null;
+    lookaheadScheduler.cancelAll();
+    lookaheadScheduler.stop();
+    try {
+      this.metronomeSynth.dispose();
+      this.metronomeAccent.dispose();
+      this.metronomeGain.dispose();
+      this.masterChain.dispose();
+      workletManager.dispose();
+    } catch {
+      // ignore
+    }
+    this.unlocked = false;
+    this.playbackState = "stopped";
+    (globalThis as typeof globalThis & Record<string, boolean | undefined>).__SN_STUDIO_AUDIO_ENGINE_ACTIVE__ = false;
   }
 
   /** Resolves once all Tone-managed buffers (samplers etc.) finish loading. */
@@ -344,6 +395,13 @@ class AudioEngine {
   setTrackEq(trackId: string, eq: Partial<TrackEq>) {
     const v = this.voices.get(trackId);
     if (!v) return;
+    const wantsEq =
+      eq.hpfOn === true ||
+      typeof eq.hpfHz === "number" ||
+      Math.abs(eq.low ?? 0) > 0.001 ||
+      Math.abs(eq.mid ?? 0) > 0.001 ||
+      Math.abs(eq.high ?? 0) > 0.001;
+    if (wantsEq) this.ensureEqNodes(v);
     if (v.eq3) {
       if (typeof eq.low === "number") v.eq3.low.value = clampDb(eq.low);
       if (typeof eq.mid === "number") v.eq3.mid.value = clampDb(eq.mid);
@@ -384,6 +442,7 @@ class AudioEngine {
     const params = settings.params ?? {};
     switch (moduleId) {
       case "eq":
+        if (enabled) this.ensureEqNodes(v);
         // EQ module is just an enable flag on top of the 3-band — disable
         // flattens it. Discrete band values go through setTrackEq.
         if (v.eq3 && !enabled) {
@@ -394,6 +453,7 @@ class AudioEngine {
         if (v.hpf && !enabled) v.hpf.frequency.rampTo(20, 0.03);
         return;
       case "compressor":
+        if (enabled) this.ensureCompressorNode(v);
         if (v.comp) {
           if (!enabled) {
             v.comp.threshold.value = 0;
@@ -409,6 +469,7 @@ class AudioEngine {
         }
         return;
       case "saturation":
+        if (enabled) this.ensureDriveNode(v);
         if (v.drive) {
           v.drive.distortion = enabled ? 0.05 + 0.6 * amount : 0;
           v.drive.wet.rampTo(enabled ? Math.max(0.2, amount) : 0, 0.05);
@@ -421,12 +482,14 @@ class AudioEngine {
         if (v.reverb) v.reverb.wet.rampTo(enabled ? amount : 0, 0.05);
         return;
       case "chorus":
+        if (enabled) this.ensureChorusNode(v);
         if (v.chorus) {
           v.chorus.depth = enabled ? 0.2 + 0.6 * amount : 0;
           v.chorus.wet.rampTo(enabled ? amount : 0, 0.05);
         }
         return;
       case "bitcrusher":
+        if (enabled) this.ensureBitcrusherNode(v);
         if (v.bitcrusher) {
           const bits = enabled
             ? Math.max(2, Math.round(16 - 14 * (typeof params.bits === "number" ? params.bits : amount)))
@@ -435,6 +498,7 @@ class AudioEngine {
         }
         return;
       case "stereoWidth":
+        if (enabled) this.ensureWidenerNode(v);
         if (v.widener) {
           // 0=mono, 0.5=normal stereo, 1=wide. Disable -> 0.5.
           v.widener.width.rampTo(enabled ? Math.max(0, Math.min(1, amount)) : 0.5, 0.05);
@@ -960,13 +1024,18 @@ class AudioEngine {
     if (partial.resonance !== undefined) {
       v.filter.Q.rampTo(Math.max(0.1, partial.resonance * 16), 0.05);
     }
+    if (partial.drive !== undefined && partial.drive > 0) this.ensureDriveNode(v);
     if (partial.drive !== undefined && v.drive) {
       const d = Math.max(0, Math.min(1, partial.drive));
       v.drive.distortion = d * 0.9;
       v.drive.wet.rampTo(d > 0 ? Math.min(1, d * 2) : 0, 0.05);
     }
+    if (partial.chorusSend !== undefined && partial.chorusSend > 0) this.ensureChorusNode(v);
     if (partial.chorusSend !== undefined && v.chorus) {
       v.chorus.wet.rampTo(Math.max(0, Math.min(1, partial.chorusSend)), 0.05);
+    }
+    if (partial.width !== undefined && Math.abs(partial.width - 0.5) > 0.001) {
+      this.ensureWidenerNode(v);
     }
     if (partial.width !== undefined && v.widener) {
       v.widener.width.rampTo(Math.max(0, Math.min(1, partial.width)), 0.05);
@@ -1175,9 +1244,11 @@ class AudioEngine {
           v.delay.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "distortionAmount":
+          if (value > 0) this.ensureDriveNode(v);
           if (v.drive) v.drive.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "effectWetDry":
+          if (value > 0) this.ensureChorusNode(v);
           if (v.chorus) v.chorus.wet.linearRampToValueAtTime(value, rampEnd);
           break;
         case "pitch":
@@ -1720,6 +1791,78 @@ class AudioEngine {
   }
 
   // ---- voice construction ----
+  private rewireTrackFxChain(v: TrackVoice) {
+    const maybeChain: Array<Tone.ToneAudioNode | undefined> = [
+      v.filter,
+      v.hpf,
+      v.eq3,
+      v.drive,
+      v.chorus,
+      v.comp,
+      v.delay,
+      v.reverb,
+      v.bitcrusher,
+      v.widener,
+    ];
+    const chain = maybeChain.filter((node): node is Tone.ToneAudioNode => Boolean(node));
+
+    for (const node of chain) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+
+    for (let i = 0; i < chain.length - 1; i++) {
+      chain[i].connect(chain[i + 1]);
+    }
+    chain[chain.length - 1]?.connect(v.channel);
+  }
+
+  private ensureEqNodes(v: TrackVoice) {
+    let changed = false;
+    if (!v.hpf) {
+      v.hpf = new Tone.Filter({ frequency: 20, type: "highpass", rolloff: -24 });
+      changed = true;
+    }
+    if (!v.eq3) {
+      v.eq3 = new Tone.EQ3({ low: 0, mid: 0, high: 0, lowFrequency: 200, highFrequency: 3200 });
+      changed = true;
+    }
+    if (changed) this.rewireTrackFxChain(v);
+  }
+
+  private ensureDriveNode(v: TrackVoice) {
+    if (v.drive) return;
+    v.drive = new Tone.Distortion({ distortion: 0, wet: 0 });
+    this.rewireTrackFxChain(v);
+  }
+
+  private ensureChorusNode(v: TrackVoice) {
+    if (v.chorus) return;
+    v.chorus = new Tone.Chorus({ frequency: 1.2, depth: 0.4, wet: 0 }).start();
+    this.rewireTrackFxChain(v);
+  }
+
+  private ensureCompressorNode(v: TrackVoice) {
+    if (v.comp) return;
+    v.comp = new Tone.Compressor({ threshold: 0, ratio: 1, attack: 0.01, release: 0.18, knee: 8 });
+    this.rewireTrackFxChain(v);
+  }
+
+  private ensureBitcrusherNode(v: TrackVoice) {
+    if (v.bitcrusher) return;
+    v.bitcrusher = new Tone.BitCrusher(16);
+    this.rewireTrackFxChain(v);
+  }
+
+  private ensureWidenerNode(v: TrackVoice) {
+    if (v.widener) return;
+    v.widener = new Tone.StereoWidener({ width: 0.5 });
+    this.rewireTrackFxChain(v);
+  }
+
   private buildVoice(track: Track): TrackVoice {
     const untrackVoice = trackAudioResource("track-voice");
     const channel = new Tone.Channel({ volume: 0 });
@@ -1738,30 +1881,13 @@ class AudioEngine {
       type: "lowpass",
       rolloff: -12,
     });
-    // v2 sound-shaping nodes — wet defaults to 0 so they are inaudible
-    // until the user opens MelodicParams and turns them up.
-    const drive = new Tone.Distortion({ distortion: 0, wet: 0 });
-    const chorus = new Tone.Chorus({ frequency: 1.2, depth: 0.4, wet: 0 }).start();
-    const widener = new Tone.StereoWidener({ width: 0.5 });
-    // v2 mixer nodes — bypass-friendly defaults so existing projects sound
-    // identical. HPF at 20 Hz is effectively transparent; EQ all 0 dB;
-    // compressor threshold 0 dB never engages; bitcrusher at 16 bits.
-    const hpf = new Tone.Filter({ frequency: 20, type: "highpass", rolloff: -24 });
-    const eq3 = new Tone.EQ3({ low: 0, mid: 0, high: 0, lowFrequency: 200, highFrequency: 3200 });
-    const comp = new Tone.Compressor({ threshold: 0, ratio: 1, attack: 0.01, release: 0.18, knee: 8 });
-    const bitcrusher = new Tone.BitCrusher(16);
     const meter = new Tone.Meter({ smoothing: 0.7 });
-    // chain: instrument -> filter -> hpf -> eq3 -> drive -> chorus -> comp -> delay -> reverb -> bitcrusher -> widener -> channel -> master
-    filter.connect(hpf);
-    hpf.connect(eq3);
-    eq3.connect(drive);
-    drive.connect(chorus);
-    chorus.connect(comp);
-    comp.connect(delay);
+    // Default chain is intentionally lean. Optional mixer/effect nodes are
+    // inserted lazily by the setters above when a real non-default setting
+    // needs them; eager creation was the largest runtime click/load stall.
     delay.connect(reverb);
-    reverb.connect(bitcrusher);
-    bitcrusher.connect(widener);
-    widener.connect(channel);
+    filter.connect(delay);
+    reverb.connect(channel);
     channel.connect(this.masterChain.input);
     // post-fader meter tap
     channel.connect(meter);
@@ -1780,13 +1906,6 @@ class AudioEngine {
       reverb,
       delay,
       filter,
-      drive,
-      chorus,
-      widener,
-      hpf,
-      eq3,
-      comp,
-      bitcrusher,
       sends,
       dispose: () => {
         if (voice.poly) voice.poly.dispose();
@@ -1811,15 +1930,15 @@ class AudioEngine {
           voice.mic.dispose();
         }
         filter.dispose();
-        drive.dispose();
-        chorus.dispose();
-        widener.dispose();
+        voice.drive?.dispose();
+        voice.chorus?.dispose();
+        voice.widener?.dispose();
         delay.dispose();
         reverb.dispose();
-        hpf.dispose();
-        eq3.dispose();
-        comp.dispose();
-        bitcrusher.dispose();
+        voice.hpf?.dispose();
+        voice.eq3?.dispose();
+        voice.comp?.dispose();
+        voice.bitcrusher?.dispose();
         for (const g of sends.values()) {
           try { g.dispose(); } catch { /* ignore */ }
         }

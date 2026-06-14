@@ -26,3 +26,9 @@ createRoot(document.getElementById("root")!).render(
     </Suspense>
   </Router>,
 );
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    void import("./lib/audio/engine").then(({ audio }) => audio.dispose());
+  });
+}

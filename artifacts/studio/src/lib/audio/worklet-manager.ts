@@ -250,14 +250,9 @@ class SaturationProcessor extends AudioWorkletProcessor {
 
       if (oversample) {
         const n  = ic.length;
-        const up = new Float32Array(n * 2);
         for (let i = 0; i < n; i++) {
-          up[i * 2]     = ic[i];
-          up[i * 2 + 1] = i + 1 < n ? (ic[i] + ic[i + 1]) * 0.5 : ic[i];
-        }
-        for (let i = 0; i < up.length; i++) up[i] = this._sat(up[i], drive);
-        for (let i = 0; i < n; i++) {
-          const sat = (up[i * 2] + up[i * 2 + 1]) * 0.5;
+          const next = i + 1 < n ? ic[i + 1] : ic[i];
+          const sat = (this._sat(ic[i], drive) + this._sat((ic[i] + next) * 0.5, drive)) * 0.5;
           oc[i] = ic[i] * (1 - mix) + sat * mix;
         }
       } else {

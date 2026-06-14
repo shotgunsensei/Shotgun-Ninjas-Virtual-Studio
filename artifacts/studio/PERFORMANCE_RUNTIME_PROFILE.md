@@ -150,3 +150,35 @@ Recommended next patch:
 - Add per-track `performance.mark()` / `measure()` around `ensureTrack()` and
   every major node group so the next profile identifies the exact node family
   causing the largest stall.
+
+## 2026-06-14 Trace-Driven Patch Note
+
+The first two `buildVoice()` items above were patched:
+
+- Default track graph now builds only `filter -> delay -> reverb -> channel`.
+- EQ, compressor, saturation, chorus, bitcrusher, and stereo width are created
+  lazily when settings or automation require them.
+- `SaturationProcessor.process()` no longer allocates a `Float32Array` in the
+  real-time oversampling branch.
+- Master worklet parameter sync is batched to one flush per 33 ms window.
+- `AudioEngine.dispose()` now provides defensive singleton/HMR cleanup.
+
+Verified in this pass:
+
+- `npm run typecheck`: pass.
+- `npm run build`: pass with existing warnings.
+- `corepack pnpm --dir artifacts/studio run typecheck`: pass.
+- `corepack pnpm --dir artifacts/studio run build`: pass with existing
+  warnings.
+- `corepack pnpm --dir artifacts/studio run test`: all 4 Playwright tests
+  printed `ok`, but the command wrapper timed out after 180 s because the test
+  command did not exit cleanly.
+
+Not verified in this pass:
+
+- A fresh post-patch Chrome trace.
+- 10-minute playback acceptance.
+- Repeated kit/project switching under an interactive browser.
+
+Reason: production preview starts in the foreground, but background preview
+processes did not remain reachable across sandbox tool calls in this session.

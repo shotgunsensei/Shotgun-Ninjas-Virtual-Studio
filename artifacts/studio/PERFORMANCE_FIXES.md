@@ -774,3 +774,68 @@ Make `buildVoice()` incremental/lazy:
 - Yield between instrument, channel, send, meter, and FX construction phases.
 - Add per-node-family timing marks before attempting another 10-minute playback
   acceptance run.
+
+---
+
+## Runtime Trace Stabilization Patch
+
+Date: 2026-06-14
+
+### Trace Root Causes Confirmed
+
+- The blob AudioWorklet source is the inline `PROCESSOR_CODE` bundle in
+  `src/lib/audio/worklet-manager.ts`.
+- `SaturationProcessor.process()` allocated a new `Float32Array` every render
+  quantum when oversampling was enabled. That matched the trace's blocked blob
+  `process` function pattern.
+- `AudioEngine.buildVoice()` eagerly created a dense per-track Tone graph,
+  including disabled/wet-0 FX such as `Tone.Chorus`, `Tone.Distortion`,
+  `Tone.Compressor`, `Tone.BitCrusher`, EQ/high-pass filters, and stereo
+  width. This explains the trace hot spots around `createIIRFilter`,
+  `createPeriodicWave`, and `createGain` during project/demo activation.
+- Master worklet parameter writes were applied synchronously whenever master
+  settings changed.
+
+### Fixes Applied
+
+- Removed real-time typed-array allocation from the saturation worklet process
+  path. Oversampling now computes the interpolated sample inline per block.
+- Coalesced master worklet parameter writes behind a 33 ms timer so rapid
+  setting changes are batched instead of flushed immediately.
+- Changed default track construction to a lean chain:
+  `filter -> delay -> reverb -> channel -> master`.
+- Added lazy creation and rewiring for optional track FX/EQ modules. EQ,
+  compressor, saturation, chorus, bitcrusher, and stereo width nodes are only
+  instantiated when user settings, sound params, or automation require them.
+- Added defensive `AudioEngine.dispose()` cleanup for panic, scheduled events,
+  tracks, metronome worklet, lookahead scheduler, master analyser, master chain,
+  and worklet blob URL.
+- Added dev/HMR duplicate-engine detection and HMR cleanup through a dynamic
+  import in `main.tsx` so cleanup does not force eager engine construction.
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | `tsc -p tsconfig.json --noEmit` completed cleanly. |
+| `npm run build` | Pass with warnings | Client/SSR/prerender completed. Existing sourcemap, dynamic/static import overlap, and large chunk warnings remain. |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | Clean pnpm typecheck completed. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Same build warnings as npm build. |
+| `corepack pnpm --dir artifacts/studio run test` | Partial | All 4 Playwright tests printed `ok`, but the wrapper timed out after 180 s because the command did not exit cleanly. |
+
+### Runtime Verification
+
+Production preview could be started in the foreground, but background preview
+processes did not stay reachable across sandbox tool calls, so a fresh
+post-patch Chrome trace was not captured in this pass. Do not treat this patch
+as the final 10-minute playback acceptance pass until it is profiled in an
+interactive browser.
+
+### Remaining Risks
+
+- The default track shell is now much lighter, but instrument factories and kit
+  creation can still be expensive and need a fresh trace.
+- AudioWorklet graph rewire has prior fallback risk because native worklet nodes
+  and Tone/standardized-audio-context nodes do not always connect cleanly.
+- Playwright's test command needs cleanup because it reported all tests passing
+  but left the command alive until the wrapper timeout.

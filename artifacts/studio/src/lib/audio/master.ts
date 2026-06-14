@@ -71,6 +71,7 @@ export class MasterChain {
   private saturationWorklet: AudioWorkletNode | null = null;
   private limiterWorklet: AudioWorkletNode | null = null;
   private workletsActive = false;
+  private workletParamTimer: number | null = null;
 
   constructor() {
     this.input = new Tone.Channel({ volume: 0 });
@@ -181,6 +182,15 @@ export class MasterChain {
   /** Sync current settings to worklet AudioParams. */
   private _applyWorkletParams(): void {
     if (!this.workletsActive) return;
+    if (this.workletParamTimer !== null) return;
+    this.workletParamTimer = window.setTimeout(() => {
+      this.workletParamTimer = null;
+      this.flushWorkletParams();
+    }, 33);
+  }
+
+  private flushWorkletParams(): void {
+    if (!this.workletsActive) return;
     const s = this.settings;
 
     // Soft clipper: enable only when softClip setting is on.
@@ -217,10 +227,8 @@ export class MasterChain {
 
   /** Enable or disable 2× oversampling on the saturation worklet. */
   setOversampling(on: boolean): void {
-    if (!this.saturationWorklet) return;
-    const p = this.saturationWorklet.parameters as unknown as Map<string, AudioParam>;
-    const oversample = p.get("oversample");
-    if (oversample) oversample.value = on ? 1 : 0;
+    this.settings = { ...this.settings, oversample: on };
+    this._applyWorkletParams();
   }
 
   // ── send buses ──────────────────────────────────────────────────────────
@@ -333,6 +341,8 @@ export class MasterChain {
     // Phase 6: oversample sync.
     if ("oversample" in next) {
       this.setOversampling(!!next.oversample);
+    } else if (this.workletsActive) {
+      this._applyWorkletParams();
     }
   }
 
@@ -373,6 +383,10 @@ export class MasterChain {
       window.clearInterval(this.clipCheckId);
       this.untrackClipCheckInterval?.();
       this.untrackClipCheckInterval = null;
+    }
+    if (this.workletParamTimer !== null && typeof window !== "undefined") {
+      window.clearTimeout(this.workletParamTimer);
+      this.workletParamTimer = null;
     }
     // Disconnect worklet nodes safely.
     for (const node of [this.softClipperWorklet, this.saturationWorklet, this.limiterWorklet]) {
