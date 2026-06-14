@@ -4,6 +4,7 @@ import { Mic, MicOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { audio } from "../../lib/audio/engine";
+import { visualTicker } from "../../lib/visualTicker";
 import { useStore, getStore } from "../../store";
 import type { Track } from "../../types";
 
@@ -14,8 +15,8 @@ export function VocalsPanel({ track }: { track: Track }) {
     getStore().set({ vocalDeviceId: id || null });
   const [monitoring, setMonitoring] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
-  const [level, setLevel] = useState(0);
   const meterRef = useRef<Tone.Meter | null>(null);
+  const levelBarRef = useRef<HTMLDivElement>(null);
 
   // populate devices once we have permissions
   const refreshDevices = async () => {
@@ -37,7 +38,7 @@ export function VocalsPanel({ track }: { track: Track }) {
 
   // attach a meter to mic for level display when monitoring
   useEffect(() => {
-    let raf = 0;
+    let unsubscribe: (() => void) | null = null;
     if (monitoring) {
       const mic = audio.getMic(track.id);
       if (mic) {
@@ -49,19 +50,28 @@ export function VocalsPanel({ track }: { track: Track }) {
           const db = typeof v === "number" ? v : v[0];
           // map -60..0 -> 0..1
           const norm = Math.max(0, Math.min(1, (db + 60) / 60));
-          setLevel(norm);
-          raf = requestAnimationFrame(tick);
+          if (levelBarRef.current) {
+            levelBarRef.current.style.width = `${norm * 100}%`;
+            levelBarRef.current.style.background =
+              norm > 0.85
+                ? "hsl(var(--blood))"
+                : norm > 0.6
+                  ? "hsl(var(--neon))"
+                  : "hsl(var(--neon) / 0.5)";
+          }
         };
-        raf = requestAnimationFrame(tick);
+        unsubscribe = visualTicker.subscribe(tick);
       }
     }
     return () => {
-      cancelAnimationFrame(raf);
+      unsubscribe?.();
       if (meterRef.current) {
         meterRef.current.dispose();
         meterRef.current = null;
       }
-      setLevel(0);
+      if (levelBarRef.current) {
+        levelBarRef.current.style.width = "0%";
+      }
     };
   }, [monitoring, track.id]);
 
@@ -158,16 +168,9 @@ export function VocalsPanel({ track }: { track: Track }) {
           </label>
           <div className="h-6 panel-inset rounded overflow-hidden relative">
             <div
+              ref={levelBarRef}
               className="h-full transition-all"
-              style={{
-                width: `${level * 100}%`,
-                background:
-                  level > 0.85
-                    ? "hsl(var(--blood))"
-                    : level > 0.6
-                      ? "hsl(var(--neon))"
-                      : "hsl(var(--neon) / 0.5)",
-              }}
+              style={{ width: "0%", background: "hsl(var(--neon) / 0.5)" }}
             />
             <div className="absolute inset-0 grid grid-cols-12 pointer-events-none">
               {Array.from({ length: 12 }).map((_, i) => (

@@ -29,6 +29,12 @@ import {
 } from "../lib/audio/sampleEdits";
 import { useStore, getStore, makeId, makeTrack } from "../store";
 import { saveProject } from "../lib/storage/db";
+import { startPerfTimer } from "../utils/performanceDiagnostics";
+import {
+  assertSampleImportAllowed,
+  formatBytes,
+  isLargeSample,
+} from "../lib/storage/performanceGuards";
 
 type Assign =
   | { kind: "none" }
@@ -75,7 +81,9 @@ export function SamplePreviewDialog({
   const [assign, setAssign] = useState<Assign>({ kind: "none" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const importTokenRef = useRef(0);
 
   // (Re)mount wavesurfer when the dialog opens with a new blob.
   useEffect(() => {
@@ -86,11 +94,24 @@ export function SamplePreviewDialog({
     setFadeIn(0);
     setFadeOut(0);
     setError(null);
+    setWarning(null);
+    try {
+      assertSampleImportAllowed(blob);
+      if (isLargeSample(blob)) {
+        setWarning(
+          `Large sample (${formatBytes(blob.size)}). Waveform and edits may take longer; autosave waits for the import to finish.`,
+        );
+      }
+    } catch (err) {
+      setError((err as Error).message);
+      return;
+    }
     setWsFailed(false);
     setPreviewBlob(null);
     setAssign({ kind: "none" });
     let ws: WaveSurfer | null = null;
     let regionsPlugin: ReturnType<typeof RegionsPlugin.create> | null = null;
+    const token = ++importTokenRef.current;
     try {
       regionsPlugin = RegionsPlugin.create();
       ws = WaveSurfer.create({
@@ -104,7 +125,20 @@ export function SamplePreviewDialog({
       });
       wsRef.current = ws;
       const url = URL.createObjectURL(blob);
+      const endWaveformTiming = startPerfTimer("waveform-generation", {
+        source: "WaveSurfer",
+        bytes: blob.size,
+        type: blob.type,
+      });
+      let waveformTimingEnded = false;
+      const endWaveformOnce = () => {
+        if (waveformTimingEnded) return;
+        waveformTimingEnded = true;
+        endWaveformTiming();
+      };
       ws.on("ready", () => {
+        if (token !== importTokenRef.current) return;
+        endWaveformOnce();
         const d = ws!.getDuration();
         setDuration(d);
         setRegion({ start: 0, end: d });
@@ -120,9 +154,19 @@ export function SamplePreviewDialog({
           setRegion({ start: r.start, end: r.end });
         });
       });
-      ws.on("error", () => setWsFailed(true));
-      ws.load(url).catch(() => setWsFailed(true));
+      ws.on("error", () => {
+        if (token !== importTokenRef.current) return;
+        endWaveformOnce();
+        setWsFailed(true);
+      });
+      ws.load(url).catch(() => {
+        if (token !== importTokenRef.current) return;
+        endWaveformOnce();
+        setWsFailed(true);
+      });
       return () => {
+        importTokenRef.current++;
+        endWaveformOnce();
         URL.revokeObjectURL(url);
         try {
           ws?.destroy();
@@ -151,10 +195,16 @@ export function SamplePreviewDialog({
   useEffect(() => {
     if (!wsFailed || !blob || !canvasRef.current) return;
     let cancelled = false;
+    const token = ++importTokenRef.current;
     (async () => {
+      const endTiming = startPerfTimer("waveform-generation", {
+        source: "SamplePreviewDialog fallback",
+        bytes: blob.size,
+        type: blob.type,
+      });
       try {
         const buf = await decodeBlob(blob);
-        if (cancelled || !canvasRef.current) return;
+        if (cancelled || token !== importTokenRef.current || !canvasRef.current) return;
         setDuration(buf.duration);
         setRegion({ start: 0, end: buf.duration });
         const cv = canvasRef.current;
@@ -180,10 +230,13 @@ export function SamplePreviewDialog({
         }
       } catch (err) {
         setError((err as Error).message);
+      } finally {
+        endTiming();
       }
     })();
     return () => {
       cancelled = true;
+      importTokenRef.current++;
     };
   }, [wsFailed, blob]);
 
@@ -474,6 +527,9 @@ export function SamplePreviewDialog({
 
           {error && (
             <p className="text-xs text-destructive font-mono">{error}</p>
+          )}
+          {warning && !error && (
+            <p className="text-xs text-amber-300 font-mono">{warning}</p>
           )}
 
           <div className="flex justify-end gap-2 pt-2">

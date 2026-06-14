@@ -1,3 +1,6 @@
+import { timePerfAsync } from "../../utils/performanceDiagnostics";
+import { assertSampleImportAllowed } from "../storage/performanceGuards";
+
 /**
  * Sample editing utilities. Operate on AudioBuffer / Blob in pure
  * browser-only code: trim, normalize, reverse, fade, trim-silence.
@@ -7,15 +10,18 @@
  */
 
 export async function decodeBlob(blob: Blob): Promise<AudioBuffer> {
-  const ac = new (window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext })
-      .webkitAudioContext)();
-  try {
-    const arr = await blob.arrayBuffer();
-    return await ac.decodeAudioData(arr.slice(0));
-  } finally {
-    await ac.close();
-  }
+  return timePerfAsync("sample-import", async () => {
+    assertSampleImportAllowed(blob);
+    const ac = new (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext)();
+    try {
+      const arr = await blob.arrayBuffer();
+      return await ac.decodeAudioData(arr.slice(0));
+    } finally {
+      await ac.close();
+    }
+  }, { bytes: blob.size, type: blob.type });
 }
 
 function createBuffer(
@@ -187,14 +193,16 @@ export async function applyEditsToBlob(
     fadeOutSec?: number;
   },
 ): Promise<{ blob: Blob; buffer: AudioBuffer }> {
-  let buf = await decodeBlob(blob);
-  const start = Math.max(0, edits.trimStartSec ?? 0);
-  const end = Math.min(buf.duration, edits.trimEndSec ?? buf.duration);
-  if (start > 0 || end < buf.duration) buf = trimBuffer(buf, start, end);
-  if (edits.reverse) buf = reverseBuffer(buf);
-  if (edits.fadeInSec || edits.fadeOutSec) {
-    buf = applyFades(buf, edits.fadeInSec ?? 0, edits.fadeOutSec ?? 0);
-  }
-  if (edits.normalize) buf = normalizeBuffer(buf);
-  return { blob: audioBufferToWavBlob(buf), buffer: buf };
+  return timePerfAsync("sample-edit", async () => {
+    let buf = await decodeBlob(blob);
+    const start = Math.max(0, edits.trimStartSec ?? 0);
+    const end = Math.min(buf.duration, edits.trimEndSec ?? buf.duration);
+    if (start > 0 || end < buf.duration) buf = trimBuffer(buf, start, end);
+    if (edits.reverse) buf = reverseBuffer(buf);
+    if (edits.fadeInSec || edits.fadeOutSec) {
+      buf = applyFades(buf, edits.fadeInSec ?? 0, edits.fadeOutSec ?? 0);
+    }
+    if (edits.normalize) buf = normalizeBuffer(buf);
+    return { blob: audioBufferToWavBlob(buf), buffer: buf };
+  }, { bytes: blob.size, type: blob.type });
 }

@@ -87,7 +87,29 @@ function isUncacheable(request, url) {
   if (url.pathname.endsWith(".hot-update.json")) return true;
   // Audio worklets / range requests for big media should pass through.
   if (request.headers.get("range")) return true;
+  if (request.destination === "audio" || request.destination === "video") return true;
+  if (url.pathname.includes("/api/")) return true;
+  if (url.pathname.includes("/samples/") || url.pathname.includes("/user-samples/"))
+    return true;
   return false;
+}
+
+function normalizedPath(url) {
+  return url.pathname.endsWith("/") ? url.pathname : url.pathname.replace(/\/$/, "");
+}
+
+function isShellUrl(url) {
+  const path = normalizedPath(url);
+  return SHELL_URLS.some((entry) => normalizedPath(new URL(entry, self.location.origin)) === path);
+}
+
+function isStaticAsset(request, url) {
+  if (isShellUrl(url)) return true;
+  const assetRoot = BASE + "assets/";
+  if (url.pathname.startsWith(assetRoot)) {
+    return ["script", "style", "worker", "font", "image", ""].includes(request.destination);
+  }
+  return ["manifest", "font", "image"].includes(request.destination);
 }
 
 self.addEventListener("fetch", (event) => {
@@ -122,8 +144,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Same-origin GETs: cache-first with background refresh. This covers
-  // hashed JS/CSS chunks, icons, fonts, and locally-bundled demo JSON.
+  // Static app-shell assets only: cache-first with background refresh.
+  // Do not cache arbitrary same-origin GETs; user projects and samples live
+  // in IndexedDB and future runtime endpoints must stay network-owned.
+  if (!isStaticAsset(request, url)) return;
+
   event.respondWith(
     (async () => {
       const cache = await caches.open(RUNTIME_CACHE);

@@ -15,6 +15,12 @@ import { makeId } from "../../store";
 import { audio } from "../../lib/audio/engine";
 import type { Track, NoteEvent, NoteClip } from "../../types";
 import { MidiLearnButton } from "../MidiLearnButton";
+import { startPerfTimer } from "../../utils/performanceDiagnostics";
+import {
+  assertSampleImportAllowed,
+  formatBytes,
+  isLargeSample,
+} from "../../lib/storage/performanceGuards";
 
 // ---- keyboard map: 1-8 = pads 0-7, q-i = pads 8-15 ----
 const PAD_KEYS: Record<string, number> = {
@@ -53,6 +59,7 @@ export function ChopLab({ track }: { track: Track }) {
   const [relinkNeeded, setRelinkNeeded] = useState(false);
 
   const engine = getChopEngine();
+  const loadTokenRef = useRef(0);
 
   // Keep engine tempo-sync state in sync with store.
   useEffect(() => {
@@ -78,12 +85,15 @@ export function ChopLab({ track }: { track: Track }) {
     }
 
     // Decode the stored blob back to an AudioBuffer.
+    const token = ++loadTokenRef.current;
     (async () => {
       try {
+        assertSampleImportAllowed(cl.sampleBlob!);
         const arrayBuffer = await cl.sampleBlob!.arrayBuffer();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawCtx: AudioContext = (Tone.getContext().rawContext as any);
         const decoded = await rawCtx.decodeAudioData(arrayBuffer);
+        if (token !== loadTokenRef.current) return;
         audioBufferRef.current = decoded;
         setSampleName(cl.sampleName ?? null);
         setRelinkNeeded(false);
@@ -155,14 +165,28 @@ export function ChopLab({ track }: { track: Track }) {
 
   // ---- Sample loading ----
   async function loadFile(file: File) {
+    const token = ++loadTokenRef.current;
+    const endTiming = startPerfTimer("sample-import", {
+      source: "ChopLab",
+      bytes: file.size,
+      type: file.type,
+    });
     setLoadError(null);
     setSampleName(null);
     setRelinkNeeded(false);
     try {
+      assertSampleImportAllowed(file);
+      if (isLargeSample(file)) {
+        getStore().setStatus(
+          `Large Chop Lab sample (${formatBytes(file.size)}). Loading may take a moment.`,
+          "warn",
+        );
+      }
       const arrayBuffer = await file.arrayBuffer();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rawCtx: AudioContext = (Tone.getContext().rawContext as any);
       const decoded = await rawCtx.decodeAudioData(arrayBuffer.slice(0));
+      if (token !== loadTokenRef.current) return;
       audioBufferRef.current = decoded;
       setSampleName(file.name);
       // Auto-estimate BPM from the loaded sample.
@@ -173,7 +197,9 @@ export function ChopLab({ track }: { track: Track }) {
       engine.loadBuffer(decoded, [], []);
       getStore().setStatus(`Sample loaded: ${file.name} · detected ~${detectedBpm} BPM`, "info");
     } catch (err) {
-      setLoadError("Failed to decode audio. Try a WAV or MP3 file.");
+      setLoadError((err as Error).message || "Failed to decode audio. Try a WAV or MP3 file.");
+    } finally {
+      endTiming();
     }
   }
 
@@ -596,6 +622,12 @@ function WaveformCanvas({
   const duration = audioBuffer.duration;
 
   const draw = useCallback(() => {
+    const endTiming = startPerfTimer("waveform-generation", {
+      source: "ChopLab",
+      samples: audioBuffer.length,
+      markers: markers.length,
+    });
+    try {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -654,6 +686,9 @@ function WaveformCanvas({
       ctx.font = "bold 9px monospace";
       ctx.fillText(String(i + 1), x + 2, 11);
     });
+    } finally {
+      endTiming();
+    }
   }, [audioBuffer, markers, duration]);
 
   // Resize + redraw.

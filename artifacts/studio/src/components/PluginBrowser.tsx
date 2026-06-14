@@ -20,7 +20,7 @@ import { pluginRegistry } from "../lib/plugins/registry";
 import { PLUGIN_ID_TO_FX_MODULE } from "../lib/plugins/builtins";
 import { loadWamPlugin } from "../lib/plugins/wam-loader";
 import type { PluginManifest } from "../lib/plugins/types";
-import type { FxModuleId } from "../types";
+import type { DrumKitId, FxModuleId } from "../types";
 
 type StatusBadge = "active" | "disabled" | "errored" | "inactive";
 
@@ -161,7 +161,7 @@ function InstrumentPluginRow({ manifest }: { manifest: PluginManifest }) {
       store.patchTrack(selectedTrackId, { presetId });
       store.setStatus(`Preset: ${manifest.name}`, "info");
     } else if (manifest.id.startsWith("instrument.drumkit.")) {
-      const kitId = manifest.id.replace("instrument.drumkit.", "");
+      const kitId = manifest.id.replace("instrument.drumkit.", "") as DrumKitId;
       if (track.kind !== "drums") {
         store.setStatus("Select a drum track to change kits.", "warn");
         return;

@@ -892,9 +892,11 @@ function _eightBitJingle(ctx: AudioContext, freq: number, dur: number) {
   osc2.stop(t + dur);
 }
 
-function _distCurve(amount: number): Float32Array {
+function _distCurve(amount: number): Float32Array<ArrayBuffer> {
   const n = 256;
-  const curve = new Float32Array(n);
+  const curve: Float32Array<ArrayBuffer> = new Float32Array(
+    new ArrayBuffer(n * Float32Array.BYTES_PER_ELEMENT),
+  );
   const k = amount;
   for (let i = 0; i < n; i++) {
     const x = (i * 2) / n - 1;

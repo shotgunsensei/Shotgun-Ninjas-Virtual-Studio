@@ -1,0 +1,152 @@
+# Performance Runtime Profile
+
+Date: 2026-06-12
+
+Scope: production runtime profiling and stress verification against
+`artifacts/studio`. This pass did not attempt feature work or UI redesign.
+
+## Runtime Setup
+
+| Item | Result |
+| --- | --- |
+| Browser | Playwright Chromium / Chrome 148.0.7778.96 |
+| Production preview URL | `http://127.0.0.1:5173/` |
+| Studio route | `http://127.0.0.1:5173/studio` |
+| Build hash evidence | Current measured bundle: `assets/index-C5HOAuT3.js`; later builds during patching emitted newer hashed bundles |
+| Service worker | Registered and controlling in preview; fresh-cache unregister/delete was used for focused probes |
+| Performance Mode | Toggle path available; full on/off stress was not completed because playback acceptance was blocked first |
+| Profiling harness | `scripts/runtime-profile.mjs` writes local JSON under `runtime-profile/`; no external analytics or project data upload |
+
+## Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | `tsc -p tsconfig.json --noEmit` completed without errors after runtime patches. |
+| `npm run build` | Pass with warnings | Client/SSR/prerender completed. Warnings remain for sourcemap lookups, static/dynamic import overlap, and the large `index` chunk. |
+| `npm run test` | Pass | 4 Playwright welcome-flow tests passed. |
+| `npm run serve -- --strictPort true --port 5173` | Pass | Production preview served `/` and `/studio` on `127.0.0.1:5173`. |
+
+## Evidence Captured
+
+### Cold Load
+
+Partial profile artifact:
+
+- `runtime-profile/runtime-profile-1781297512520.json`
+
+Cold `/studio` production load completed, but Long Task API captured four long
+tasks before audio startup:
+
+| Long task | Duration |
+| --- | ---: |
+| Startup task 1 | 342 ms |
+| Startup task 2 | 3,280 ms |
+| Startup task 3 | 262 ms |
+| Startup task 4 | 2,266 ms |
+
+After cold load:
+
+- JS heap used: 27.66 MB
+- JS heap total: 99.21 MB
+- DOM nodes: 4,205 according to CDP, 2,344 elements in DOM query
+- JS event listeners: 6,240
+- Service worker controller: true
+- Console errors: none in the partial profile
+
+### Audio Startup
+
+Focused production probe:
+
+- `/studio` load: 7.1-10.4 seconds depending on cache/build state
+- Enable Audio button hides after roughly 0.35-1.1 seconds
+- Console warnings confirmed the AudioWorklet path still falls back:
+  - `[MasterChain] Worklet rewire failed - keeping Tone.js chain: InvalidAccessError`
+  - `[AudioEngine] Worklet init failed - Tone.js fallback active. TypeError: Failed to execute 'connect' on 'AudioNode': Overload resolution failed.`
+
+The worklet path was improved from wrong-context failures to successful
+registration/node creation, but native worklet nodes still cannot be rewired
+into the existing Tone/standardized-audio-context graph safely.
+
+### Demo Load After Audio Enabled
+
+Focused production probe after `Enable Audio`, then Load -> Trap Starter:
+
+| Measurement | Before patches | After scoped patches |
+| --- | ---: | ---: |
+| Trap Starter click/dialog close | >30,000 ms timeout / 38,630 ms measured | 29,940 ms measured |
+| Largest long task | 38,011 ms | 26,716 ms |
+| Console/page errors | none | none |
+
+The patches reduced duplicate eager work, but did not remove the blocking root
+cause. A single `audio.ensureTrack()` / `buildVoice()` path can still monopolize
+the main thread for roughly 27 seconds after audio is enabled.
+
+## Runtime Scenarios
+
+| Scenario | Status | Evidence / reason |
+| --- | --- | --- |
+| Cold load `/` and `/studio` | Partial pass | Route loads with no page errors, but startup has 3.28 s and 2.27 s long tasks. |
+| Audio startup play/pause/stop/panic/replay | Partial pass | Enable Audio completes; post-panic replay UI path was previously fixed, but full audible verification is not possible in headless. |
+| 10-minute playback with mixer/visualizer | Blocked | Could not begin valid run because loading Trap Starter after audio enabled produced 26-38 s long tasks. |
+| Mixer stress | Blocked | Not meaningful until demo load/playback no longer freezes. |
+| Visualizer stress | Blocked | Not meaningful until demo load/playback no longer freezes. |
+| Repeated kit/instrument switching | Blocked | Track graph build remains the blocking issue. |
+| Repeated project load/unload | Failed | First post-audio demo load produces page-freezing long task. |
+| Sample import | Not completed | Deferred because the primary production playback path is blocked. |
+| Save/load/autosave | Not completed | Deferred because project load after audio enabled is blocked. |
+| JSON export/import | Not completed | Deferred after primary runtime blocker was confirmed. |
+| WAV export | Not completed in this pass | Previous smoke passed default WAV; current runtime pass blocked before playback acceptance. |
+| Service worker cache simulation | Partial | Fresh-cache unregister/delete path used in probes; full old-cache update simulation not completed. |
+
+## Confirmed Bottlenecks
+
+1. **Main-thread audio graph construction remains the release blocker.**
+   `buildVoice()` still creates a dense Tone graph synchronously for a track.
+   Runtime evidence shows one graph/scheduling cycle can create a 26-32 second
+   long task after audio is enabled.
+
+2. **Initial app load still has multi-second long tasks.**
+   Cold production `/studio` load captured 3.28 s and 2.27 s long tasks before
+   any deliberate playback stress.
+
+3. **AudioWorklet integration still falls back.**
+   Worklet registration/context resolution was improved, but native worklet
+   nodes still fail to connect into the existing graph. The studio runs on the
+   Tone.js fallback chain.
+
+4. **The full 10-minute playback acceptance test has not passed.**
+   Per the stabilization rule, the studio cannot be called fixed or release-safe
+   until this passes without page-unresponsive behavior.
+
+## Fixes Applied During Runtime Profiling
+
+- Added `scripts/runtime-profile.mjs`, a local Playwright/CDP runtime profiling
+  harness that captures long tasks, heap, DOM node count, listener count,
+  console warnings/errors, and scenario results.
+- Hardened `WorkletManager` context handling so it unwraps native
+  `BaseAudioContext` through Tone/standardized-audio-context wrapper shapes.
+- Changed worklet call sites to pass the Tone context wrapper to the manager.
+- Removed duplicate eager `audio.ensureTrack()` / `flushMixToEngine()` calls
+  from `loadDemo()` and `remixDemo()`.
+- Removed synchronous `audio.disposeAllTracks()` from demo/remix click handlers.
+- Removed synchronous `audio.removeAllTracksExcept()` from `resetStore()`.
+- Deferred and chunked `useTransport()` project scheduling work so it yields
+  between old-track removals and new-track scheduling.
+
+## Release Safety
+
+Not release-safe.
+
+The exact next blocking issue is to make `audio.ensureTrack()` / `buildVoice()`
+incremental or lazy enough that loading a demo/project after audio is enabled
+does not create a >50 ms long task, and certainly not a 26-32 second task.
+
+Recommended next patch:
+
+- Split `buildVoice()` into a cheap track shell plus lazy instrument/FX module
+  realization.
+- Avoid creating disabled/wet-0 FX nodes until a track actually uses them.
+- Build at most one small graph segment per task and yield between segments.
+- Add per-track `performance.mark()` / `measure()` around `ensureTrack()` and
+  every major node group so the next profile identifies the exact node family
+  causing the largest stall.

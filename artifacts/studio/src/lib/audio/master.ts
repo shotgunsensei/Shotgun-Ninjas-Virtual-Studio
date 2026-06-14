@@ -2,6 +2,7 @@ import * as Tone from "tone";
 import type { MasterBusSettings, SendBusId } from "../../types";
 import { SEND_BUS_IDS } from "../../types";
 import { workletManager } from "./worklet-manager";
+import { trackInterval } from "../../utils/performanceDiagnostics";
 
 /**
  * Master safety chain (v2, Phase 6 upgrade).
@@ -58,6 +59,7 @@ export class MasterChain {
   private settings: MasterBusSettings = { ...DEFAULT_MASTER_BUS };
   private clipped = false;
   private clipCheckId: number | null = null;
+  private untrackClipCheckInterval: (() => void) | null = null;
 
   private levels: { peakDb: [number, number]; rmsDb: [number, number] } = {
     peakDb: [-Infinity, -Infinity],
@@ -127,11 +129,11 @@ export class MasterChain {
    */
   initWorklets(): void {
     if (workletManager.fallback || !workletManager.ready) return;
-    const rawCtx = Tone.getContext().rawContext as AudioContext;
+    const toneCtx = Tone.getContext() as unknown as AudioContext;
 
-    const clip = workletManager.createNode("soft-clipper", rawCtx);
-    const sat  = workletManager.createNode("saturation",   rawCtx);
-    const lim  = workletManager.createNode("limiter",      rawCtx);
+    const clip = workletManager.createNode("soft-clipper", toneCtx);
+    const sat  = workletManager.createNode("saturation",   toneCtx);
+    const lim  = workletManager.createNode("limiter",      toneCtx);
 
     if (!clip || !sat || !lim) return;
 
@@ -276,6 +278,7 @@ export class MasterChain {
       const p = typeof peak === "number" ? peak : Math.max(peak[0] ?? -Infinity, peak[1] ?? -Infinity);
       if (p > -0.1) this.clipped = true;
     };
+    this.untrackClipCheckInterval = trackInterval("master-clip-watcher");
     this.clipCheckId = window.setInterval(tick, 80);
   }
 
@@ -368,6 +371,8 @@ export class MasterChain {
   dispose() {
     if (this.clipCheckId !== null && typeof window !== "undefined") {
       window.clearInterval(this.clipCheckId);
+      this.untrackClipCheckInterval?.();
+      this.untrackClipCheckInterval = null;
     }
     // Disconnect worklet nodes safely.
     for (const node of [this.softClipperWorklet, this.saturationWorklet, this.limiterWorklet]) {

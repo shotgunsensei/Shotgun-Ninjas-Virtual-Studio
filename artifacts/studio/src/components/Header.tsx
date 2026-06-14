@@ -70,10 +70,10 @@ import {
   downloadBlob,
   studioExportFilename,
   studioProjectFilename,
-  detectClipping,
   exportStemsZip,
   exportDawPack,
   type ExportFormat,
+  type RenderOptions,
   type RenderProgress,
   type StemProgress,
 } from "../lib/audio/export";
@@ -97,6 +97,10 @@ import {
   clearDraft,
   type ProjectExportMode,
 } from "../lib/storage/db";
+import {
+  assertJsonImportAllowed,
+  beginStorageCriticalOperation,
+} from "../lib/storage/performanceGuards";
 import {
   Dialog,
   DialogContent,
@@ -315,6 +319,7 @@ export function Header() {
     setExportProgress({ phase: "decoding", progress: 0 });
     setExporting(true);
     cancelRef.current = { cancelled: false };
+    const endCriticalOperation = beginStorageCriticalOperation();
     try {
       const proj = getStore().state.project;
       const renderOptions =
@@ -338,22 +343,11 @@ export function Header() {
         renderOptions,
       );
       if (cancelRef.current.cancelled) throw new Error("Export cancelled");
-      // Detect clipping for status surface
-      try {
-        const ac = new AudioContext();
-        const buf = await ac.decodeAudioData(
-          (await result.blob.arrayBuffer()).slice(0),
+      if (result.clipping?.clipped) {
+        getStore().setStatus(
+          `Master clipped (${result.clipping.peakDb.toFixed(1)} dBFS) — consider lowering master.`,
+          "warn",
         );
-        const { clipped, peakDb } = detectClipping(buf);
-        if (clipped) {
-          getStore().setStatus(
-            `Master clipped (${peakDb.toFixed(1)} dBFS) — consider lowering master.`,
-            "warn",
-          );
-        }
-        await ac.close();
-      } catch {
-        // ignore peak detection failures
       }
       const filename = studioExportFilename(proj.name, proj.bpm, result.extension);
       let saved = false;
@@ -396,11 +390,13 @@ export function Header() {
         getStore().setStatus(`Export failed: ${msg}`, "error");
       }
     } finally {
+      endCriticalOperation();
       setExporting(false);
     }
   };
 
   const onJsonExport = async (mode: ProjectExportMode) => {
+    const endCriticalOperation = beginStorageCriticalOperation();
     try {
       const proj = getStore().state.project;
       const text = await projectToJson(proj, mode);
@@ -435,11 +431,15 @@ export function Header() {
         `JSON export failed: ${(err as Error).message}`,
         "error",
       );
+    } finally {
+      endCriticalOperation();
     }
   };
 
   const onJsonImport = async (file: File) => {
+    const endCriticalOperation = beginStorageCriticalOperation();
     try {
+      assertJsonImportAllowed(file);
       const text = await file.text();
       const summary = summarizeProjectJson(text);
       setImportSummary(summary);
@@ -448,13 +448,16 @@ export function Header() {
         `JSON import failed: ${(err as Error).message}`,
         "error",
       );
+    } finally {
+      endCriticalOperation();
     }
   };
 
   const confirmImport = async () => {
     if (!importSummary) return;
-    const proj = importSummary.project;
+    const endCriticalOperation = beginStorageCriticalOperation();
     try {
+      const proj = parseProjectJson(importSummary.jsonText);
       audio.stop();
       await saveProject(proj);
       await setLastProjectId(proj.id);
@@ -466,6 +469,8 @@ export function Header() {
         `Import failed: ${(err as Error).message}`,
         "error",
       );
+    } finally {
+      endCriticalOperation();
     }
   };
 
@@ -680,6 +685,7 @@ export function Header() {
     setStemsExporting(true);
     setStemProgress(null);
     setExportModalOpen(false);
+    const endCriticalOperation = beginStorageCriticalOperation();
     try {
       const proj = getStore().state.project;
       const blob = await exportStemsZip(proj, options, (p) => setStemProgress(p));
@@ -689,6 +695,7 @@ export function Header() {
     } catch (err) {
       getStore().setStatus(`Stems export failed: ${(err as Error).message}`, "error");
     } finally {
+      endCriticalOperation();
       setStemsExporting(false);
       setStemProgress(null);
     }
@@ -700,6 +707,7 @@ export function Header() {
     setDawPackExporting(true);
     setDawPackProgress(null);
     setExportModalOpen(false);
+    const endCriticalOperation = beginStorageCriticalOperation();
     try {
       const proj = getStore().state.project;
 
@@ -742,6 +750,7 @@ export function Header() {
     } catch (err) {
       getStore().setStatus(`DAW Pack export failed: ${(err as Error).message}`, "error");
     } finally {
+      endCriticalOperation();
       setDawPackExporting(false);
       setDawPackProgress(null);
     }
@@ -1593,7 +1602,7 @@ export function Header() {
                   ))}
                 </select>
                 <span className="text-muted-foreground/70 text-[10px]">
-                  Drafts are written ~1s after each change.
+                  Drafts are written after ~8s of idle editing.
                 </span>
               </label>
             </section>

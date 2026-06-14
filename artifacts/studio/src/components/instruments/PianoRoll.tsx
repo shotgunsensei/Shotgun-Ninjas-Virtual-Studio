@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { audio } from "../../lib/audio/engine";
+import { visualTicker } from "../../lib/visualTicker";
 import { getStore, makeId, useStore } from "../../store";
 import type { NoteClip, NoteEvent, StepDivision, Track } from "../../types";
 
@@ -112,18 +113,11 @@ export function PianoRoll({ track }: { track: Track }) {
   // Live playhead during playback (no React re-renders per frame).
   useEffect(() => {
     if (!isPlaying || !playheadRef.current) return;
-    let raf = 0;
-    const tick = () => {
-      // Skip the DOM write while the tab is hidden — transport position
-      // is still advancing and will be picked up on resume.
-      if (!document.hidden && playheadRef.current) {
-        const pos = audio.positionBeats() % totalBeats;
-        playheadRef.current.style.transform = `translateX(${pos * PX_PER_BEAT}px)`;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return visualTicker.subscribe(() => {
+      if (!playheadRef.current) return;
+      const pos = audio.positionBeats() % totalBeats;
+      playheadRef.current.style.transform = `translateX(${pos * PX_PER_BEAT}px)`;
+    });
   }, [isPlaying, totalBeats]);
 
   // Delete the selected note via keyboard (only when the roll has focus

@@ -3,6 +3,7 @@ import * as Tone from "tone";
 import { audio } from "../lib/audio/engine";
 import { getStore, useStore, makeId } from "../store";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
+import { startPerfTimer } from "../utils/performanceDiagnostics";
 
 /**
  * Hook providing the play/pause/stop/record actions for the transport bar.
@@ -19,6 +20,8 @@ export function useTransport() {
   const scheduleKey = useStore((s) => {
     const p = s.project;
     return (
+      s.transportScheduleRevision +
+      '|' +
       p.bpm +
       '|' +
       p.tracks
@@ -49,9 +52,14 @@ export function useTransport() {
   }, [audioUnlocked]);
 
   const play = useCallback(async () => {
-    await ensureUnlocked();
-    audio.play();
-    getStore().set({ isPlaying: true });
+    const endTiming = startPerfTimer("transport-play");
+    try {
+      await ensureUnlocked();
+      audio.play();
+      getStore().set({ isPlaying: true });
+    } finally {
+      endTiming();
+    }
   }, [ensureUnlocked]);
 
   const pause = useCallback(() => {
@@ -60,56 +68,61 @@ export function useTransport() {
   }, []);
 
   const stop = useCallback(async () => {
-    // cancel any pending count-in BEFORE doing anything else so deferred
-    // timers cannot start a new recording after stop.
-    const timers = getStore().state.countInTimers;
-    if (timers.interval !== null) window.clearInterval(timers.interval);
-    if (timers.timeout !== null) window.clearTimeout(timers.timeout);
-    getStore().set({
-      countInTimers: { interval: null, timeout: null },
-      countingIn: false,
-      countInBeat: 0,
-    });
+    const endTiming = startPerfTimer("transport-stop");
+    try {
+      // cancel any pending count-in BEFORE doing anything else so deferred
+      // timers cannot start a new recording after stop.
+      const timers = getStore().state.countInTimers;
+      if (timers.interval !== null) window.clearInterval(timers.interval);
+      if (timers.timeout !== null) window.clearTimeout(timers.timeout);
+      getStore().set({
+        countInTimers: { interval: null, timeout: null },
+        countingIn: false,
+        countInBeat: 0,
+      });
 
-    // commit any in-progress recording first
-    const armed = getStore().state.project.tracks.find((t) => t.armed);
-    if (armed) {
-      if (armed.kind === "vocals") {
-        if (vocalRecorder.isActive()) {
-          const result = await vocalRecorder.stop();
-          if (result) {
-            getStore().addAudioClip(armed.id, {
+      // commit any in-progress recording first
+      const armed = getStore().state.project.tracks.find((t) => t.armed);
+      if (armed) {
+        if (armed.kind === "vocals") {
+          if (vocalRecorder.isActive()) {
+            const result = await vocalRecorder.stop();
+            if (result) {
+              getStore().addAudioClip(armed.id, {
+                id: makeId(),
+                start: result.startBeat,
+                durationSec: result.durationSec,
+                blob: result.blob,
+              });
+              // Surface the take in the sample preview dialog so the user
+              // can trim silence / normalize / fade and save it to the
+              // sample library or re-assign it.
+              getStore().set({
+                pendingSample: {
+                  blob: result.blob,
+                  defaultName: `${armed.name} take ${new Date().toLocaleTimeString()}`,
+                  recordedTrackId: armed.id,
+                },
+              });
+            }
+          }
+        } else if (noteRecorder.isActiveFor(armed.id)) {
+          const result = noteRecorder.stop();
+          if (result && result.events.length > 0) {
+            getStore().addNoteClip(armed.id, {
               id: makeId(),
               start: result.startBeat,
-              durationSec: result.durationSec,
-              blob: result.blob,
-            });
-            // Surface the take in the sample preview dialog so the user
-            // can trim silence / normalize / fade and save it to the
-            // sample library or re-assign it.
-            getStore().set({
-              pendingSample: {
-                blob: result.blob,
-                defaultName: `${armed.name} take ${new Date().toLocaleTimeString()}`,
-                recordedTrackId: armed.id,
-              },
+              length: Math.max(result.lengthBeats, 1),
+              notes: result.events,
             });
           }
         }
-      } else if (noteRecorder.isActiveFor(armed.id)) {
-        const result = noteRecorder.stop();
-        if (result && result.events.length > 0) {
-          getStore().addNoteClip(armed.id, {
-            id: makeId(),
-            start: result.startBeat,
-            length: Math.max(result.lengthBeats, 1),
-            notes: result.events,
-          });
-        }
       }
+      audio.stop();
+      getStore().set({ isPlaying: false, isRecording: false, countingIn: false, countInBeat: 0 });
+    } finally {
+      endTiming();
     }
-    audio.stop();
-    getStore().set({ isPlaying: false, isRecording: false, countingIn: false, countInBeat: 0 });
   }, []);
 
   const record = useCallback(async () => {
@@ -190,32 +203,64 @@ export function useTransport() {
     audioIds: [],
   });
   useEffect(() => {
-    const tracks = getStore().state.project.tracks;
-    for (const t of tracks) audio.ensureTrack(t);
-    audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
-    scheduledRef.current.audioPlayers.forEach((p) => p.dispose());
-
+    let cancelled = false;
     const noteIds: number[] = [];
     const audioPlayers: Tone.Player[] = [];
     const audioIds: number[] = [];
-    for (const t of tracks) {
-      for (const c of t.noteClips) {
-        noteIds.push(...audio.scheduleClip(t, c));
-      }
-      for (const c of t.audioClips) {
-        if (c.blob) {
-          const r = audio.scheduleAudioClip(t, c);
-          if (r) {
-            audioIds.push(r.id);
-            audioPlayers.push(r.player);
-          }
+
+    const yieldToBrowser = () =>
+      new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+    const run = async () => {
+      const tracks = getStore().state.project.tracks;
+      const keepTrackIds = new Set(tracks.map((t) => t.id));
+      for (const id of audio.getActiveTrackIds()) {
+        if (cancelled) break;
+        if (!keepTrackIds.has(id)) {
+          audio.removeTrack(id);
+          await yieldToBrowser();
         }
       }
-    }
-    scheduledRef.current = { noteIds, audioPlayers, audioIds };
+      audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
+      audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
+
+      for (const t of tracks) {
+        if (cancelled) break;
+        audio.ensureTrack(t);
+        for (const c of t.noteClips) {
+          if (cancelled) break;
+          noteIds.push(...audio.scheduleClip(t, c));
+        }
+        for (const c of t.audioClips) {
+          if (cancelled) break;
+          if (c.blob) {
+            const r = audio.scheduleAudioClip(t, c);
+            if (r) {
+              audioIds.push(r.id);
+              audioPlayers.push(r.player);
+            }
+          }
+        }
+        await yieldToBrowser();
+      }
+
+      if (cancelled) {
+        audio.cancelScheduled([...noteIds, ...audioIds]);
+        audio.disposeScheduledAudioPlayers(audioPlayers);
+        return;
+      }
+      scheduledRef.current = { noteIds, audioPlayers, audioIds };
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      void run();
+    }, 250);
+
     return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
       audio.cancelScheduled([...noteIds, ...audioIds]);
-      audioPlayers.forEach((p) => p.dispose());
+      audio.disposeScheduledAudioPlayers(audioPlayers);
     };
   }, [scheduleKey]);
 

@@ -2,11 +2,11 @@
  * AudioDiagnosticsPanel — Phase 6 Pro Audio Engine
  *
  * Collapsible real-time panel accessible from the transport bar. Polls
- * the audio engine and browser APIs at 4 Hz and displays:
+ * the audio engine and browser APIs at 1 Hz and displays:
  *   - AudioContext state, sample rate, base/output latency
  *   - Current BPM, scheduled event count, active voice count
  *   - Peak output level in dBFS (from the existing master Meter)
- *   - Dropped visual frames (rAF delta > 33 ms)
+ *   - Dropped visual frames relative to the shared visual ticker cadence
  *   - Live CPU pressure via AudioWorklet round-trip timing (green→yellow→red)
  *   - Browser capability flags (AudioWorklet, MIDI, SharedArrayBuffer,
  *     OfflineAudioContext)
@@ -18,7 +18,9 @@ import { Activity, X, AlertTriangle } from "lucide-react";
 import { audio } from "../lib/audio/engine";
 import { lookaheadScheduler } from "../lib/audio/lookahead-scheduler";
 import { workletManager } from "../lib/audio/worklet-manager";
+import { visualTicker } from "../lib/visualTicker";
 import { useStore } from "../store";
+import { trackInterval } from "../utils/performanceDiagnostics";
 
 // CPU pressure thresholds (ms round-trip from main → audio worklet → main).
 // A single 128-sample buffer at 44.1 kHz is ~2.9 ms.
@@ -198,44 +200,36 @@ export function AudioDiagnosticsPanel({
   const [snap, setSnap] = useState<DiagSnap | null>(null);
   const droppedFramesRef = useRef(0);
   const lastRafTsRef = useRef<number | null>(null);
-  const rafRef = useRef<number>(0);
   const oversampleOn = useStore((s) => !!(s.project.masterBus?.oversample));
 
-  // rAF dropped-frame monitor — only runs while the panel is open.
+  // Shared-ticker dropped-frame monitor — only runs while the panel is open.
   // Gated on `open` so no rAF loop is active when the panel is closed;
-  // also guarded by document.hidden so tab-backgrounding doesn't falsely
-  // inflate the counter or waste CPU when invisible.
+  // visualTicker also pauses automatically while document.hidden.
   useEffect(() => {
     if (!open) {
       lastRafTsRef.current = null;
       return;
     }
-    let running = true;
-    const tick = (ts: number) => {
-      if (!running) return;
-      if (!document.hidden) {
-        const last = lastRafTsRef.current;
-        if (last !== null && ts - last > 33) droppedFramesRef.current++;
-        lastRafTsRef.current = ts;
-      } else {
-        // Reset timestamp on returning from hidden so the first visible frame
-        // is not counted as a dropped frame.
-        lastRafTsRef.current = null;
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
+    const unsubscribe = visualTicker.subscribe((ts) => {
+      const last = lastRafTsRef.current;
+      const expectedFrameMs = 1000 / visualTicker.getFpsCap();
+      const droppedThresholdMs = Math.max(66, expectedFrameMs * 1.75);
+      if (last !== null && ts - last > droppedThresholdMs) droppedFramesRef.current++;
+      lastRafTsRef.current = ts;
+    });
     return () => {
-      running = false;
-      cancelAnimationFrame(rafRef.current);
+      unsubscribe();
+      lastRafTsRef.current = null;
     };
   }, [open]);
 
-  // 4 Hz polling loop
+  // 1 Hz polling loop. This is a diagnostics readout, not a meter; keep it
+  // visible enough for debugging without repainting the panel 4x per second.
   useEffect(() => {
     if (!open) return;
 
     const poll = () => {
+      if (document.hidden) return;
       try {
         const rawCtx = Tone.getContext().rawContext as AudioContext | undefined;
         const ctxAny = rawCtx as (AudioContext & { baseLatency?: number; outputLatency?: number }) | undefined;
@@ -279,8 +273,12 @@ export function AudioDiagnosticsPanel({
     };
 
     poll();
-    const id = setInterval(poll, 250);
-    return () => clearInterval(id);
+    const untrackInterval = trackInterval("AudioDiagnosticsPanel poll");
+    const id = setInterval(poll, 1000);
+    return () => {
+      clearInterval(id);
+      untrackInterval();
+    };
   }, [open, oversampleOn]);
 
   if (!open) return null;

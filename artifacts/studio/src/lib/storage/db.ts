@@ -2,6 +2,8 @@ import { openDB, type IDBPDatabase } from "idb";
 import type { ChopLabPersistedState, Project, SampleLibraryItem } from "../../types";
 import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
 import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
+import { countPerf, timePerfAsync } from "../../utils/performanceDiagnostics";
+import { blobContentFingerprint } from "./performanceGuards";
 
 const DB_NAME = "shotgun-ninjas-studio";
 /** v1 — initial projects/blobs/meta stores.
@@ -70,11 +72,6 @@ let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 // blobs on every autosave tick when nothing has changed.
 const blobFpCache = new Map<string, string>();
 
-function blobFingerprint(blob: Blob): string {
-  const lm = (blob as unknown as { lastModified?: number }).lastModified ?? 0;
-  return `${blob.size}:${blob.type}:${lm}`;
-}
-
 function getDb() {
   if (!dbPromise) {
     dbPromise = openDB<Schema>(DB_NAME, DB_VERSION, {
@@ -118,8 +115,9 @@ async function serializeAndFlushBlobs(
   const serializedSamples = await Promise.all(
     (project.samples ?? []).map(async (s) => {
       if (s.blob) {
-        const fp = blobFingerprint(s.blob);
+        const fp = await blobContentFingerprint(s.blob);
         if (blobFpCache.get(s.blobKey) !== fp) {
+          countPerf("sampleBlobWrites", 1, { kind: "sample", bytes: s.blob.size });
           await blobs.put(s.blob, s.blobKey);
           blobFpCache.set(s.blobKey, fp);
         }
@@ -138,8 +136,9 @@ async function serializeAndFlushBlobs(
   if (project.chopLab) {
     const cl = project.chopLab;
     if (cl.sampleBlob && cl.sampleBlobKey) {
-      const fp = blobFingerprint(cl.sampleBlob);
+      const fp = await blobContentFingerprint(cl.sampleBlob);
       if (blobFpCache.get(cl.sampleBlobKey) !== fp) {
+        countPerf("sampleBlobWrites", 1, { kind: "choplab", bytes: cl.sampleBlob.size });
         await blobs.put(cl.sampleBlob, cl.sampleBlobKey);
         blobFpCache.set(cl.sampleBlobKey, fp);
       }
@@ -166,8 +165,9 @@ async function serializeAndFlushBlobs(
               blobKey = `${project.id}:${t.id}:${c.id}`;
             }
             if (c.blob && blobKey) {
-              const fp = blobFingerprint(c.blob);
+              const fp = await blobContentFingerprint(c.blob);
               if (blobFpCache.get(blobKey) !== fp) {
+                countPerf("sampleBlobWrites", 1, { kind: "audio-clip", bytes: c.blob.size });
                 await blobs.put(c.blob, blobKey);
                 blobFpCache.set(blobKey, fp);
               }
@@ -188,26 +188,33 @@ async function serializeAndFlushBlobs(
 }
 
 export async function saveProject(project: Project): Promise<void> {
-  const db = await getDb();
-  const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE, META_STORE], "readwrite");
-  const serialized = await serializeAndFlushBlobs(project, tx);
-  await tx.objectStore(PROJECTS_STORE).put(serialized, project.id);
-  await tx
-    .objectStore(META_STORE)
-    .put({ lastProjectId: project.id }, META_LAST_PROJECT);
-  const savedInfo: LastSavedInfo = { projectId: project.id, ts: Date.now() };
-  await tx.objectStore(META_STORE).put(savedInfo, META_LAST_SAVED);
-  // Saving makes any pending draft obsolete — clear it so the recovery
-  // prompt won't re-offer stale data on next load.
-  await tx.objectStore(META_STORE).delete(META_DRAFT);
-  await tx.done;
+  return timePerfAsync("project-save", async () => {
+    const db = await getDb();
+    const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE, META_STORE], "readwrite");
+    const serialized = await serializeAndFlushBlobs(project, tx);
+    await tx.objectStore(PROJECTS_STORE).put(serialized, project.id);
+    await tx
+      .objectStore(META_STORE)
+      .put({ lastProjectId: project.id }, META_LAST_PROJECT);
+    const savedInfo: LastSavedInfo = { projectId: project.id, ts: Date.now() };
+    await tx.objectStore(META_STORE).put(savedInfo, META_LAST_SAVED);
+    // Saving makes any pending draft obsolete — clear it so the recovery
+    // prompt won't re-offer stale data on next load.
+    await tx.objectStore(META_STORE).delete(META_DRAFT);
+    await tx.done;
+  }, {
+    tracks: project.tracks.length,
+    samples: project.samples?.length ?? 0,
+  });
 }
 
 export async function loadProject(id: string): Promise<Project | null> {
-  const db = await getDb();
-  const raw = (await db.get(PROJECTS_STORE, id)) as SerializedProject | undefined;
-  if (!raw) return null;
-  return hydrateSerialized(raw, db);
+  return timePerfAsync("project-load", async () => {
+    const db = await getDb();
+    const raw = (await db.get(PROJECTS_STORE, id)) as SerializedProject | undefined;
+    if (!raw) return null;
+    return hydrateSerialized(raw, db);
+  }, { projectId: id });
 }
 
 async function hydrateSerialized(
@@ -309,16 +316,21 @@ export async function getLastSavedInfo(): Promise<LastSavedInfo | null> {
  * than the last saved version.
  */
 export async function saveDraft(project: Project): Promise<void> {
-  const db = await getDb();
-  const tx = db.transaction([BLOBS_STORE, META_STORE], "readwrite");
-  const serialized = await serializeAndFlushBlobs(project, tx);
-  const snapshot: DraftSnapshot = {
-    project: serialized,
-    ts: Date.now(),
-    projectId: project.id,
-  };
-  await tx.objectStore(META_STORE).put(snapshot, META_DRAFT);
-  await tx.done;
+  return timePerfAsync("autosave", async () => {
+    const db = await getDb();
+    const tx = db.transaction([BLOBS_STORE, META_STORE], "readwrite");
+    const serialized = await serializeAndFlushBlobs(project, tx);
+    const snapshot: DraftSnapshot = {
+      project: serialized,
+      ts: Date.now(),
+      projectId: project.id,
+    };
+    await tx.objectStore(META_STORE).put(snapshot, META_DRAFT);
+    await tx.done;
+  }, {
+    tracks: project.tracks.length,
+    samples: project.samples?.length ?? 0,
+  });
 }
 
 export async function loadDraft(): Promise<DraftSnapshot | null> {
@@ -484,6 +496,7 @@ export type ProjectExportMode = "project-only" | "project-with-samples";
  *  modal so the user can review before replacing the active project. */
 export interface ProjectImportSummary {
   project: Project;
+  jsonText: string;
   brand?: ProjectJsonBrand;
   trackCount: number;
   noteClipCount: number;
@@ -506,6 +519,9 @@ async function blobToBase64(blob: Blob): Promise<{ base64: string; mimeType: str
     bin += String.fromCharCode(
       ...bytes.subarray(i, Math.min(i + chunk, bytes.length)),
     );
+    if (i > 0 && i % (chunk * 128) === 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
   }
   return { base64: btoa(bin), mimeType: blob.type || "application/octet-stream" };
 }
@@ -530,62 +546,69 @@ export async function projectToJson(
   project: Project,
   mode: ProjectExportMode = "project-with-samples",
 ): Promise<string> {
-  const embed = mode === "project-with-samples";
-  const tracks = await Promise.all(
-    project.tracks.map(async (t) => ({
-      ...t,
-      audioClips: await Promise.all(
-        t.audioClips.map(async (c) => {
-          if (!c.blob || !embed) {
-            const { blob: _b, ...rest } = c;
-            void _b;
-            return rest;
-          }
+  return timePerfAsync("json-export", async () => {
+    const embed = mode === "project-with-samples";
+    const tracks: ProjectJsonV1["project"]["tracks"] = [];
+    for (const t of project.tracks) {
+      const audioClips: ProjectJsonV1["project"]["tracks"][number]["audioClips"] = [];
+      for (const c of t.audioClips) {
+        if (!c.blob || !embed) {
+          const { blob: _b, ...rest } = c;
+          void _b;
+          audioClips.push(rest);
+        } else {
           const { base64, mimeType } = await blobToBase64(c.blob);
           const { blob: _ignored, ...rest } = c;
           void _ignored;
-          return { ...rest, base64, mimeType };
-        }),
-      ),
-    })),
-  );
-  const samples = await Promise.all(
-    (project.samples ?? []).map(async (s) => {
-      if (!s.blob || !embed) {
-        const { blob: _b, ...rest } = s;
-        void _b;
-        return rest;
+          audioClips.push({ ...rest, base64, mimeType });
+        }
       }
-      const { base64, mimeType } = await blobToBase64(s.blob);
-      const { blob: _b, ...rest } = s;
-      void _b;
-      return { ...rest, base64, mimeType };
-    }),
-  );
-  const now = Date.now();
-  const brand: ProjectJsonBrand = {
-    createdWith: CREATED_WITH,
-    appName: APP_NAME,
-    appUrl: APP_URL,
-    appVersion: APP_VERSION,
-    schemaVersion: CURRENT_SCHEMA_VERSION,
-    exportedAt: now,
-    exportMode: mode,
-  };
-  const payload: ProjectJsonV1 = {
-    format: "shotgun-ninjas-studio-project",
-    version: 2,
-    brand,
-    project: {
-      ...project,
+      tracks.push({ ...t, audioClips });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const samples: ProjectJsonV1["project"]["samples"] = [];
+    for (const s of project.samples ?? []) {
+        if (!s.blob || !embed) {
+          const { blob: _b, ...rest } = s;
+          void _b;
+          samples.push(rest);
+        } else {
+          const { base64, mimeType } = await blobToBase64(s.blob);
+          const { blob: _b, ...rest } = s;
+          void _b;
+          samples.push({ ...rest, base64, mimeType });
+        }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const now = Date.now();
+    const brand: ProjectJsonBrand = {
+      createdWith: CREATED_WITH,
+      appName: APP_NAME,
+      appUrl: APP_URL,
+      appVersion: APP_VERSION,
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      createdAt: project.createdAt ?? project.updatedAt ?? now,
-      updatedAt: now,
-      tracks,
-      samples,
-    } as ProjectJsonV1["project"],
-  };
-  return JSON.stringify(payload, null, 2);
+      exportedAt: now,
+      exportMode: mode,
+    };
+    const payload: ProjectJsonV1 = {
+      format: "shotgun-ninjas-studio-project",
+      version: 2,
+      brand,
+      project: {
+        ...project,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        createdAt: project.createdAt ?? project.updatedAt ?? now,
+        updatedAt: now,
+        tracks,
+        samples,
+      } as ProjectJsonV1["project"],
+    };
+    return JSON.stringify(payload, null, 2);
+  }, {
+    mode,
+    tracks: project.tracks.length,
+    samples: project.samples?.length ?? 0,
+  });
 }
 
 /**
@@ -636,24 +659,25 @@ function parseEnvelope(text: string): ProjectJsonV1 {
  */
 export function summarizeProjectJson(text: string): ProjectImportSummary {
   const data = parseEnvelope(text);
-  const project = parseProjectJson(text);
+  const project = projectFromEnvelope(data, false);
   let noteClipCount = 0;
   let audioClipCount = 0;
   const missingSampleNames: string[] = [];
-  for (const t of project.tracks) {
-    noteClipCount += t.noteClips.length;
-    audioClipCount += t.audioClips.length;
-    for (const c of t.audioClips) {
-      if (!c.blob) missingSampleNames.push(`${t.name} clip`);
+  for (const t of data.project.tracks) {
+    noteClipCount += Array.isArray(t.noteClips) ? t.noteClips.length : 0;
+    audioClipCount += Array.isArray(t.audioClips) ? t.audioClips.length : 0;
+    for (const c of t.audioClips ?? []) {
+      if (!c.base64 && !c.blobKey) missingSampleNames.push(`${t.name} clip`);
     }
   }
-  for (const s of project.samples ?? []) {
-    if (!s.blob) missingSampleNames.push(s.name);
+  for (const s of data.project.samples ?? []) {
+    if (!s.base64 && !s.blobKey) missingSampleNames.push(s.name);
   }
   const isOlderAppVersion =
     !!data.brand && compareVersions(data.brand.appVersion, APP_VERSION) < 0;
   return {
     project,
+    jsonText: text,
     brand: data.brand,
     trackCount: project.tracks.length,
     noteClipCount,
@@ -677,6 +701,10 @@ function compareVersions(a: string, b: string): number {
 
 export function parseProjectJson(text: string): Project {
   const data = parseEnvelope(text);
+  return projectFromEnvelope(data, true);
+}
+
+function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Project {
   const newId = `${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
@@ -685,7 +713,7 @@ export function parseProjectJson(text: string): Project {
     ...t,
     audioClips: t.audioClips.map((c) => {
       const blob =
-        c.base64 && c.mimeType
+        hydrateBlobs && c.base64 && c.mimeType
           ? base64ToBlob(c.base64, c.mimeType)
           : undefined;
       const blobKey = blob ? `${newId}:${t.id}:${c.id}` : undefined;
@@ -697,7 +725,7 @@ export function parseProjectJson(text: string): Project {
   }));
   const samples = (p.samples ?? []).map((s) => {
     const blob =
-      s.base64 && s.mimeType ? base64ToBlob(s.base64, s.mimeType) : undefined;
+      hydrateBlobs && s.base64 && s.mimeType ? base64ToBlob(s.base64, s.mimeType) : undefined;
     const blobKey = `${newId}:sample:${s.id}`;
     const { base64: _b, mimeType: _m, ...rest } = s;
     void _b;

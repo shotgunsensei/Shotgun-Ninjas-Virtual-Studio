@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import * as Tone from "tone";
 import {
   WORLDS,
   type StudioWorld,
@@ -23,7 +24,7 @@ import {
 import { playWorldWelcome, startAmbientLoop, type AmbientLoop } from "../lib/worldAudio";
 import { getStore } from "../store";
 import { audio } from "../lib/audio/engine";
-import type { DrumKitId } from "../lib/audio/sounds/kits";
+import type { DrumKitId } from "../types";
 
 const AMBIENT_VOLUME = 0.10;
 
@@ -75,8 +76,9 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
   }, [ambientEnabled]);
 
   const getAudioCtx = useCallback(() => {
+    const toneCtx = Tone.getContext().rawContext as AudioContext;
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-      audioCtxRef.current = new AudioContext();
+      audioCtxRef.current = toneCtx;
     }
     return audioCtxRef.current;
   }, []);

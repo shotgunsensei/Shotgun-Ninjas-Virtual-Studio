@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { audio } from "../lib/audio/engine";
 import { DEFAULT_MASTER_BUS } from "../lib/audio/master";
 import { MIX_PRESETS } from "../lib/audio/mixPresets";
+import { visualTicker } from "../lib/visualTicker";
 import { getStore, useStore } from "../store";
 
 export function MasterStrip() {
@@ -146,22 +147,16 @@ function BusToggle({
 function useMasterClipped(): boolean {
   const [clipped, setClipped] = useState(false);
   useEffect(() => {
-    let raf = 0;
-    // Poll the master clip latch at ~10 Hz — it's a binary indicator
-    // for the user, so animation-frame frequency is overkill.
-    const MIN_INTERVAL_MS = 100;
+    // Poll the master clip latch at ~5 Hz via the shared ticker. It's a
+    // binary indicator, so frame frequency is overkill.
+    const MIN_INTERVAL_MS = 200;
     let lastTick = 0;
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      if (document.hidden) return;
-      const now = performance.now();
-      if (now - lastTick < MIN_INTERVAL_MS) return;
-      lastTick = now;
+    return visualTicker.subscribe((ts) => {
+      if (ts - lastTick < MIN_INTERVAL_MS) return;
+      lastTick = ts;
       const c = audio.getMasterClipped();
       setClipped((prev) => (prev !== c ? c : prev));
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    });
   }, []);
   return clipped;
 }

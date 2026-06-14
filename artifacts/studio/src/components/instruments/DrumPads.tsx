@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { audio, type DrumPiece, DRUM_PIECES } from "../../lib/audio/engine";
 import { noteRecorder } from "../../lib/audio/recorder";
 import { useMidiEvents } from "../../lib/midi/midi";
+import { visualTicker } from "../../lib/visualTicker";
 import { useStore, getStore, makeId } from "../../store";
 import { getSettings } from "../../lib/settings";
 import { MidiLearnButton } from "../MidiLearnButton";
@@ -136,7 +137,8 @@ export function DrumPads({ track }: { track: Track }) {
     [totalSteps, div.stepBeats],
   );
 
-  const playheadStep = usePlayheadStep(isPlaying, totalBeats, div.stepBeats);
+  const sequencerRef = useRef<HTMLDivElement>(null);
+  useStepPlayheadHighlight(sequencerRef, isPlaying, totalBeats, div.stepBeats);
 
   const PAD_LABEL_GUTTER = "3rem";
   const padRowTemplate = `var(--pad-label-gutter) repeat(${totalSteps}, minmax(0, 1fr))`;
@@ -408,6 +410,7 @@ export function DrumPads({ track }: { track: Track }) {
 
       {/* Step sequencer */}
       <div
+        ref={sequencerRef}
         className="panel-inset panel-glow rounded-md p-2 space-y-2"
         style={{ ["--pad-label-gutter" as string]: PAD_LABEL_GUTTER }}
         data-step-sequencer
@@ -518,8 +521,6 @@ export function DrumPads({ track }: { track: Track }) {
                   beat={beat}
                   clip={clip}
                   stepsPerBeat={stepsPerBeat}
-                  isPlaying={isPlaying}
-                  playheadStep={playheadStep}
                   onClick={onCellClick}
                   onContext={onCellContext}
                 />
@@ -569,8 +570,6 @@ function StepCell({
   beat,
   clip,
   stepsPerBeat,
-  isPlaying,
-  playheadStep,
   onClick,
   onContext,
 }: {
@@ -579,8 +578,6 @@ function StepCell({
   beat: number;
   clip: NoteClip | undefined;
   stepsPerBeat: number;
-  isPlaying: boolean;
-  playheadStep: number;
   onClick: (e: React.MouseEvent, piece: DrumPiece, beat: number) => void;
   onContext: (e: React.MouseEvent, piece: DrumPiece, beat: number) => void;
 }) {
@@ -590,7 +587,6 @@ function StepCell({
   const ev = clip ? findStepNote(clip.notes, piece, beat) : undefined;
   const on = !!ev;
   const isBeat = Math.abs(i % stepsPerBeat) < 0.001;
-  const isAtPlayhead = isPlaying && i === playheadStep;
   const startsBeat = i > 0 && Math.abs(i % stepsPerBeat) < 0.001;
   const accent = !!ev?.accent;
   const prob = ev?.probability ?? 1;
@@ -652,9 +648,7 @@ function StepCell({
         onPointerUp={cancelLongPress}
         onPointerLeave={cancelLongPress}
         onPointerCancel={cancelLongPress}
-        className={`block w-full h-4 rounded-[2px] border transition-colors relative ${fillCls} ${
-          isAtPlayhead ? "ring-1 ring-neon" : ""
-        }`}
+        className={`block w-full h-4 rounded-[2px] border transition-colors relative ${fillCls}`}
         aria-label={`${LABELS[piece]} step ${i + 1}`}
         data-step
         data-piece={piece}
@@ -1056,33 +1050,39 @@ function Row({
   );
 }
 
-function usePlayheadStep(
+function useStepPlayheadHighlight(
+  rootRef: RefObject<HTMLElement | null>,
   isPlaying: boolean,
   totalBeats: number,
   stepBeats: number,
-) {
-  const [step, setStep] = useState(0);
+): void {
   useEffect(() => {
-    if (!isPlaying || totalBeats <= 0 || stepBeats <= 0) return;
-    let raf = 0;
-    let lastStep = -1;
-    const tick = () => {
-      // Skip rendering work when the tab is hidden — transport keeps
-      // running, but we don't want to schedule unnecessary React work.
-      if (!document.hidden) {
-        const pos = audio.positionBeats() % totalBeats;
-        const next = Math.floor(pos / stepBeats);
-        // Only push a re-render when the lit cell actually changes,
-        // not every animation frame.
-        if (next !== lastStep) {
-          lastStep = next;
-          setStep(next);
-        }
-      }
-      raf = requestAnimationFrame(tick);
+    const clearStep = (idx: number) => {
+      if (idx < 0 || !rootRef.current) return;
+      rootRef.current
+        .querySelectorAll<HTMLElement>(`[data-step-index="${idx}"]`)
+        .forEach((el) => el.classList.remove("ring-1", "ring-neon"));
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [isPlaying, totalBeats, stepBeats]);
-  return step;
+    if (!isPlaying || totalBeats <= 0 || stepBeats <= 0) {
+      clearStep(-1);
+      return;
+    }
+    let lastStep = -1;
+    const unsubscribe = visualTicker.subscribe(() => {
+      if (!rootRef.current) return;
+      const pos = audio.positionBeats() % totalBeats;
+      const next = Math.floor(pos / stepBeats);
+      if (next !== lastStep) {
+        clearStep(lastStep);
+        rootRef.current
+          .querySelectorAll<HTMLElement>(`[data-step-index="${next}"]`)
+          .forEach((el) => el.classList.add("ring-1", "ring-neon"));
+        lastStep = next;
+      }
+    });
+    return () => {
+      unsubscribe();
+      clearStep(lastStep);
+    };
+  }, [rootRef, isPlaying, totalBeats, stepBeats]);
 }

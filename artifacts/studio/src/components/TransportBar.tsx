@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2, Activity, History, Trash2, ExternalLink } from "lucide-react";
 import { WorldPickerButton } from "./WorldPicker";
 import { StereoMeter } from "./Meter";
@@ -18,8 +18,11 @@ import { OfflineReadyIndicator } from "./PwaInstallControls";
 import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
 import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
 import { useGamepad } from "../lib/performance/gamepad";
-import { AudioDiagnosticsPanel } from "./AudioDiagnosticsPanel";
 import { visualTicker } from "../lib/visualTicker";
+
+const AudioDiagnosticsPanel = lazy(() =>
+  import("./AudioDiagnosticsPanel").then((m) => ({ default: m.AudioDiagnosticsPanel })),
+);
 
 export function TransportBar() {
   const bpm = useStore((s) => s.project.bpm);
@@ -110,6 +113,9 @@ export function TransportBar() {
               // ignore
             }
             audio.panicStopAll();
+            getStore().set((s) => ({
+              transportScheduleRevision: s.transportScheduleRevision + 1,
+            }));
             getStore().set({
               isPlaying: false,
               isRecording: false,
@@ -305,7 +311,11 @@ export function TransportBar() {
         </Button>
       </Tip>
     </div>
-    <AudioDiagnosticsPanel open={diagOpen} onClose={() => setDiagOpen(false)} />
+    {diagOpen && (
+      <Suspense fallback={null}>
+        <AudioDiagnosticsPanel open={diagOpen} onClose={() => setDiagOpen(false)} />
+      </Suspense>
+    )}
     </div>
   );
 }
@@ -322,6 +332,7 @@ export function TransportBar() {
  */
 function PositionReadout({ isPlaying }: { isPlaying: boolean }) {
   const spanRef = useRef<HTMLSpanElement>(null);
+  const lastTextRef = useRef("1.1.1");
   useEffect(() => {
     if (!isPlaying) return;
     // Use the shared visualTicker so this loop pauses automatically when the
@@ -332,7 +343,11 @@ function PositionReadout({ isPlaying }: { isPlaying: boolean }) {
         const bar = Math.floor(beats / 4) + 1;
         const beat = Math.floor(beats % 4) + 1;
         const step = Math.floor((beats * 4) % 4) + 1;
-        spanRef.current.textContent = `${bar}.${beat}.${step}`;
+        const next = `${bar}.${beat}.${step}`;
+        if (next !== lastTextRef.current) {
+          lastTextRef.current = next;
+          spanRef.current.textContent = next;
+        }
       }
     });
   }, [isPlaying]);
@@ -357,6 +372,7 @@ function PositionReadout({ isPlaying }: { isPlaying: boolean }) {
  */
 function MasterClipBadge() {
   const [clipped, setClipped] = useState(false);
+  const clippedRef = useRef(false);
   const lastWarnRef = useRef(0);
   useEffect(() => {
     // Use the shared visualTicker so this loop pauses automatically when the
@@ -365,7 +381,10 @@ function MasterClipBadge() {
       const lv = audio.getMasterLevels().peakDb;
       const peak = Math.max(lv[0], lv[1]);
       if (peak >= -0.1 && Number.isFinite(peak)) {
-        setClipped(true);
+        if (!clippedRef.current) {
+          clippedRef.current = true;
+          setClipped(true);
+        }
         // Surface a toast at most once every 5 s so the user notices
         // without getting spammed during a long loud section.
         const now = performance.now();
@@ -384,7 +403,10 @@ function MasterClipBadge() {
     <Tip label="Master clipped — click to clear">
       <button
         type="button"
-        onClick={() => setClipped(false)}
+        onClick={() => {
+          clippedRef.current = false;
+          setClipped(false);
+        }}
         className="flex items-center gap-1 px-2 h-7 rounded-md border border-red-500/60 bg-red-500/15 text-red-300 font-mono text-[10px] uppercase tracking-widest studio-clip-led"
         aria-label="Master clipped, click to reset"
       >
@@ -459,13 +481,14 @@ function MidiActivityIndicator() {
 /**
  * Project-wide latching CLIP LED in the transport bar.
  *
- * Polls every track's Tone.Meter at ~30 Hz. As soon as any track peaks
+ * Polls every track's Tone.Meter through the shared visualTicker. As soon as any track peaks
  * at or above 0 dBFS the LED latches red and records a ClipHistoryEntry.
  * Clicking the LED toggles the clip history popover. The history log
  * persists for the session and can be cleared manually.
  */
 function ProjectClipBadge() {
   const [clippedIds, setClippedIds] = useState<Set<string>>(new Set());
+  const clippedIdsRef = useRef<Set<string>>(new Set());
   const [historyOpen, setHistoryOpen] = useState(false);
   const lastWarnRef = useRef(0);
   // Per-track throttle: don't log the same track more than once per 2 s.
@@ -473,53 +496,45 @@ function ProjectClipBadge() {
   const clipHistory = useStore((s) => s.clipHistory);
 
   useEffect(() => {
-    let raf = 0;
-    const FRAME_MS = 1000 / 30;
-    let lastFrame = 0;
-    const tick = (ts: number) => {
-      if (ts - lastFrame >= FRAME_MS && !document.hidden) {
-        lastFrame = ts;
-        const tracks = getStore().state.project.tracks;
-        const newClips: Array<{ id: string; name: string }> = [];
-        for (const t of tracks) {
-          const meter = audio.getTrackMeter(t.id);
-          if (!meter) continue;
-          const v = meter.getValue();
-          const dbL = typeof v === "number" ? v : (v[0] ?? -Infinity);
-          const dbR = typeof v === "number" ? v : (v[1] ?? dbL);
-          if (dbL >= 0 || dbR >= 0) newClips.push({ id: t.id, name: t.name });
+    return visualTicker.subscribe(() => {
+      const { isPlaying, project } = getStore().state;
+      if (!isPlaying && !historyOpen) return;
+      const newClips: Array<{ id: string; name: string }> = [];
+      for (const t of project.tracks) {
+        const meter = audio.getTrackMeter(t.id);
+        if (!meter) continue;
+        const v = meter.getValue();
+        const dbL = typeof v === "number" ? v : (v[0] ?? -Infinity);
+        const dbR = typeof v === "number" ? v : (v[1] ?? dbL);
+        if (dbL >= 0 || dbR >= 0) newClips.push({ id: t.id, name: t.name });
+      }
+      if (newClips.length > 0) {
+        const now = performance.now();
+        const next = new Set(clippedIdsRef.current);
+        let changed = false;
+        for (const { id, name } of newClips) {
+          if (!next.has(id)) { next.add(id); changed = true; }
+          // Throttle per-track history entries to once per 2 s.
+          const lastLogged = lastClipLogRef.current.get(id) ?? 0;
+          if (now - lastLogged > 2000) {
+            lastClipLogRef.current.set(id, now);
+            getStore().addClipEvent(id, name);
+          }
         }
-        if (newClips.length > 0) {
-          const now = performance.now();
-          setClippedIds((prev) => {
-            const next = new Set(prev);
-            let changed = false;
-            for (const { id, name } of newClips) {
-              if (!next.has(id)) { next.add(id); changed = true; }
-              // Throttle per-track history entries to once per 2 s.
-              const lastLogged = lastClipLogRef.current.get(id) ?? 0;
-              if (now - lastLogged > 2000) {
-                lastClipLogRef.current.set(id, now);
-                getStore().addClipEvent(id, name);
-              }
-            }
-            if (!changed) return prev;
-            if (now - lastWarnRef.current > 5000) {
-              lastWarnRef.current = now;
-              getStore().setStatus(
-                `Track clipping detected — check channel strips.`,
-                "warn",
-              );
-            }
-            return next;
-          });
+        if (changed) {
+          clippedIdsRef.current = next;
+          if (now - lastWarnRef.current > 5000) {
+            lastWarnRef.current = now;
+            getStore().setStatus(
+              `Track clipping detected — check channel strips.`,
+              "warn",
+            );
+          }
+          setClippedIds(next);
         }
       }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
+    });
+  }, [historyOpen]);
 
   const anyClipped = clippedIds.size > 0;
   const hasHistory = clipHistory.length > 0;
@@ -537,7 +552,8 @@ function ProjectClipBadge() {
         }
       }
       getStore().resetAllTrackClips();
-      setClippedIds(new Set());
+      clippedIdsRef.current = new Set();
+      setClippedIds(clippedIdsRef.current);
     }
     setHistoryOpen((o) => !o);
   };

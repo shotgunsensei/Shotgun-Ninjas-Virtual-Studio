@@ -1,6 +1,7 @@
 import * as Tone from "tone";
 import { midiNoteToName } from "../midi/midi";
 import type { BasslinePatternId } from "../../types";
+import { trackTransportEvent, untrackTransportEvent } from "../../utils/performanceDiagnostics";
 export type { BasslinePatternId };
 
 export const BASSLINE_PATTERN_LABELS: Record<BasslinePatternId, string> = {
@@ -69,7 +70,7 @@ export class BasselinePattern {
       const duration = step.duration;
       const beatOff = step.beatOffset;
 
-      const id = transport.scheduleRepeat(
+      const id = trackTransportEvent(transport.scheduleRepeat(
         (time) => {
           if (!this.playNote || !this.currentTrackId) return;
           this.playNote(this.currentTrackId, noteName, velocity, duration);
@@ -77,7 +78,7 @@ export class BasselinePattern {
         },
         "1m",
         `+${beatOff * beatDurSec()}`,
-      );
+      ), "bassline-pattern");
       this.eventIds.push(id);
     }
   }
@@ -86,6 +87,7 @@ export class BasselinePattern {
     const transport = Tone.getTransport();
     for (const id of this.eventIds) {
       try { transport.clear(id); } catch { /* ignore */ }
+      untrackTransportEvent(id, "bassline-pattern");
     }
     this.eventIds = [];
     this.currentTrackId = null;

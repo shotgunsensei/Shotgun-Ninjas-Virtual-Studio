@@ -7,7 +7,7 @@
  *  3. The Load dialog's Remix button forks a demo; name ends with " (remix)".
  *  4. On reload after onboarding, the welcome modal does NOT re-appear.
  *
- * All tests navigate to `/?disableAudio=1` so the AudioEngine skips Tone.js
+ * All tests navigate to `/studio?disableAudio=1` so the AudioEngine skips Tone.js
  * node construction (which blocks the headless Chromium main thread for tens
  * of seconds per track).  The UI flow — modal, store updates, coach card,
  * project-name field — is fully exercised; only the audio graph is skipped.
@@ -20,7 +20,7 @@ import { test, expect, type Page } from "@playwright/test";
 // ---------------------------------------------------------------------------
 
 /** URL used by every test — audio disabled so loadDemo / remixDemo are fast. */
-const STUDIO_URL = "/?disableAudio=1";
+const STUDIO_URL = "/studio?disableAudio=1";
 
 /** Clear all browser storage so each test starts from a truly blank slate. */
 async function clearStorage(page: Page): Promise<void> {

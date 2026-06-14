@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { getStore, useStore } from "../store";
 import { DRUM_KIT_LIST } from "../lib/audio/sounds/kits";
 import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
 import { listProjects, loadProject, relocateSampleBlob } from "../lib/storage/db";
+import { assertSampleImportAllowed, isLargeSample, formatBytes } from "../lib/storage/performanceGuards";
 import { flushMixToEngine } from "../store";
-import { PluginBrowser } from "./PluginBrowser";
 import { SoundLibraryPanel } from "./SoundLibraryPanel";
+
+const PluginBrowser = lazy(() =>
+  import("./PluginBrowser").then((m) => ({ default: m.PluginBrowser })),
+);
 
 type TabId = "library" | "tracks" | "kits" | "presets" | "samples" | "projects" | "plugins";
 
@@ -61,7 +65,17 @@ export function LeftBrowser() {
         {tab === "presets" && <PresetsTab />}
         {tab === "samples" && <SamplesTab />}
         {tab === "projects" && <ProjectsTab />}
-        {tab === "plugins" && <PluginBrowser />}
+        {tab === "plugins" && (
+          <Suspense
+            fallback={
+              <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Loading plugins...
+              </div>
+            }
+          >
+            <PluginBrowser />
+          </Suspense>
+        )}
       </div>
     </div>
   );
@@ -209,6 +223,13 @@ function SamplesTab() {
     const target = (proj.samples ?? []).find((s) => s.id === sampleId);
     if (!target) return;
     try {
+      assertSampleImportAllowed(file);
+      if (isLargeSample(file)) {
+        getStore().setStatus(
+          `Large sample (${formatBytes(file.size)}). Relinking may take a moment.`,
+          "warn",
+        );
+      }
       // Rewrite the blob behind the sample's existing blobKey so any
       // clip that references the sample picks up the new audio on next
       // load without a full project reload.

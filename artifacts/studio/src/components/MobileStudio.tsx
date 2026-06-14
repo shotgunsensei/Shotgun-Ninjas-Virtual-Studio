@@ -139,6 +139,9 @@ export function MobileStudio() {
               /* ignore */
             }
             audio.panicStopAll();
+            getStore().set((s) => ({
+              transportScheduleRevision: s.transportScheduleRevision + 1,
+            }));
             getStore().set({
               isPlaying: false,
               isRecording: false,

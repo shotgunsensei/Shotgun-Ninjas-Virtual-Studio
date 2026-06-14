@@ -1,11 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 import { execSync } from "child_process";
+import { platform } from "os";
 
 const chromiumExecutablePath = (() => {
   const envPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
   if (envPath) return envPath;
   try {
-    return execSync("which chromium", { encoding: "utf8" }).trim();
+    const command = platform() === "win32" ? "where chromium" : "which chromium";
+    return execSync(command, { encoding: "utf8" }).split(/\r?\n/)[0]?.trim() ?? "";
   } catch {
     return "";
   }
@@ -35,7 +37,7 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: {
-          executablePath: chromiumExecutablePath,
+          ...(chromiumExecutablePath ? { executablePath: chromiumExecutablePath } : {}),
           args: [
             "--no-sandbox",
             "--disable-setuid-sandbox",
@@ -49,7 +51,10 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `PORT=${TEST_PORT} BASE_PATH=/ pnpm --filter @workspace/studio dev`,
+    command:
+      platform() === "win32"
+        ? "npm run dev"
+        : `PORT=${TEST_PORT} BASE_PATH=/ pnpm --filter @workspace/studio dev`,
     url: BASE_URL,
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,

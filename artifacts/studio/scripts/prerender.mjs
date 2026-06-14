@@ -1,13 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const publicDir = resolve(root, "dist/public");
 const serverEntry = resolve(root, "dist/server/entry-server.js");
 
-const { render } = await import(serverEntry);
+const { render } = await import(pathToFileURL(serverEntry).href);
 
 let template = readFileSync(resolve(publicDir, "index.html"), "utf-8");
 

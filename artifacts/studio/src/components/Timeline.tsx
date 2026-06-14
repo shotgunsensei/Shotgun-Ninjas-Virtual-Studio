@@ -2,6 +2,8 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Download, Flag, MoreVertical, Plus, X } from "lucide-react";
 import { useStore, getStore, canDropClipOnTrack } from "../store";
 import { audio } from "../lib/audio/engine";
+import { visualTicker } from "../lib/visualTicker";
+import { drawWaveformPeaks, getWaveformPeaks } from "../lib/audio/waveformPeaks";
 import type { Section, Track } from "../types";
 import { AutomationLaneStrip, AddAutomationLaneRow } from "./AutomationLane";
 import {
@@ -87,19 +89,11 @@ export function Timeline() {
 
   useEffect(() => {
     if (!isPlaying || !playheadRef.current) return;
-    let raf = 0;
-    const tick = () => {
-      // Pause render work while the tab is hidden — transport keeps
-      // playing audio but there's no reason to mutate DOM the user can't
-      // see.
-      if (!document.hidden && playheadRef.current) {
-        const pos = audio.positionBeats() % (totalBeats || 1);
-        playheadRef.current.style.transform = `translateX(${pos * PX_PER_BEAT}px)`;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return visualTicker.subscribe(() => {
+      if (!playheadRef.current) return;
+      const pos = audio.positionBeats() % (totalBeats || 1);
+      playheadRef.current.style.transform = `translateX(${pos * PX_PER_BEAT}px)`;
+    });
   }, [isPlaying, totalBeats]);
 
   // Delete the selected clip with the keyboard, ignoring text inputs.
@@ -1249,46 +1243,12 @@ function AudioClipView({
   useEffect(() => {
     if (!clip.blob || !canvasRef.current) return;
     const cv = canvasRef.current;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return;
     let cancelled = false;
     (async () => {
       try {
-        const arr = await clip.blob!.arrayBuffer();
-        const ac = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-        const buf = await ac.decodeAudioData(arr);
+        const peaks = await getWaveformPeaks(clip.blob!);
         if (cancelled) return;
-        const data = buf.getChannelData(0);
-        const sr = buf.sampleRate;
-        // Restrict the waveform to the trimmed window so what the user sees
-        // matches what plays back.
-        const startIdx = Math.max(
-          0,
-          Math.min(data.length, Math.floor(offsetSec * sr)),
-        );
-        const endIdx = Math.max(
-          startIdx,
-          Math.min(data.length, Math.floor((offsetSec + durationSec) * sr)),
-        );
-        const sliceLen = Math.max(1, endIdx - startIdx);
-        const w = cv.width;
-        const h = cv.height;
-        ctx.clearRect(0, 0, w, h);
-        ctx.fillStyle = "rgba(0, 200, 255, 0.6)";
-        const step = Math.max(1, Math.floor(sliceLen / w));
-        for (let x = 0; x < w; x++) {
-          let min = 1.0;
-          let max = -1.0;
-          for (let j = 0; j < step; j++) {
-            const v = data[startIdx + x * step + j] ?? 0;
-            if (v < min) min = v;
-            if (v > max) max = v;
-          }
-          const y1 = ((1 - max) / 2) * h;
-          const y2 = ((1 - min) / 2) * h;
-          ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
-        }
-        ac.close();
+        drawWaveformPeaks(cv, peaks, { offsetSec, durationSec });
       } catch {
         // ignore
       }

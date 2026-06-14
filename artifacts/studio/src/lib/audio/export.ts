@@ -20,6 +20,10 @@ import {
 } from "./engine";
 import { findKit, buildKit, type KitVoice } from "./sounds/kits";
 import { findPreset, buildPresetVoice } from "./sounds/presets";
+import {
+  startPerfTimer,
+  trackAudioResource,
+} from "../../utils/performanceDiagnostics";
 
 const SAMPLE_RATE = 44100;
 const CHANNELS = 2;
@@ -48,6 +52,7 @@ export interface ExportResult {
   blob: Blob;
   extension: string;
   mimeType: string;
+  clipping?: { clipped: boolean; peakDb: number };
 }
 
 interface RenderVoice {
@@ -90,11 +95,17 @@ export async function renderProject(
       "An export is already in progress. Please wait for it to complete before starting another.",
     );
   }
+  const endTiming = startPerfTimer(format === "wav" ? "wav-export" : "mp3-export", {
+    tracks: project.tracks.length,
+    bars: project.bars,
+    format,
+  });
   _exportInProgress = true;
   try {
     return await _renderProjectInner(project, format, onProgress, options);
   } finally {
     _exportInProgress = false;
+    endTiming();
   }
 }
 
@@ -129,12 +140,15 @@ async function _renderProjectInner(
   const renderSec = Math.max(0.5, projectSec + TAIL_SEC);
 
   onProgress?.({ phase: "decoding", progress: 0 });
-  const decoded = await decodeAudioClips(project);
+  const decoded = await decodeAudioClips(project, (p) =>
+    onProgress?.({ phase: "decoding", progress: p }),
+  );
   onProgress?.({ phase: "decoding", progress: 1 });
 
   const buffer = await renderOffline(project, decoded, renderSec, startBeat, endBeat, (p) =>
     onProgress?.({ phase: "rendering", progress: p }),
   );
+  const clipping = detectClipping(buffer);
 
   onProgress?.({ phase: "encoding", progress: 0 });
   if (format === "mp3") {
@@ -146,18 +160,25 @@ async function _renderProjectInner(
       blob: new Blob([mp3.buffer as ArrayBuffer], { type: "audio/mpeg" }),
       extension: "mp3",
       mimeType: "audio/mpeg",
+      clipping,
     };
   }
-  const wav = encodeWav(buffer);
+  const wav = await encodeWav(buffer, (p) =>
+    onProgress?.({ phase: "encoding", progress: p }),
+  );
   onProgress?.({ phase: "encoding", progress: 1 });
   return {
     blob: new Blob([wav], { type: "audio/wav" }),
     extension: "wav",
     mimeType: "audio/wav",
+    clipping,
   };
 }
 
-async function decodeAudioClips(project: Project): Promise<Map<string, AudioBuffer>> {
+async function decodeAudioClips(
+  project: Project,
+  onProgress?: (p: number) => void,
+): Promise<Map<string, AudioBuffer>> {
   const out = new Map<string, AudioBuffer>();
 
   // Collect all clips that need decoding up-front.
@@ -174,7 +195,7 @@ async function decodeAudioClips(project: Project): Promise<Map<string, AudioBuff
     // Decode in batches of 4 to prevent simultaneous decodeAudioData calls
     // from spiking memory/CPU and triggering page-unresponsive warnings on
     // projects with many large audio clips.
-    const BATCH = 4;
+    const BATCH = 2;
     for (let i = 0; i < pending.length; i += BATCH) {
       const batch = pending.slice(i, i + BATCH);
       await Promise.all(
@@ -193,6 +214,7 @@ async function decodeAudioClips(project: Project): Promise<Map<string, AudioBuff
       if (i + BATCH < pending.length) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
+      onProgress?.(Math.min(1, (i + batch.length) / pending.length));
     }
   } finally {
     await ac.close();
@@ -208,6 +230,7 @@ async function renderOffline(
   endBeat: number,
   onProgress: (p: number) => void,
 ): Promise<AudioBuffer> {
+  const untrackOfflineRender = trackAudioResource("offline-render");
   const originalContext = Tone.getContext();
   const offline = new Tone.OfflineContext(CHANNELS, durationSec, SAMPLE_RATE);
   Tone.setContext(offline);
@@ -301,6 +324,7 @@ async function renderOffline(
     }
   } finally {
     Tone.setContext(originalContext);
+    untrackOfflineRender();
   }
 }
 
@@ -433,7 +457,10 @@ function clampPan(x: number) {
 
 // ---------- WAV encoding ----------
 
-function encodeWav(buffer: AudioBuffer): ArrayBuffer {
+async function encodeWav(
+  buffer: AudioBuffer,
+  onProgress?: (p: number) => void,
+): Promise<ArrayBuffer> {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const numFrames = buffer.length;
@@ -477,7 +504,12 @@ function encodeWav(buffer: AudioBuffer): ArrayBuffer {
       view.setInt16(offset, intSample, true);
       offset += 2;
     }
+    if (i > 0 && i % 16384 === 0) {
+      onProgress?.(Math.min(0.99, i / numFrames));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
   }
+  onProgress?.(1);
   return ab;
 }
 

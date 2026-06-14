@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWorld } from "../contexts/WorldContext";
 import { useSettings } from "../lib/settings";
 
@@ -18,10 +18,22 @@ import { useSettings } from "../lib/settings";
 export function BackgroundFx() {
   const { activeWorld } = useWorld();
   const performanceMode = useSettings((s) => s.performanceMode);
+  const [hidden, setHidden] = useState(
+    typeof document !== "undefined" ? document.hidden : false,
+  );
   const variant = activeWorld.visualizerVariant;
 
-  // Unmount completely in Performance Mode to remove animated DOM nodes.
-  if (performanceMode) return null;
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibilityChange = () => setHidden(document.hidden);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  // Unmount completely in Performance Mode or while hidden to remove animated DOM nodes.
+  if (performanceMode || hidden) return null;
 
   return (
     <div
@@ -48,7 +60,7 @@ function ShurikenLayer() {
     }> = [];
     let seed = 1337;
     const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 36; i++) {
       out.push({
         top: rand() * 100, left: rand() * 100, size: 1.5 + rand() * 2.5,
         delay: rand() * 6, duration: 3 + rand() * 5, hue: rand() > 0.7 ? "red" : "neon",
@@ -118,7 +130,7 @@ function SparksLayer() {
   const sparks = useMemo(() => {
     let seed = 2401;
     const rand = () => { seed = (seed * 6971 + 31337) % 196613; return seed / 196613; };
-    return Array.from({ length: 28 }, () => ({
+    return Array.from({ length: 18 }, () => ({
       left: rand() * 100,
       baseDelay: rand() * 4,
       duration: 1.5 + rand() * 3,
@@ -161,7 +173,7 @@ function RainLayer() {
   const drops = useMemo(() => {
     let seed = 8811;
     const rand = () => { seed = (seed * 4421 + 17783) % 131071; return seed / 131071; };
-    return Array.from({ length: 60 }, () => ({
+    return Array.from({ length: 32 }, () => ({
       left: rand() * 102 - 1,
       delay: rand() * 2,
       duration: 0.4 + rand() * 0.6,
@@ -205,7 +217,7 @@ function SmokeLayer() {
   const blobs = useMemo(() => {
     let seed = 3309;
     const rand = () => { seed = (seed * 5501 + 22229) % 161803; return seed / 161803; };
-    return Array.from({ length: 8 }, (_, i) => ({
+    return Array.from({ length: 5 }, (_, i) => ({
       left: 5 + rand() * 85,
       top: 10 + rand() * 70,
       size: 120 + rand() * 180,
@@ -319,7 +331,7 @@ function ScanlineLayer() {
   const pixels = useMemo(() => {
     let seed = 9932;
     const rand = () => { seed = (seed * 6267 + 28657) % 196418; return seed / 196418; };
-    return Array.from({ length: 20 }, () => ({
+    return Array.from({ length: 12 }, () => ({
       left: rand() * 98,
       top: rand() * 95,
       size: 3 + Math.floor(rand() * 3) * 3,

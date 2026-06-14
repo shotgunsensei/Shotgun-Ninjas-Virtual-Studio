@@ -43,6 +43,12 @@ import { buildPresetVoice, findPreset } from "./sounds/presets";
 import { tryLoadMelodicSampler } from "./sounds/samples";
 import { applyGroove, getGroove, shouldFlam, shouldGhost } from "./sounds/groove";
 import { getChopEngine } from "./chopEngine";
+import {
+  startPerfTimer,
+  trackAudioResource,
+  trackTransportEvent,
+  untrackTransportEvent,
+} from "../../utils/performanceDiagnostics";
 
 // Re-export voice primitives so existing call sites that import from
 // `./engine` (export.ts, components) keep compiling without churn.
@@ -104,6 +110,25 @@ interface TrackVoice {
   dispose: () => void;
 }
 
+type PlaybackState =
+  | "stopped"
+  | "starting"
+  | "playing"
+  | "paused"
+  | "stopping"
+  | "error";
+
+interface ScheduledTransportResource {
+  label: string;
+  trackId?: string;
+}
+
+interface AudioClipResource {
+  url: string;
+  trackId: string;
+  eventId: number;
+}
+
 class AudioEngine {
   /**
    * When `?disableAudio=1` is present in the URL the engine silently skips
@@ -149,8 +174,11 @@ class AudioEngine {
    * playback regardless of which UI module scheduled it.
    */
   private activeAudioPlayers = new Set<Tone.Player>();
+  private audioClipResources = new Map<Tone.Player, AudioClipResource>();
+  private scheduledTransportIds = new Map<number, ScheduledTransportResource>();
   private metronomeId: number | null = null;
   private metronomeEnabled = false;
+  private playbackState: PlaybackState = "stopped";
   private soloSet = new Set<string>();
   unlocked = false;
   private noteEverPlayed = false;
@@ -189,37 +217,43 @@ class AudioEngine {
    */
   async unlock() {
     if (this.unlocked) return;
-    await Tone.start();
-
-    // Phase 6: register AudioWorklet processors then wire them into the master chain.
+    const endInit = startPerfTimer("audio-engine-init");
     try {
-      const rawCtx = Tone.getContext().rawContext as AudioContext;
-      await workletManager.register(rawCtx);
-      this.masterChain.initWorklets();
+      await Tone.start();
 
-      // Create the MetronomeProcessor node on the audio thread.
-      if (workletManager.ready) {
-        const node = workletManager.createNode("metronome", rawCtx);
-        if (node) {
-          // Bridge the AudioWorkletNode (native) to the Tone.js metronomeGain node.
-          const gainAny = this.metronomeGain as unknown as { input?: AudioNode };
-          if (gainAny.input instanceof AudioNode) {
-            node.connect(gainAny.input);
-          } else {
-            // Fallback: connect to Tone destination directly (lower precedence than master chain).
-            node.connect(rawCtx.destination);
+      // Phase 6: register AudioWorklet processors then wire them into the master chain.
+      try {
+        const toneCtx = Tone.getContext();
+        const rawCtx = toneCtx.rawContext as AudioContext;
+        await workletManager.register(toneCtx as unknown as AudioContext);
+        this.masterChain.initWorklets();
+
+        // Create the MetronomeProcessor node on the audio thread.
+        if (workletManager.ready) {
+          const node = workletManager.createNode("metronome", toneCtx as unknown as AudioContext);
+          if (node) {
+            // Bridge the AudioWorkletNode (native) to the Tone.js metronomeGain node.
+            const gainAny = this.metronomeGain as unknown as { input?: AudioNode };
+            if (gainAny.input instanceof AudioNode) {
+              node.connect(gainAny.input);
+            } else {
+              // Fallback: connect to Tone destination directly (lower precedence than master chain).
+              node.connect(rawCtx.destination);
+            }
+            this.metronomeWorkletNode = node;
           }
-          this.metronomeWorkletNode = node;
         }
+      } catch (err) {
+        console.warn("[AudioEngine] Worklet init failed — Tone.js fallback active.", err);
       }
-    } catch (err) {
-      console.warn("[AudioEngine] Worklet init failed — Tone.js fallback active.", err);
+
+      // Phase 6: start the lookahead scheduler.
+      lookaheadScheduler.start();
+
+      this.unlocked = true;
+    } finally {
+      endInit();
     }
-
-    // Phase 6: start the lookahead scheduler.
-    lookaheadScheduler.start();
-
-    this.unlocked = true;
   }
 
   /** Alias for `unlock()` — part of the documented v2 facade surface. */
@@ -245,13 +279,23 @@ class AudioEngine {
    * call so we don't pay the cost when no scope is mounted.
    */
   private masterAnalyser: Tone.Analyser | null = null;
-  getMasterAnalyser(): Tone.Analyser {
-    if (!this.masterAnalyser) {
-      const a = new Tone.Analyser("waveform", 256);
+  private masterAnalyserSize = 0;
+  getMasterAnalyser(size = 256): Tone.Analyser {
+    const boundedSize = Math.max(32, Math.min(2048, size));
+    if (!this.masterAnalyser || this.masterAnalyserSize !== boundedSize) {
+      if (this.masterAnalyser) {
+        try {
+          this.masterAnalyser.dispose();
+        } catch {
+          // ignore analyser disposal races
+        }
+      }
+      const a = new Tone.Analyser("waveform", boundedSize);
       // tap the post-master signal so the scope reflects what the user
       // actually hears (post FX, post limiter)
       this.masterChain.input.connect(a);
       this.masterAnalyser = a;
+      this.masterAnalyserSize = boundedSize;
     }
     return this.masterAnalyser;
   }
@@ -424,14 +468,42 @@ class AudioEngine {
     return Tone.getTransport().swing;
   }
 
+  getPlaybackState(): PlaybackState {
+    return this.playbackState;
+  }
+
   play() {
+    if (this.noAudio) return;
+    if (this.playbackState === "starting" || this.playbackState === "playing") return;
     // Releasing any held panic mute is a no-op when no panic is active,
     // so this is safe to call on every play.
-    this.masterChain.releasePanicHold();
-    Tone.getTransport().start();
+    this.playbackState = "starting";
+    try {
+      this.masterChain.releasePanicHold();
+      if (this.metronomeEnabled && this.metronomeId === null) {
+        this.setMetronome(true);
+      }
+      this.ensureAutomationScheduler();
+      const transport = Tone.getTransport();
+      if (transport.state !== "started") {
+        transport.start();
+      }
+      this.playbackState = "playing";
+    } catch (err) {
+      this.playbackState = "error";
+      throw err;
+    }
   }
   pause() {
-    Tone.getTransport().pause();
+    if (this.noAudio) return;
+    if (this.playbackState === "stopped" || this.playbackState === "stopping") return;
+    try {
+      Tone.getTransport().pause();
+      this.playbackState = "paused";
+    } catch (err) {
+      this.playbackState = "error";
+      throw err;
+    }
   }
   /**
    * Stop transport and reliably release any sustained notes (keyboard,
@@ -440,10 +512,19 @@ class AudioEngine {
    */
   stop() {
     if (this.noAudio) return;
-    Tone.getTransport().stop();
-    Tone.getTransport().position = 0;
-    for (const v of this.voices.values()) {
-      releaseAllNotes(v.poly);
+    if (this.playbackState === "stopping") return;
+    this.playbackState = "stopping";
+    try {
+      Tone.getTransport().stop();
+      Tone.getTransport().position = 0;
+      this.stopScheduledAudioPlayers(false);
+      for (const v of this.voices.values()) {
+        releaseAllNotes(v.poly);
+      }
+      this.playbackState = "stopped";
+    } catch (err) {
+      this.playbackState = "error";
+      throw err;
     }
   }
   seekToBeat(beat: number) {
@@ -466,50 +547,43 @@ class AudioEngine {
   }
 
   /**
-   * Hard kill: stop the transport, release every sustained note, dip
-   * the master to silence reverb/delay tails, and stop any live mic
-   * monitoring. Bound to the red Panic button.
-   *
-   * Intentionally does NOT call Transport.cancel() — clip and metronome
-   * schedules registered by useTransport / setMetronome must survive
-   * panic so the next Play resumes correctly without forcing a
-   * reschedule.
+   * Hard kill: stop the transport, clear all engine-owned schedules,
+   * release every sustained note, dip the master to silence reverb/delay
+   * tails, and stop any live mic monitoring. Bound to the red Panic button.
    */
   panicStopAll() {
-    // Intentionally does NOT call Transport.cancel() — clip and
-    // metronome schedules were registered by useTransport / setMetronome
-    // and must survive a panic so the next Play resumes correctly
-    // without forcing a reschedule.
     const transport = Tone.getTransport();
-    transport.stop();
-    transport.position = 0;
-    // Hard-stop every in-flight scheduled audio clip player so a panic
-    // is a true kill for vocal/audio clips, not just for synth tails.
-    for (const p of this.activeAudioPlayers) {
-      try {
-        p.stop();
-      } catch {
-        // ignore
-      }
-    }
-    for (const v of this.voices.values()) {
-      releaseAllNotes(v.poly);
-      if (v.mic && v.micOn) {
-        try {
-          v.mic.close();
-        } catch {
-          // ignore
+    this.playbackState = "stopping";
+    try {
+      transport.stop();
+      transport.position = 0;
+      this.clearAllScheduledTransportEvents();
+      this.clearMetronomeSchedule();
+      this.stopAutomationScheduler();
+      this.stopScheduledAudioPlayers(true);
+      for (const v of this.voices.values()) {
+        releaseAllNotes(v.poly);
+        if (v.mic && v.micOn) {
+          try {
+            v.mic.close();
+          } catch {
+            // ignore
+          }
+          v.micOn = false;
         }
-        v.micOn = false;
       }
-    }
-    // Phase 6: clear any queued worklet metronome clicks and lookahead events.
-    if (this.metronomeWorkletNode) {
-      workletManager.postMessage(this.metronomeWorkletNode, { type: "clear" });
-    }
-    lookaheadScheduler.cancelAll();
 
-    this.masterChain.duckForPanic();
+      // Phase 6: clear any queued worklet metronome clicks and lookahead events.
+      if (this.metronomeWorkletNode) {
+        workletManager.postMessage(this.metronomeWorkletNode, { type: "clear" });
+      }
+      lookaheadScheduler.cancelAll();
+
+      this.masterChain.duckForPanic();
+      this.playbackState = "stopped";
+    } catch {
+      this.playbackState = "error";
+    }
   }
 
   // ---- metronome ----
@@ -528,16 +602,13 @@ class AudioEngine {
     if (!on) {
       // Explicitly remove the repeating Transport event so it stops consuming
       // scheduling CPU instead of just being silenced by the boolean guard.
-      if (this.metronomeId !== null) {
-        try { Tone.getTransport().clear(this.metronomeId); } catch { /* ignore */ }
-        this.metronomeId = null;
-      }
+      this.clearMetronomeSchedule();
       return;
     }
     if (this.metronomeId !== null) return; // already scheduled — don't stack
     {
       let beat = 0;
-      this.metronomeId = Tone.getTransport().scheduleRepeat((time) => {
+      const id = Tone.getTransport().scheduleRepeat((time) => {
         if (!this.metronomeEnabled) return;
         const accent = beat % 4 === 0;
 
@@ -561,6 +632,7 @@ class AudioEngine {
         }
         beat++;
       }, "4n");
+      this.metronomeId = trackTransportEvent(id, "metronome");
     }
   }
 
@@ -652,6 +724,11 @@ class AudioEngine {
   }
 
   removeTrack(trackId: string) {
+    this.cancelScheduledForTrack(trackId);
+    this.removeTrackAutomation(trackId);
+    for (const key of Array.from(this.paramOverrides)) {
+      if (key.startsWith(`${trackId}:`)) this.paramOverrides.delete(key);
+    }
     const v = this.voices.get(trackId);
     if (!v) return;
     v.dispose();
@@ -659,15 +736,28 @@ class AudioEngine {
     this.soloSet.delete(trackId);
   }
 
+  getActiveTrackIds(): string[] {
+    return Array.from(this.voices.keys());
+  }
+
   /** Tear down every voice — used when swapping in a fresh project
    * (e.g. loading a demo) so we don't leak instruments or accumulate
    * stale voice ids in the engine. */
   disposeAllTracks() {
     if (this.noAudio) return;
+    this.cancelAllProjectSchedules();
     for (const id of Array.from(this.voices.keys())) {
       this.removeTrack(id);
     }
     this.soloSet.clear();
+  }
+
+  removeAllTracksExcept(trackIds: readonly string[]) {
+    if (this.noAudio) return;
+    const keep = new Set(trackIds);
+    for (const id of Array.from(this.voices.keys())) {
+      if (!keep.has(id)) this.removeTrack(id);
+    }
   }
 
   applyTrackSettings(track: Track) {
@@ -699,8 +789,13 @@ class AudioEngine {
   changePreset(track: Track) {
     const v = this.voices.get(track.id);
     if (!v) return;
+    const endTiming = startPerfTimer("instrument-replacement", {
+      trackId: track.id,
+      kind: track.kind,
+    });
     this.disposeInstrument(v);
     this.attachInstrument(v, track);
+    endTiming();
   }
 
   // ---- v2 sound-model methods ----
@@ -710,10 +805,12 @@ class AudioEngine {
     const v = this.voices.get(trackId);
     if (!v) return;
     if (v.kitId === kitId && v.kit) return;
+    const endTiming = startPerfTimer("kit-switch", { trackId, kitId });
     this.disposeInstrument(v);
     v.kitId = kitId;
     const def = findKit(kitId);
     v.kit = buildKit(def, v.filter, v.reverb, v.delay);
+    endTiming();
   }
 
   /** Switch this track to a named v2 melodic preset, rebuilding the voice. */
@@ -723,6 +820,7 @@ class AudioEngine {
     if (v.presetId === presetId && v.poly) return;
     const def = findPreset(presetId);
     if (!def) return;
+    const endTiming = startPerfTimer("instrument-replacement", { trackId, presetId });
     this.disposeInstrument(v);
     v.presetId = presetId;
     const poly = buildPresetVoice(def);
@@ -734,6 +832,7 @@ class AudioEngine {
     v.reverb.wet.rampTo(def.synth.reverbSend, 0.05);
     v.delay.wet.rampTo(def.synth.delaySend, 0.05);
     this.maybeAttachMelodicSampler(v, def, presetId);
+    endTiming();
   }
 
   /**
@@ -914,12 +1013,14 @@ class AudioEngine {
     } else {
       this.trackAutomationData.set(trackId, lanes);
     }
-    this.ensureAutomationScheduler();
+    if (this.automationActive) this.ensureAutomationScheduler();
+    else this.stopAutomationScheduler();
   }
 
   /** Remove all automation data for a track (called on track deletion). */
   removeTrackAutomation(trackId: string) {
     this.trackAutomationData.delete(trackId);
+    if (!this.automationActive) this.stopAutomationScheduler();
   }
 
   /** Replace the project-level modulation sources and routings. */
@@ -936,7 +1037,8 @@ class AudioEngine {
         this.stepModState.delete(id);
       }
     }
-    this.ensureAutomationScheduler();
+    if (this.automationActive) this.ensureAutomationScheduler();
+    else this.stopAutomationScheduler();
   }
 
   /** Get the live output value (0..1) for a modulation source. Used by the MOD panel UI. */
@@ -947,10 +1049,11 @@ class AudioEngine {
   private ensureAutomationScheduler() {
     if (this.automationSchedulerId !== null) return;
     if (!this.automationActive) return;
-    this.automationSchedulerId = Tone.getTransport().scheduleRepeat(
+    const id = Tone.getTransport().scheduleRepeat(
       (time) => this.automationTick(time),
       0.02, // 20 ms resolution
     );
+    this.automationSchedulerId = trackTransportEvent(id, "automation");
   }
 
   private stopAutomationScheduler() {
@@ -960,6 +1063,7 @@ class AudioEngine {
       } catch {
         // ignore
       }
+      untrackTransportEvent(this.automationSchedulerId, "automation");
       this.automationSchedulerId = null;
     }
   }
@@ -1126,6 +1230,12 @@ class AudioEngine {
   private disposeInstrument(v: TrackVoice) {
     if (v.poly) {
       try {
+        releaseAllNotes(v.poly);
+        (v.poly as unknown as { disconnect?: () => void }).disconnect?.();
+      } catch {
+        // ignore
+      }
+      try {
         v.poly.dispose();
       } catch {
         // ignore
@@ -1138,7 +1248,11 @@ class AudioEngine {
       v.drums = undefined;
     }
     if (v.kit) {
-      v.kit.dispose();
+      try {
+        v.kit.dispose();
+      } catch {
+        // ignore
+      }
       v.kit = undefined;
     }
     v.presetId = undefined;
@@ -1345,7 +1459,8 @@ class AudioEngine {
         continue;
       }
       const t = startBeats + ev.time;
-      const id = Tone.getTransport().schedule((time) => {
+      let id = -1;
+      id = Tone.getTransport().schedule((time) => {
         const bpm = Tone.getTransport().bpm.value;
         // Per-step probability gate (independent of groove template prob).
         if (ev.probability !== undefined && ev.probability < 1) {
@@ -1429,6 +1544,7 @@ class AudioEngine {
           }
         }
       }, `0:${t}:0`);
+      this.registerScheduledTransportEvent(id, "note-clip", track.id);
       ids.push(id);
     }
     return ids;
@@ -1440,8 +1556,34 @@ class AudioEngine {
   }
 
   cancelScheduled(ids: number[]) {
-    const t = Tone.getTransport();
-    for (const id of ids) t.clear(id);
+    for (const id of ids) {
+      this.clearScheduledTransportEvent(id);
+    }
+  }
+
+  cancelAllProjectSchedules() {
+    const ids = Array.from(this.scheduledTransportIds.entries())
+      .filter(([, resource]) => resource.label === "note-clip" || resource.label === "audio-clip")
+      .map(([id]) => id);
+    this.cancelScheduled(ids);
+    this.stopScheduledAudioPlayers(true);
+  }
+
+  cancelScheduledForTrack(trackId: string) {
+    const ids = Array.from(this.scheduledTransportIds.entries())
+      .filter(([, resource]) => resource.trackId === trackId)
+      .map(([id]) => id);
+    this.cancelScheduled(ids);
+    const players = Array.from(this.audioClipResources.entries())
+      .filter(([, resource]) => resource.trackId === trackId)
+      .map(([player]) => player);
+    this.disposeScheduledAudioPlayers(players);
+  }
+
+  disposeScheduledAudioPlayers(players: Tone.Player[]) {
+    for (const player of players) {
+      this.disposeScheduledAudioPlayer(player);
+    }
   }
 
   /** Schedule a vocal audio clip via Tone.Player aligned to its start beat. */
@@ -1477,22 +1619,109 @@ class AudioEngine {
     const origDispose = player.dispose.bind(player);
     player.dispose = () => {
       this.activeAudioPlayers.delete(player);
+      const resource = this.audioClipResources.get(player);
+      if (resource) {
+        this.audioClipResources.delete(player);
+        try {
+          URL.revokeObjectURL(resource.url);
+        } catch {
+          // ignore
+        }
+      }
       return origDispose();
     };
     const offset = Math.max(0, clip.offsetSec ?? 0);
     const duration = Math.max(0, clip.durationSec);
-    const evId = Tone.getTransport().schedule((time) => {
+    let evId = -1;
+    evId = Tone.getTransport().schedule((time) => {
       try {
         player.start(time, offset, duration);
       } catch {
         // ignore
       }
     }, `0:${clip.start}:0`);
+    this.registerScheduledTransportEvent(evId, "audio-clip", track.id);
+    this.audioClipResources.set(player, { url, trackId: track.id, eventId: evId });
     return { id: evId, player };
+  }
+
+  private registerScheduledTransportEvent(id: number, label: string, trackId?: string) {
+    this.scheduledTransportIds.set(id, { label, trackId });
+    trackTransportEvent(id, label);
+  }
+
+  private unregisterScheduledTransportEvent(id: number) {
+    const resource = this.scheduledTransportIds.get(id);
+    if (!resource) return;
+    this.scheduledTransportIds.delete(id);
+    untrackTransportEvent(id, resource.label);
+  }
+
+  private clearScheduledTransportEvent(id: number) {
+    try {
+      Tone.getTransport().clear(id);
+    } catch {
+      // ignore
+    }
+    this.unregisterScheduledTransportEvent(id);
+  }
+
+  private clearAllScheduledTransportEvents() {
+    for (const id of Array.from(this.scheduledTransportIds.keys())) {
+      this.clearScheduledTransportEvent(id);
+    }
+  }
+
+  private clearMetronomeSchedule() {
+    if (this.metronomeId === null) return;
+    try {
+      Tone.getTransport().clear(this.metronomeId);
+    } catch {
+      // ignore
+    }
+    untrackTransportEvent(this.metronomeId, "metronome");
+    this.metronomeId = null;
+  }
+
+  private stopScheduledAudioPlayers(dispose: boolean) {
+    for (const player of Array.from(this.activeAudioPlayers)) {
+      try {
+        player.stop();
+      } catch {
+        // ignore
+      }
+      if (dispose) this.disposeScheduledAudioPlayer(player);
+    }
+  }
+
+  private disposeScheduledAudioPlayer(player: Tone.Player) {
+    try {
+      player.stop();
+    } catch {
+      // ignore
+    }
+    const resource = this.audioClipResources.get(player);
+    if (resource) {
+      this.clearScheduledTransportEvent(resource.eventId);
+    }
+    try {
+      player.dispose();
+    } catch {
+      this.activeAudioPlayers.delete(player);
+      if (resource) {
+        this.audioClipResources.delete(player);
+        try {
+          URL.revokeObjectURL(resource.url);
+        } catch {
+          // ignore
+        }
+      }
+    }
   }
 
   // ---- voice construction ----
   private buildVoice(track: Track): TrackVoice {
+    const untrackVoice = trackAudioResource("track-voice");
     const channel = new Tone.Channel({ volume: 0 });
     // Freeverb is an algorithmic reverb (Schroeder/Moorer) — instantaneous
     // to create unlike Tone.Reverb which generates a convolution IR buffer
@@ -1596,6 +1825,7 @@ class AudioEngine {
         }
         meter.dispose();
         channel.dispose();
+        untrackVoice();
       },
     };
     this.attachInstrument(voice, track);

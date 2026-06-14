@@ -73,7 +73,7 @@ export default function LandingPage() {
   useEffect(() => {
     const onPrompt = (e: Event) => {
       const evt = e as CustomEvent<{ prompt: () => void }>;
-      if (evt.detail?.prompt) setPwaPrompt(evt.detail);
+      if (typeof evt.detail?.prompt === "function") setPwaPrompt(evt.detail);
     };
     window.addEventListener("studio:pwa-prompt", onPrompt);
     return () => window.removeEventListener("studio:pwa-prompt", onPrompt);
@@ -137,7 +137,7 @@ export default function LandingPage() {
               Load Demo
             </button>
           </div>
-          {pwaPrompt && (
+            {pwaPrompt?.prompt && (
             <button
               onClick={() => pwaPrompt.prompt()}
               className="text-xs font-mono text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"

@@ -282,6 +282,100 @@ const PROCESSOR_NAMES: Record<WorkletNodeKind, string> = {
   'saturation':    'sn-saturation',
 };
 
+function resolveNativeContext(context: AudioContext | BaseAudioContext | unknown): BaseAudioContext | null {
+  if (
+    typeof BaseAudioContext !== "undefined" &&
+    context instanceof BaseAudioContext
+  ) {
+    return context;
+  }
+
+  const maybe = context as
+    | {
+        rawContext?: unknown;
+        _context?: unknown;
+        _nativeAudioContext?: unknown;
+      }
+    | null
+    | undefined;
+
+  if (
+    typeof BaseAudioContext !== "undefined" &&
+    maybe?.rawContext instanceof BaseAudioContext
+  ) {
+    return maybe.rawContext;
+  }
+
+  const rawContext = maybe?.rawContext as
+    | { _nativeAudioContext?: unknown }
+    | null
+    | undefined;
+  if (
+    typeof BaseAudioContext !== "undefined" &&
+    rawContext?._nativeAudioContext instanceof BaseAudioContext
+  ) {
+    return rawContext._nativeAudioContext;
+  }
+
+  if (
+    typeof BaseAudioContext !== "undefined" &&
+    maybe?._context instanceof BaseAudioContext
+  ) {
+    return maybe._context;
+  }
+
+  const internalContext = maybe?._context as
+    | { _nativeAudioContext?: unknown }
+    | null
+    | undefined;
+  if (
+    typeof BaseAudioContext !== "undefined" &&
+    internalContext?._nativeAudioContext instanceof BaseAudioContext
+  ) {
+    return internalContext._nativeAudioContext;
+  }
+
+  if (
+    typeof BaseAudioContext !== "undefined" &&
+    maybe?._nativeAudioContext instanceof BaseAudioContext
+  ) {
+    return maybe._nativeAudioContext;
+  }
+
+  return null;
+}
+
+function resolveToneWorkletContext(context: unknown): {
+  addAudioWorkletModule?: (url: string) => Promise<void>;
+  createAudioWorkletNode?: (
+    name: string,
+    options?: AudioWorkletNodeOptions,
+  ) => AudioWorkletNode;
+} | null {
+  const maybe = context as
+    | {
+        addAudioWorkletModule?: unknown;
+        createAudioWorkletNode?: unknown;
+      }
+    | null
+    | undefined;
+
+  if (
+    typeof maybe?.addAudioWorkletModule === "function" ||
+    typeof maybe?.createAudioWorkletNode === "function"
+  ) {
+    return maybe as {
+      addAudioWorkletModule?: (url: string) => Promise<void>;
+      createAudioWorkletNode?: (
+        name: string,
+        options?: AudioWorkletNodeOptions,
+      ) => AudioWorkletNode;
+    };
+  }
+
+  return null;
+}
+
 class WorkletManager {
   private static _instance: WorkletManager | null = null;
 
@@ -331,10 +425,18 @@ class WorkletManager {
     }
     this._registering = true;
     try {
+      const nativeContext = resolveNativeContext(context);
+      const toneContext = resolveToneWorkletContext(context);
       const blob = new Blob([PROCESSOR_CODE], { type: 'application/javascript' });
       const url  = URL.createObjectURL(blob);
       this._blobUrl = url;
-      await context.audioWorklet.addModule(url);
+      if (nativeContext && "audioWorklet" in nativeContext) {
+        await nativeContext.audioWorklet.addModule(url);
+      } else if (toneContext?.addAudioWorkletModule) {
+        await toneContext.addAudioWorkletModule(url);
+      } else {
+        throw new TypeError("AudioWorklet registration requires a native or Tone worklet context");
+      }
       this._registered = true;
       return true;
     } catch (err) {
@@ -350,7 +452,15 @@ class WorkletManager {
   createNode(kind: WorkletNodeKind, context: AudioContext, options?: AudioWorkletNodeOptions): AudioWorkletNode | null {
     if (!this._registered) return null;
     try {
-      return new AudioWorkletNode(context, PROCESSOR_NAMES[kind], options);
+      const nativeContext = resolveNativeContext(context);
+      if (nativeContext) {
+        return new AudioWorkletNode(nativeContext, PROCESSOR_NAMES[kind], options);
+      }
+      const toneContext = resolveToneWorkletContext(context);
+      if (toneContext?.createAudioWorkletNode) {
+        return toneContext.createAudioWorkletNode(PROCESSOR_NAMES[kind], options);
+      }
+      throw new TypeError("AudioWorkletNode requires a native or Tone worklet context");
     } catch (err) {
       console.warn(`[WorkletManager] Failed to create ${kind} node:`, err);
       return null;

@@ -42,6 +42,7 @@ function patch(next: Partial<PwaState>) {
 let waitingWorker: ServiceWorker | null = null;
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
 let registration: ServiceWorkerRegistration | null = null;
+let updateReloadPending = false;
 
 function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
@@ -80,6 +81,8 @@ function trackWaiting(reg: ServiceWorkerRegistration) {
 
 /** Tell the waiting worker to take over and reload the page once it does. */
 export function applyUpdate() {
+  if (updateReloadPending) return;
+  updateReloadPending = true;
   if (!waitingWorker) {
     // Fallback: just reload — the SW lifecycle will sort itself out.
     window.location.reload();
@@ -91,6 +94,7 @@ export function applyUpdate() {
     reloaded = true;
     window.location.reload();
   });
+  patch({ updateAvailable: false });
   waitingWorker.postMessage({ type: "SKIP_WAITING" });
 }
 

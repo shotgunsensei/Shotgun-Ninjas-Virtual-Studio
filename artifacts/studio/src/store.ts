@@ -103,6 +103,8 @@ class Store {
   private listeners = new Set<Listener>();
   state: {
     project: Project;
+    projectRevision: number;
+    transportScheduleRevision: number;
     selectedTrackId: string;
     selectedClipId: string | null;
     audioUnlocked: boolean;
@@ -164,6 +166,8 @@ class Store {
   constructor(project: Project) {
     this.state = {
       project,
+      projectRevision: 0,
+      transportScheduleRevision: 0,
       selectedTrackId: project.tracks[0]?.id ?? "",
       selectedClipId: null,
       audioUnlocked: false,
@@ -204,7 +208,17 @@ class Store {
 
   set(updater: Partial<typeof this.state> | ((s: typeof this.state) => Partial<typeof this.state>)) {
     const patch = typeof updater === "function" ? updater(this.state) : updater;
-    this.state = { ...this.state, ...patch };
+    const projectChanged =
+      Object.prototype.hasOwnProperty.call(patch, "project") &&
+      patch.project !== undefined &&
+      patch.project !== this.state.project;
+    this.state = {
+      ...this.state,
+      ...patch,
+      projectRevision: projectChanged
+        ? this.state.projectRevision + 1
+        : patch.projectRevision ?? this.state.projectRevision,
+    };
     this.listeners.forEach((l) => l());
   }
 
@@ -212,6 +226,7 @@ class Store {
     this.state = {
       ...this.state,
       project: { ...this.state.project, ...patch, updatedAt: Date.now() },
+      projectRevision: this.state.projectRevision + 1,
     };
     this.listeners.forEach((l) => l());
   }
@@ -400,10 +415,14 @@ class Store {
     this.patchProject({ tracks });
   }
 
-  addAudioClip(trackId: string, clip: { id: string; start: number; durationSec: number; blob: Blob }) {
+  addAudioClip(trackId: string, clip: { id: string; start: number; durationSec: number; blob: Blob; blobKey?: string }) {
     // Capture the original recording length so resize can later clamp
     // right-edge growth to the actual available audio.
-    const stored = { ...clip, sourceDurationSec: clip.durationSec };
+    const stored = {
+      ...clip,
+      blobKey: clip.blobKey ?? `${this.state.project.id}:${trackId}:${clip.id}`,
+      sourceDurationSec: clip.durationSec,
+    };
     const tracks = this.state.project.tracks.map((t) => {
       if (t.id !== trackId) return t;
       return { ...t, audioClips: [...t.audioClips, stored] };
@@ -767,6 +786,7 @@ class Store {
       ...this.state,
       chopLab: next,
       project: { ...this.state.project, chopLab: persisted, updatedAt: Date.now() },
+      projectRevision: this.state.projectRevision + 1,
     };
     this.listeners.forEach((l) => l());
   }
@@ -1162,6 +1182,7 @@ export function getStore(initial?: Project) {
 }
 
 export function resetStore(project: Project) {
+  audio.cancelAllProjectSchedules();
   if (storeInstance) {
     // Mutate the existing instance so React subscriptions (bound to the
     // current Store via `useSyncExternalStore`) keep working. This is

@@ -2,7 +2,6 @@ import { audio } from "./audio/engine";
 import { applyMixPreset } from "./audio/mixPresets";
 import {
   defaultProject,
-  flushMixToEngine,
   getStore,
   makeId,
   makeTrack,
@@ -989,10 +988,7 @@ export function loadDemo(id: string): boolean {
   if (!def) return false;
   const project = def.build();
   audio.stop();
-  audio.disposeAllTracks();
   resetStore(project);
-  for (const t of project.tracks) audio.ensureTrack(t);
-  flushMixToEngine(project);
   const store = getStore();
   store.set({
     isTransientProject: true,
@@ -1022,10 +1018,7 @@ export function remixDemo(id: string): boolean {
     updatedAt: Date.now(),
   };
   audio.stop();
-  audio.disposeAllTracks();
   resetStore(project);
-  for (const t of project.tracks) audio.ensureTrack(t);
-  flushMixToEngine(project);
   const store = getStore();
   store.set({
     isTransientProject: false,

@@ -197,5 +197,580 @@ simultaneously with `decodeAudioData()`. On a project with 10+ vocal clips each
 |---|---|
 | WAV export for very long projects (>4 min) still blocks the main thread | OfflineAudioContext.startRendering() is synchronous from the browser's perspective; only a Worker-based render path would solve this completely |
 | Main-thread sample decode for files >20 MB | Web Worker decode path is a larger refactor; documented in backlog |
-| Full voice disposal registry | Requires auditing every voice-rebuild path; deferred to a dedicated task |
+| Full raw Web Audio primitive registry | Tone track voices and scheduled clip players now have stronger cleanup, but world ambience one-shot primitives still use best-effort Web Audio node cleanup |
 | SharedArrayBuffer ring buffer for near-zero-latency audio | Already a separate task in the backlog |
+
+---
+
+## Fix 12 — Development-only performance diagnostics instrumentation
+
+**Files:**
+
+- `src/utils/performanceDiagnostics.ts`
+- `src/main.tsx`
+- `src/App.tsx`
+- `src/lib/storage/db.ts`
+- `src/lib/audio/export.ts`
+- `src/lib/audio/engine.ts`
+- `src/hooks/useTransport.ts`
+- `src/lib/visualTicker.ts`
+- `src/components/MasterScope.tsx`
+- `src/components/AudioDiagnosticsPanel.tsx`
+- `src/components/TransportBar.tsx`
+- `src/components/SamplePreviewDialog.tsx`
+- `src/components/instruments/ChopLab.tsx`
+- `src/lib/audio/lookahead-scheduler.ts`
+- `src/lib/audio/master.ts`
+- `src/lib/audio/sampleEdits.ts`
+- `src/lib/performance/bassline.ts`
+
+**Problem:** The app had known hot paths but no lightweight, app-local way to
+measure durations or count active loops/resources during normal dev usage.
+
+**Fix:** Added a Vite-development-only diagnostics helper around
+`performance.mark()` and `performance.measure()`, plus counters for active rAF
+loops, intervals, Tone.Transport event IDs, audio resources, autosave attempts,
+skipped autosaves, and sample blob writes.
+
+**Measured paths:**
+
+- App startup
+- Audio engine initialization
+- Project load/save/autosave
+- Sample import/edit and waveform generation
+- WAV/MP3 export
+- JSON export
+- Transport play/stop
+- Kit switch and instrument replacement
+- Visualizer mount/unmount
+
+**How to use in dev console:**
+
+```js
+window.__SN_PERF_DIAGNOSTICS__.snapshot()
+window.__SN_PERF_DIAGNOSTICS__.enableLogs()
+window.__SN_PERF_DIAGNOSTICS__.disableLogs()
+window.__SN_PERF_DIAGNOSTICS__.reset()
+```
+
+**Production safety:** The helper is gated behind `import.meta.env.DEV`, does
+not install a global in production, does not add external analytics, and does
+not transmit project data.
+
+**Known diagnostic limitation:** One-shot Tone.Transport note/audio clip events
+are tracked when scheduled and when existing cancellation paths clear them.
+The current engine does not automatically untrack those IDs when a one-shot
+event naturally completes, so use this counter mainly to detect stacking after
+stop/load/cancel flows.
+
+**Validation status:**
+
+- `corepack pnpm --filter @workspace/studio typecheck` runs with Git `sh` on
+  PATH and pnpm pre-run dependency verification disabled, but fails on existing
+  unrelated TypeScript errors outside the diagnostics patch.
+- `corepack pnpm --filter @workspace/studio build` fails before app compilation
+  because Rollup cannot resolve its Windows native optional package.
+- `corepack pnpm --filter @workspace/studio test` fails before tests because
+  the Playwright webServer command is not Windows-compatible and Chromium is
+  not found.
+
+---
+
+## Fix 13 — Render-storm cleanup for playback UI loops
+
+**Files:**
+
+- `src/components/TransportBar.tsx`
+- `src/components/MasterScope.tsx`
+- `src/components/Timeline.tsx`
+- `src/components/instruments/PianoRoll.tsx`
+- `src/components/instruments/DrumPads.tsx`
+- `src/components/instruments/VocalsPanel.tsx`
+- `src/components/AudioDiagnosticsPanel.tsx`
+- `src/components/MasterStrip.tsx`
+
+**Problem:** Several playback-adjacent UI elements still owned independent rAF
+loops or pushed React state during high-frequency visual updates. The main
+confirmed risks were `ProjectClipBadge`, `MasterScope`, arrangement/piano-roll
+playheads, DrumPads active-step highlighting, the vocal monitor meter, the
+diagnostics panel, and the master clip latch.
+
+**Fixes:**
+
+- Moved `ProjectClipBadge` from its own 30 Hz rAF loop to `visualTicker`.
+- Skipped project-wide track-meter scans unless playback is running or clip
+  history is open.
+- Gated clip-badge React state writes behind actual newly clipped track IDs.
+- Moved `MasterScope`, `Timeline` playhead, `PianoRoll` playhead, and master
+  clip polling to `visualTicker`.
+- Cached `MasterScope` colors instead of calling `getComputedStyle()` on every
+  draw.
+- Changed DrumPads active-step highlighting from React state/prop fanout to
+  direct DOM class updates on matching step cells.
+- Changed the vocal monitor level meter from per-frame `setState` to direct
+  ref style updates through `visualTicker`.
+- Reduced `AudioDiagnosticsPanel` polling from 4 Hz to 1 Hz and paused
+  diagnostics polling while `document.hidden`.
+- Avoided redundant transport position text writes when the bar.beat.step value
+  has not changed.
+
+**Result:** Playback visual updates now share the same capped ticker used by
+meters. Performance Mode continues to cap the shared ticker at 15 FPS, so the
+patched playheads, scope, vocal meter, diagnostics frame monitor, and clip badge
+all inherit the lower visual cadence.
+
+**Validation status:**
+
+- `npm run build` fails immediately because the root build script shells out to
+  `pnpm`, and direct `pnpm` is not on PATH in this PowerShell session.
+- `corepack pnpm --filter @workspace/studio typecheck` still fails on existing
+  unrelated TypeScript errors in `Header.tsx`, `PluginBrowser.tsx`,
+  `WorldContext.tsx`, `worldAudio.ts`, `worlds.ts`, and `LandingPage.tsx`.
+- `corepack pnpm --filter @workspace/studio build` still fails before app
+  compilation because Rollup cannot resolve `@rollup/rollup-win32-x64-msvc`.
+- `corepack pnpm --filter @workspace/studio test` still fails before tests
+  because the Playwright webServer command is not Windows-compatible and
+  Chromium is not found.
+
+---
+
+## Fix 14 — Audio lifecycle, Transport ownership, and cleanup hardening
+
+**Files:**
+
+- `src/lib/audio/engine.ts`
+- `src/hooks/useTransport.ts`
+- `src/store.ts`
+- `src/contexts/WorldContext.tsx`
+
+**Confirmed root causes:**
+
+- `panicStopAll()` intentionally preserved clip and metronome Transport events,
+  which made panic a partial audio kill instead of a full scheduler reset.
+- Note and audio clip Transport IDs were returned to `useTransport`, but the
+  engine did not own a track-scoped registry for cancelling schedules during
+  track deletion, project reset, or panic.
+- Scheduled `Tone.Player` audio clips created object URLs and could be disposed
+  directly by the hook, bypassing central URL/resource cleanup.
+- Automation used a 20 ms `Transport.scheduleRepeat` that started when
+  automation/modulation appeared but was not stopped when the last lane/source
+  was removed.
+- World ambience created a separate raw `AudioContext`; the studio now uses the
+  Tone raw context for live ambience so there is one intended live context.
+
+**Fixes:**
+
+- Added an internal playback state machine:
+  `stopped`, `starting`, `playing`, `paused`, `stopping`, `error`.
+- `audio.play()` now no-ops during duplicate start attempts, restarts missing
+  metronome/automation schedules when needed, and only starts Tone.Transport
+  when it is not already started.
+- `audio.stop()` now releases sustained notes and stops scheduled audio players
+  without disposing reusable clip players.
+- Reworked `panicStopAll()` to stop Transport, reset position, clear all
+  engine-owned note/audio clip Transport IDs, clear the explicit metronome
+  `scheduleRepeat` ID, stop automation scheduling, clear worklet/lookahead
+  queues, stop/dispose scheduled audio clip players, release active notes, and
+  close live mic monitoring.
+- Added an engine-owned Transport resource registry with labels and optional
+  track IDs for note/audio clip schedules.
+- Added track-scoped cleanup on `removeTrack()` and `removeAllTracksExcept()`
+  so deleted/project-replaced tracks cancel old schedules and dispose voices.
+- Added `cancelAllProjectSchedules()` and call it from `resetStore()` so project
+  load/recovery/demo swaps clear old project events before the store changes.
+- Routed scheduled audio clip player disposal through
+  `audio.disposeScheduledAudioPlayers()` so object URLs are revoked and active
+  player tracking is cleared consistently.
+- Hardened instrument replacement disposal by releasing sustained notes before
+  disposing melodic voices and by clearing replaced kit/preset IDs.
+- Stopped the automation Transport repeat when no automation/modulation remains.
+- Switched `WorldProvider` ambience from `new AudioContext()` to
+  `Tone.getContext().rawContext`.
+
+**Risk level:** Medium. The patch changes ownership and cleanup around core
+playback, but avoids changing note generation, instrument definitions, or UI
+flows.
+
+**Validation status:**
+
+- `npm run build` fails before app compilation because Rollup cannot resolve
+  `@rollup/rollup-win32-x64-msvc` from the existing Windows install.
+- `corepack pnpm --dir artifacts/studio run typecheck` is blocked by pnpm
+  dependency verification unless Git `sh` is added to PATH; with Git `sh` on
+  PATH it is blocked by pnpm `approve-builds` for `esbuild`.
+- Direct local TypeScript check
+  `& '..\..\node_modules\.bin\tsc.cmd' -p tsconfig.json --noEmit` runs and
+  fails only on existing unrelated errors in `Header.tsx`, `PluginBrowser.tsx`,
+  `worldAudio.ts`, `worlds.ts`, and `LandingPage.tsx`.
+- `npm run test` fails before tests because the Playwright webServer command
+  uses POSIX-only `which` and `PORT` syntax on Windows.
+
+**Remaining risks:**
+
+- Full browser manual audio testing is still needed after the Rollup optional
+  dependency/install state is repaired.
+- World welcome/ambient primitives still synthesize raw Web Audio nodes on the
+  shared Tone context; they are no longer a second live context, but their
+  individual one-shot nodes are still best-effort cleanup.
+- Offline export intentionally creates temporary `AudioContext`/
+  `Tone.OfflineContext` instances and closes/restores them after decoding or
+  rendering.
+
+---
+
+## Fix 15 — Storage, autosave, sample import, waveform, and export guardrails
+
+**Files:**
+
+- `src/App.tsx`
+- `src/store.ts`
+- `src/lib/storage/db.ts`
+- `src/lib/storage/performanceGuards.ts`
+- `src/lib/audio/export.ts`
+- `src/lib/audio/sampleEdits.ts`
+- `src/lib/audio/waveformPeaks.ts`
+- `src/components/Header.tsx`
+- `src/components/LeftBrowser.tsx`
+- `src/components/SamplePreviewDialog.tsx`
+- `src/components/Timeline.tsx`
+- `src/components/instruments/ChopLab.tsx`
+
+**Confirmed root causes:**
+
+- Autosave used a boolean dirty flag and project object identity, but had no
+  project revision / saved revision tracking.
+- The first project change after subscription could be skipped by the old
+  autosave guard.
+- Draft autosave skipped during playback and did not requeue unless another
+  store change happened.
+- Blob write skipping used `size:type:lastModified`; same-size edited content
+  could be missed.
+- JSON import summary hydrated embedded base64 blobs before confirmation.
+- Export decoded the finished WAV/MP3 blob again just to check clipping.
+- Timeline audio clips decoded full blobs per clip mount to draw waveforms.
+- Sample preview, Chop Lab, and sample relink paths had no consistent oversized
+  file guard before decode.
+
+**Fixes:**
+
+- Added `projectRevision` to the store and revision-aware autosave tracking in
+  `App.tsx`.
+- Draft autosave remains debounced at 8 seconds, now skips clean revisions, and
+  requeues while playback or critical storage/export/import work is active.
+- Periodic project autosave clears dirty state only after a successful save of
+  the current revision.
+- Added `performanceGuards.ts` for critical-operation gating, sample/JSON size
+  limits, byte formatting, and one-time blob content fingerprints.
+- Switched IDB blob skip checks to cached SHA-256 content fingerprints instead
+  of size-only metadata.
+- Assigned stable audio clip blob keys at clip creation.
+- JSON export now yields between blob conversions/tracks/samples.
+- JSON import summary parses and migrates lightweight project metadata without
+  hydrating embedded blobs; full blob hydration now happens only after the
+  existing confirmation modal.
+- Wrapped audio export, stems export, DAW Pack export, JSON export, and JSON
+  import in critical-operation guards so autosave backs off during heavy work.
+- Removed the post-export full decode in `Header.tsx`; clipping is detected from
+  the render buffer before encoding.
+- WAV encoding now yields periodically and reports encoding progress during
+  large buffers.
+- Audio clip decode for export now runs in smaller batches of 2 with progress
+  updates and UI yields between batches.
+- Added a cached waveform peak generator for timeline audio clips so repeated
+  visible waveform renders do not repeatedly decode the same blob.
+- Added oversized sample rejection at 50 MB and large-sample warnings at 20 MB
+  for drop import, Sample Preview, Chop Lab, and sample relink.
+- Added stale-result tokens for Sample Preview and Chop Lab imports so a slower
+  previous decode cannot overwrite a newer import.
+- Corrected the autosave settings copy from "~1s" to "~8s".
+
+**Risk level:** Medium. The patch changes save/export/import timing and adds
+guardrails, but keeps the persisted project schema and confirmation behavior.
+
+**Validation status:**
+
+- `npm run typecheck` runs and now fails only on existing unrelated errors in
+  `PluginBrowser.tsx`, `worldAudio.ts`, `worlds.ts`, and `LandingPage.tsx`.
+- `npm run build` fails before app compilation because Rollup cannot resolve
+  `@rollup/rollup-win32-x64-msvc` from the existing Windows install.
+- No `lint` script exists in `artifacts/studio/package.json`.
+- `npm run test` fails before tests because the Playwright webServer command
+  uses POSIX-only `which` and `PORT` syntax on Windows.
+
+**Remaining risks:**
+
+- WAV/MP3 export still uses full `OfflineAudioContext.startRendering()` and
+  holds the final render buffer in memory; long dense projects can still exceed
+  browser limits.
+- Project-with-samples JSON export still creates large base64 strings by design,
+  but now yields and avoids blob hydration before import confirmation.
+- Sample editing still performs full-buffer transforms on the main thread after
+  decode; very large files are rejected before that path.
+- Manual browser validation is still required after the Rollup optional
+  dependency/install state is repaired.
+
+---
+
+## Fix 16 — CSS paint, decorative FX, lazy panels, Performance Mode, and PWA cache
+
+**Files:**
+
+- `src/index.css`
+- `src/components/BackgroundFx.tsx`
+- `src/components/MasterScope.tsx`
+- `src/components/TransportBar.tsx`
+- `src/components/LeftBrowser.tsx`
+- `src/App.tsx`
+- `src/lib/audio/engine.ts`
+- `src/lib/pwa.ts`
+- `public/sw.js`
+
+**Confirmed root causes:**
+
+- Normal mode background FX rendered dozens of animated DOM nodes for rain,
+  sparks, smoke, scanline pixels, and twinkles.
+- Background FX unmounted in Performance Mode, but not while the tab was hidden.
+- Performance Mode removed some glow classes, but dense step/pad surfaces,
+  meter shadows, backdrop blur, and utility shadow classes could still force
+  expensive paint/compositing.
+- `AudioDiagnosticsPanel`, `PluginBrowser`, `HelpDialog`, and `ChopLab` were
+  statically imported even though they are hidden until a panel/dialog/tab opens.
+- The master scope always used a 256-point analyser even in Performance Mode.
+- The service worker used cache-first runtime handling for all same-origin GETs,
+  which could stale-cache future runtime endpoints or sample-serving routes.
+
+**Fixes:**
+
+- Reduced normal-mode decorative DOM counts:
+  shuriken twinkles 60 -> 36, sparks 28 -> 18, rain drops 60 -> 32, smoke blobs
+  8 -> 5, scanline pixels 20 -> 12.
+- `BackgroundFx` now unmounts while `document.hidden`, removing decorative
+  animation work without touching intentional audio playback.
+- Extended `body[data-perf="true"]` CSS to strip dense UI shadows, glow classes,
+  panel inset shadows, animated pulse classes, backdrop blur, and grid
+  background effects while preserving layout geometry.
+- Removed the small blur filter from the static shuriken backdrop.
+- Lazy-loaded `HelpDialog`, `ChopLab`, `PluginBrowser`, and
+  `AudioDiagnosticsPanel` behind their actual visible states with safe Suspense
+  fallbacks.
+- `MasterScope` now requests a 128-point analyser and samples fewer points in
+  Performance Mode; normal mode remains 256-point.
+- `audio.getMasterAnalyser(size)` now recreates and disposes the analyser when
+  the requested safe size changes.
+- Service worker runtime caching is now limited to the app shell and static Vite
+  assets; arbitrary same-origin GETs, API paths, sample paths, audio/video, blob,
+  data, and range requests pass through without SW caching.
+- `applyUpdate()` now ignores duplicate update-apply clicks and clears the toast
+  state before posting `SKIP_WAITING`, avoiding reload-loop style repeated
+  actions.
+
+**Risk level:** Low to medium. The changes mainly gate visuals and lazy-load
+hidden panels. The highest-risk area is service worker caching behavior, but it
+now aligns with the intended app-shell-only cache policy.
+
+**Validation status:**
+
+- `npm run typecheck` passes.
+- `npm run build` passes after current-platform Windows native package and
+  Windows build-script fixes in the final verification pass.
+- No `lint` script exists in `artifacts/studio/package.json`.
+- `npm run test` passes after Playwright browser install and stale test-route
+  correction.
+- Production preview served `/` and `/studio` successfully.
+
+**Remaining risks:**
+
+- Export modal logic still lives inside `Header.tsx`, so it was not split into
+  a lazy component during this scoped pass.
+- `SoundLibraryPanel` remains statically imported because the Library tab can be
+  the persisted default tab; lazy-loading it is possible but needs a separate
+  startup UX decision.
+- Full fresh-cache/old-cache browser validation still depends on a successful
+  production build/preview.
+
+---
+
+## Self-Review Patch
+
+Date: 2026-06-12
+
+### Blocking Issue Found
+
+`AudioEngine.panicStopAll()` now correctly clears engine-owned Transport events
+and disposes scheduled audio clip players, but `useTransport()` only rebuilt
+project schedules when the project-derived `scheduleKey` changed. Pressing Panic
+could therefore clear note/audio clip schedules and leave the next Play with no
+project clips scheduled until the user edited the project or loaded another one.
+
+### Patch Applied
+
+- Added `transportScheduleRevision` to the store as a lightweight invalidation
+  counter.
+- Included that revision in `useTransport()`'s schedule key.
+- Bumped the revision from desktop Panic, mobile Panic, keyboard Escape panic,
+  and error-boundary panic paths immediately after `audio.panicStopAll()`.
+
+### Risk
+
+Low. The patch does not change project data, audio rendering, UI layout, or file
+formats. It only forces the existing schedule cleanup/rebuild effect to run after
+hard panic clears engine schedules.
+
+---
+
+## Final Verification
+
+Date: 2026-06-12
+
+### Commands Run
+
+| Command | Result | Output summary |
+| --- | --- | --- |
+| `corepack pnpm install` | Pass with prior blocker cleared | Initially added missing Windows native packages but exited on pnpm build approval. After `corepack pnpm approve-builds --all`, `esbuild@0.27.3` postinstall completed. |
+| `npm run typecheck` in `artifacts/studio` | Pass | `tsc -p tsconfig.json --noEmit` completed with no TypeScript errors. |
+| `npm run build` in `artifacts/studio` | Pass with warnings | Client and SSR builds completed; prerender completed. Warnings remain for sourcemap locations, static/dynamic import overlap, and a 2.08 MB minified main chunk. |
+| `npm run test` in `artifacts/studio` | Pass | 4 Playwright welcome-flow tests passed after installing Chromium and correcting the stale `/` test URL to `/studio?disableAudio=1`. |
+| `npm run serve -- --strictPort true` in `artifacts/studio` | Pass | Production preview served at `http://localhost:5173/`; both `/` and `/studio` returned HTTP 200 after stale listeners were stopped. |
+| `corepack pnpm run typecheck:libs` | Pass | Root library TypeScript build completed. |
+| `corepack pnpm run build` at repo root | Blocked by local PATH | Root script calls bare `pnpm`; Corepack could not install global shims under `C:\Program Files\nodejs` without elevation. |
+| `corepack pnpm -r --if-present run build` | Blocked outside studio | `artifacts/mockup-sandbox` build requires `PORT`; studio package build itself passes. |
+| Lint | Not available | No root or studio `lint` script exists. |
+
+### Command Output Summary
+
+- Fixed Windows verification blockers in `pnpm-workspace.yaml` by allowing the
+  current-platform native packages for Rollup, esbuild, lightningcss, and
+  Tailwind oxide.
+- Fixed `artifacts/studio/vite.config.ts` so production build/preview default
+  to `PORT=5173` and `BASE_PATH=/` when env vars are not provided.
+- Fixed `artifacts/studio/scripts/prerender.mjs` to import the SSR entry through
+  `pathToFileURL()` on Windows.
+- Fixed narrow TypeScript errors in `PluginBrowser.tsx`, `worlds.ts`,
+  `worldAudio.ts`, and `LandingPage.tsx`.
+- Fixed Playwright config for Windows and updated the stale studio test route.
+
+### Manual Tests Performed
+
+These checks were performed against production preview with Playwright-driven
+manual smoke scripts:
+
+- App loads at `/studio` and renders the studio header.
+- No obvious console errors or uncaught page errors on load.
+- Audio enable button appears and disappears after click without captured
+  console/page errors.
+- Play, pause, stop, and panic buttons respond in the UI.
+- Demo load via Load dialog loaded `Trap Starter`.
+- Project-only JSON export downloaded a `.snproj.json` file.
+- WAV export downloaded `shotgun-ninjas-studio_Cyber_Dojo_Demo_96_2026-06-12.wav`.
+- Performance Mode persisted setting applied `body[data-perf="true"]`.
+- Service worker registered under `http://127.0.0.1:5173/` and controlled the
+  page after reload.
+- Direct `/studio` production preview route returned HTTP 200.
+
+### Pass / Fail Table
+
+| Checklist item | Status | Evidence |
+| --- | --- | --- |
+| App loads | Pass | Production preview `/studio` rendered `header`. |
+| Audio enable works | Pass | Enable button disappeared after click; no captured console/page errors. |
+| Play/pause works | Pass | Play button changed to Pause and Pause click returned control. |
+| Stop works | Pass | Stop button clicked after playback smoke. |
+| Panic works | Pass | Panic button clicked without captured console/page errors. |
+| Load demo project | Pass | Load dialog loaded `Trap Starter`. |
+| Playback extended session | Not completed | No 10-minute runtime profile was captured. |
+| Mixer during playback | Partial | Transport playback smoke ran; no dedicated mixer-open profile was captured. |
+| Visualizer during playback | Partial | Master scope mounted in transport; no separate visualizer studio panel profile was captured. |
+| Sample import | Not completed | No file-drop/import smoke was completed in this final pass. |
+| Save/load project | Partial | Demo load and export verified; explicit IndexedDB save/reload was not fully exercised. |
+| JSON export/import | Partial | Project-only JSON export passed; import chooser path used File System Access in headless and was not completed. |
+| WAV export | Pass for default project | WAV download completed for default `Cyber Dojo Demo`. |
+| Performance Mode on/off | Partial | Persisted Performance Mode applied `body[data-perf="true"]`; UI toggle itself was not completed in headless. |
+| Tab hidden/restored | Not completed | No reliable headless visibility-state test was captured. |
+| Repeated kit switch | Not completed | Not exercised in final verification. |
+| Repeated project load | Partial | Playwright welcome-flow tests repeatedly loaded/remixed demos; no long repeated load/unload scheduler profile was captured. |
+| Service worker update/cache sanity | Partial | SW registration/control and HTTP 200 routing verified; old-cache update prompt scenario not simulated. |
+
+### Known Limitations
+
+- Root `pnpm run build` remains dependent on a bare `pnpm` shim being on PATH.
+  Corepack could not install global shims without elevation, but the equivalent
+  studio package commands were run directly and passed.
+- Workspace recursive build is blocked by `artifacts/mockup-sandbox` requiring
+  `PORT`; this is outside the studio package.
+- Production build still emits a large main chunk warning (`index` chunk about
+  2.08 MB minified / 592 KB gzip).
+- Vite reports that dynamic imports of `engine.ts` and `master.ts` do not create
+  separate chunks because those modules are also statically imported elsewhere.
+- Build emits sourcemap warning messages for several UI component modules.
+- Long-session playback, heap snapshots, old service-worker cache update flow,
+  sample import, and repeated kit/project stress loops still need hands-on
+  browser profiling.
+
+### Remaining Risks
+
+- Export remains memory-heavy for long/dense projects because offline render and
+  final encoding still hold full buffers.
+- Main bundle size is still large despite lazy-loading several panels.
+- File System Access API import paths need a dedicated browser/manual test; the
+  headless JSON import attempt did not complete.
+- The root workspace still has non-studio verification friction on Windows.
+
+### Recommended Next Action
+
+Run a focused browser profiling session on production preview with a real
+interactive browser: 10-minute playback, mixer open, visualizer open, repeated
+kit switching, repeated demo load, normal sample import, and old-service-worker
+update simulation. Capture Performance panel traces and heap snapshots before
+starting the next optimization pass.
+
+---
+
+## Runtime Profiling Patch
+
+Date: 2026-06-12
+
+### Runtime Evidence
+
+Production preview profiling created `PERFORMANCE_RUNTIME_PROFILE.md` and local
+JSON evidence under `runtime-profile/`. The 10-minute playback acceptance test
+did not pass because the test could not begin safely: after audio was enabled,
+loading Trap Starter produced page-freezing long tasks.
+
+Measured evidence:
+
+- Cold `/studio` production load had long tasks up to 3,280 ms and 2,266 ms.
+- Enable Audio completed, but AudioWorklet rewire still fell back to the Tone.js
+  chain.
+- Loading Trap Starter after audio was enabled initially produced a 38,011 ms
+  long task.
+- After scoped cleanup/defer patches, the largest measured post-audio demo-load
+  task was still 26,716 ms.
+
+### Fixes Applied
+
+- Added local runtime profiling harness: `scripts/runtime-profile.mjs`.
+- Hardened `WorkletManager` context resolution for Tone and
+  standardized-audio-context wrappers.
+- Passed the Tone context wrapper into worklet registration/node creation paths.
+- Removed duplicate eager demo/remix `ensureTrack()` and `flushMixToEngine()`
+  calls.
+- Removed synchronous demo/remix `disposeAllTracks()` calls from click handlers.
+- Removed synchronous `removeAllTracksExcept()` from `resetStore()`.
+- Deferred and chunked transport scheduling so cleanup/scheduling yields between
+  tracks.
+
+### Current Blocker
+
+The studio is not release-safe. A single track graph build through
+`audio.ensureTrack()` / `buildVoice()` can still monopolize the main thread for
+roughly 27 seconds in production preview after audio has been enabled.
+
+### Required Next Patch
+
+Make `buildVoice()` incremental/lazy:
+
+- Create a cheap track shell first.
+- Lazy-create disabled FX nodes only when the user enables or changes them.
+- Yield between instrument, channel, send, meter, and FX construction phases.
+- Add per-node-family timing marks before attempting another 10-minute playback
+  acceptance run.

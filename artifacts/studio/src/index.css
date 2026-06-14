@@ -377,7 +377,6 @@
 .studio-shuriken {
   /* Static rotation-free fallback when reduced motion is requested */
   transform: rotate(15deg);
-  filter: blur(0.5px);
 }
 
 .studio-twinkle {
@@ -633,8 +632,14 @@ html.studio-reduce-motion .studio-clip-led {
    ──────────────────────────────────────────────────────────────────────── */
 
 body[data-perf="true"] .glow-red,
-body[data-perf="true"] .glow-neon {
-  box-shadow: none;
+body[data-perf="true"] .glow-neon,
+body[data-perf="true"] .led,
+body[data-perf="true"] .panel,
+body[data-perf="true"] .panel-inset,
+body[data-perf="true"] [data-step],
+body[data-perf="true"] [data-pad-trigger],
+body[data-perf="true"] .touch-pad {
+  box-shadow: none !important;
 }
 
 body[data-perf="true"] .panel-glow::before {
@@ -644,6 +649,12 @@ body[data-perf="true"] .panel-glow::before {
 
 body[data-perf="true"] .studio-clip-led {
   animation: none;
+}
+
+body[data-perf="true"] .lesson-highlight,
+body[data-perf="true"] .animate-pulse,
+body[data-perf="true"] .studio-loading-pulse {
+  animation: none !important;
 }
 
 /* Suppress all CSS particle / FX animations in performance mode */
@@ -662,4 +673,40 @@ body[data-perf="true"] .studio-twinkle {
 /* Suppress the master bus pulse LED in performance mode */
 body[data-perf="true"] .master-pulse-active {
   animation: none;
+}
+
+/* Keep dense DAW surfaces cheap in Performance Mode: no animated shadows,
+   broad blur compositing, or backdrop filters on grids, strips, and popovers. */
+body[data-perf="true"] .backdrop-blur,
+body[data-perf="true"] .backdrop-blur-sm,
+body[data-perf="true"] .backdrop-blur-md,
+body[data-perf="true"] .blur-\[40px\] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+body[data-perf="true"] [class*="shadow-"],
+body[data-perf="true"] [class*="shadow_"],
+body[data-perf="true"] [class*="shadow["] {
+  box-shadow: none !important;
+}
+
+body[data-perf="true"] [data-step],
+body[data-perf="true"] [data-pad-trigger],
+body[data-perf="true"] input[type="range"],
+body[data-perf="true"] [role="slider"],
+body[data-perf="true"] [class*="meter"],
+body[data-perf="true"] [class*="fader"] {
+  transition-property: background-color, border-color, color, opacity, transform !important;
+  transition-duration: 80ms !important;
+}
+
+body[data-perf="true"] .grid-bg {
+  background-image: none;
+}
+
+body[data-perf="true"] .master-pulse-active,
+body[data-perf="true"] .studio-clip-led {
+  box-shadow: none !important;
 }

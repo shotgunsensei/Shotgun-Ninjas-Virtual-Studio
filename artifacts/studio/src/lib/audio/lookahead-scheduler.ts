@@ -19,6 +19,7 @@
  */
 
 import * as Tone from 'tone';
+import { trackInterval } from "../../utils/performanceDiagnostics";
 
 export interface ScheduledEvent {
   id: number;
@@ -33,6 +34,7 @@ class LookaheadScheduler {
   private _latencyOffsetMs = 0;
 
   private _timerId: ReturnType<typeof setInterval> | null = null;
+  private _untrackInterval: (() => void) | null = null;
   private _events: ScheduledEvent[] = [];
   private _idCounter = 0;
   private _scheduledEventCount = 0;
@@ -56,6 +58,7 @@ class LookaheadScheduler {
   /** Begin the scheduling loop. Idempotent. */
   start(): void {
     if (this._timerId !== null) return;
+    this._untrackInterval = trackInterval("lookahead-scheduler");
     this._timerId = setInterval(() => this._tick(), this._tickMs);
   }
 
@@ -64,6 +67,8 @@ class LookaheadScheduler {
     if (this._timerId !== null) {
       clearInterval(this._timerId);
       this._timerId = null;
+      this._untrackInterval?.();
+      this._untrackInterval = null;
     }
   }
 

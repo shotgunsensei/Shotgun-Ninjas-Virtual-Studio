@@ -4,7 +4,9 @@ import { Router } from "wouter";
 import { AppRouter } from "./router";
 import "./index.css";
 import { initPwa } from "./lib/pwa";
+import { perfMark } from "./utils/performanceDiagnostics";
 
+perfMark("app-startup:main-entry");
 initPwa();
 
 function Loading() {

@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
 import { audio } from "../lib/audio/engine";
+import { useSettings } from "../lib/settings";
+import { visualTicker } from "../lib/visualTicker";
+import { startPerfTimer } from "../utils/performanceDiagnostics";
 
 /**
  * Tiny master oscilloscope drawn on a canvas. Pulls a waveform from a
@@ -15,36 +18,43 @@ export function MasterScope({
   height?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const performanceMode = useSettings((s) => s.performanceMode);
   useEffect(() => {
+    const endMountTiming = startPerfTimer("visualizer-mount", { component: "MasterScope" });
     const c = canvasRef.current;
-    if (!c) return;
+    if (!c) {
+      endMountTiming();
+      return;
+    }
     const ctx = c.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      endMountTiming();
+      return;
+    }
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     c.width = width * dpr;
     c.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    let raf = 0;
-    const analyser = audio.getMasterAnalyser?.();
+    const analyser = audio.getMasterAnalyser?.(performanceMode ? 128 : 256);
     const prefersReduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
 
-    const stroke = () =>
+    const stroke =
       getComputedStyle(document.documentElement)
         .getPropertyValue("--neon")
         .trim() || "195 100% 55%";
-    const bg = () =>
+    const bg =
       getComputedStyle(document.documentElement)
         .getPropertyValue("--graphite-2")
         .trim() || "0 0% 13%";
 
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = `hsl(${bg()} / 0.4)`;
+      ctx.fillStyle = `hsl(${bg} / 0.4)`;
       ctx.fillRect(0, 0, width, height);
-      ctx.strokeStyle = `hsl(${stroke()})`;
+      ctx.strokeStyle = `hsl(${stroke})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       const mid = height / 2;
@@ -56,37 +66,32 @@ export function MasterScope({
       }
       const values = analyser.getValue() as Float32Array;
       const n = values.length;
-      const step = width / Math.max(1, n - 1);
-      for (let i = 0; i < n; i++) {
+      const sampleStride = performanceMode ? 2 : 1;
+      const points = Math.ceil(n / sampleStride);
+      const step = width / Math.max(1, points - 1);
+      for (let i = 0, point = 0; i < n; i += sampleStride, point++) {
         const v = Math.max(-1, Math.min(1, values[i] ?? 0));
-        const x = i * step;
+        const x = point * step;
         const y = mid - v * (mid * 0.9);
-        if (i === 0) ctx.moveTo(x, y);
+        if (point === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
     };
 
-    // Throttle to ~30 fps. The waveform changes too fast to need 60fps
-    // and the lower rate keeps the studio responsive on lower-end devices.
-    // Also skip canvas redraws when the tab is hidden — the transport
-    // keeps running so the analyser still has fresh data when we resume.
-    const FRAME_MS = 1000 / 30;
-    let lastFrame = 0;
-    const tick = (ts: number) => {
-      if (ts - lastFrame >= FRAME_MS) {
-        lastFrame = ts;
-        if (!document.hidden) draw();
-      }
-      raf = requestAnimationFrame(tick);
-    };
+    let unsubscribe: (() => void) | null = null;
     if (prefersReduced) {
       draw();
     } else {
-      raf = requestAnimationFrame(tick);
+      unsubscribe = visualTicker.subscribe(draw);
     }
-    return () => cancelAnimationFrame(raf);
-  }, [width, height]);
+    endMountTiming();
+    return () => {
+      const endUnmountTiming = startPerfTimer("visualizer-unmount", { component: "MasterScope" });
+      unsubscribe?.();
+      endUnmountTiming();
+    };
+  }, [width, height, performanceMode]);
 
   return (
     <canvas

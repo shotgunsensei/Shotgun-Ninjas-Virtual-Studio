@@ -19,7 +19,12 @@ const MidiPanel = lazy(() =>
 const ModulationPanel = lazy(() =>
   import("./components/ModulationPanel").then((m) => ({ default: m.ModulationPanel })),
 );
-import { HelpDialog } from "./components/HelpDialog";
+const HelpDialog = lazy(() =>
+  import("./components/HelpDialog").then((m) => ({ default: m.HelpDialog })),
+);
+const ChopLab = lazy(() =>
+  import("./components/instruments/ChopLab").then((m) => ({ default: m.ChopLab })),
+);
 import { StatusToast } from "./components/StatusToast";
 import { PwaUpdateToast } from "./components/PwaUpdateToast";
 import { BackgroundFx } from "./components/BackgroundFx";
@@ -37,7 +42,6 @@ import { applyWorldTheme, findWorld, getStoredWorldId } from "./lib/worlds";
 import { Keyboard } from "./components/instruments/Keyboard";
 import { GuitarPanel } from "./components/instruments/GuitarPanel";
 import { DrumPads } from "./components/instruments/DrumPads";
-import { ChopLab } from "./components/instruments/ChopLab";
 import { PianoRoll } from "./components/instruments/PianoRoll";
 import { VocalsPanel } from "./components/instruments/VocalsPanel";
 import { PresetBrowser } from "./components/PresetBrowser";
@@ -79,6 +83,18 @@ import { PerformancePadScreen } from "./components/PerformancePadScreen";
 import { performanceRouter } from "./lib/performance/router";
 import { midiNoteToName } from "./lib/midi/midi";
 import { basslinePattern } from "./lib/performance/bassline";
+import {
+  countPerf,
+  perfMark,
+  startPerfTimer,
+  trackInterval,
+} from "./utils/performanceDiagnostics";
+import {
+  assertSampleImportAllowed,
+  formatBytes,
+  isLargeSample,
+  isStorageCriticalOperationActive,
+} from "./lib/storage/performanceGuards";
 
 let bootstrapped = false;
 let bootstrapPromise: Promise<void> | null = null;
@@ -111,6 +127,7 @@ let bootstrapResult: BootstrapResult = {
 function bootstrap() {
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
+    const endStartup = startPerfTimer("app-startup");
     // Register all built-in instrument and effect plugins before the engine
     // starts so the plugin browser and automation hooks are ready immediately.
     initPluginSystem();
@@ -220,6 +237,7 @@ function bootstrap() {
       console.error("draft recovery check failed", err);
     }
     bootstrapped = true;
+    endStartup();
   })();
   return bootstrapPromise;
 }
@@ -278,6 +296,9 @@ function midiSigMatch(mappingSig: string, eventSig: string): boolean {
 }
 
 export default function App() {
+  useEffect(() => {
+    perfMark("app-startup:app-mounted");
+  }, []);
   const [ready, setReady] = useState<boolean>(bootstrapped);
   useEffect(() => {
     if (bootstrapped) {
@@ -310,7 +331,14 @@ export default function App() {
   return (
     <WorldProvider>
       <TooltipProvider delayDuration={250}>
-        <StudioErrorBoundary onPanic={() => audio.panicStopAll()}>
+        <StudioErrorBoundary
+          onPanic={() => {
+            audio.panicStopAll();
+            getStore().set((s) => ({
+              transportScheduleRevision: s.transportScheduleRevision + 1,
+            }));
+          }}
+        >
           <Studio />
         </StudioErrorBoundary>
       </TooltipProvider>
@@ -471,6 +499,9 @@ function Studio() {
         // Esc is the documented "panic stop" — hard-cuts in-flight audio
         // and any stuck voices in addition to stopping the transport.
         audio.panicStopAll();
+        getStore().set((s) => ({
+          transportScheduleRevision: s.transportScheduleRevision + 1,
+        }));
         stop();
         return;
       }
@@ -815,8 +846,12 @@ function Studio() {
   // projectRef always holds the latest snapshot — kept fresh by the store
   // subscription below so the render path never needs to subscribe to project.
   const projectRef = useRef(getStore().state.project);
+  const projectRevisionRef = useRef(getStore().state.projectRevision);
   const dirtyRef = useRef(false);
-  const lastSavedAtRef = useRef<number>(getStore().state.project.updatedAt);
+  const dirtyRevisionRef = useRef(projectRevisionRef.current);
+  const savedProjectRevisionRef = useRef(projectRevisionRef.current);
+  const savedDraftRevisionRef = useRef(projectRevisionRef.current);
+  const draftSaveInFlightRef = useRef(false);
   const draftTimerRef = useRef<number | null>(null);
   const [autosaveSec, setAutosaveSec] = useState(
     () => getSettings().autosaveIntervalSec,
@@ -828,21 +863,56 @@ function Studio() {
   // moves, step toggles, and note edits never cause Studio to re-render
   // just to keep the autosave timer up to date.
   useEffect(() => {
-    let isFirst = true;
-    return getStore().subscribe(() => {
-      const next = getStore().state.project;
-      if (next === projectRef.current) return;
-      projectRef.current = next;
-      if (isFirst) { isFirst = false; return; }
-      dirtyRef.current = true;
+    const queueDraftSave = () => {
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
       draftTimerRef.current = window.setTimeout(() => {
-        // Skip serialization during active playback — IDB writes compete with
-        // audio scheduling and can cause xrun/jitter on slower devices.
-        // The next store change after playback stops will reschedule this.
-        if (Tone.getTransport().state === "started") return;
-        saveDraft(projectRef.current).catch(() => { /* ignore quota / serialization errors */ });
+        draftTimerRef.current = null;
+        if (!dirtyRef.current) return;
+        if (projectRevisionRef.current <= savedDraftRevisionRef.current) {
+          countPerf("skippedAutosaves", 1, { reason: "clean-draft-revision" });
+          return;
+        }
+        if (Tone.getTransport().state === "started") {
+          countPerf("skippedAutosaves", 1, { reason: "transport-started" });
+          queueDraftSave();
+          return;
+        }
+        if (isStorageCriticalOperationActive()) {
+          countPerf("skippedAutosaves", 1, { reason: "critical-storage-operation" });
+          queueDraftSave();
+          return;
+        }
+        if (draftSaveInFlightRef.current) {
+          countPerf("skippedAutosaves", 1, { reason: "draft-save-in-flight" });
+          queueDraftSave();
+          return;
+        }
+        const revision = projectRevisionRef.current;
+        const snapshot = projectRef.current;
+        draftSaveInFlightRef.current = true;
+        countPerf("autosaveAttempts", 1, { kind: "draft" });
+        saveDraft(snapshot)
+          .then(() => {
+            if (projectRevisionRef.current === revision) {
+              savedDraftRevisionRef.current = revision;
+            }
+          })
+          .catch(() => { /* ignore quota / serialization errors */ })
+          .finally(() => {
+            draftSaveInFlightRef.current = false;
+          });
       }, 8000);
+    };
+    return getStore().subscribe(() => {
+      const store = getStore();
+      const next = store.state.project;
+      const nextRevision = store.state.projectRevision;
+      if (next === projectRef.current) return;
+      projectRef.current = next;
+      projectRevisionRef.current = nextRevision;
+      dirtyRef.current = true;
+      dirtyRevisionRef.current = nextRevision;
+      queueDraftSave();
     });
   }, []);
 
@@ -852,19 +922,40 @@ function Studio() {
   useEffect(() => {
     if (autosaveSec === 0) return;
     if (isTransient) return;
+    const untrackInterval = trackInterval("periodic-project-autosave");
     const handle = window.setInterval(() => {
-      if (!dirtyRef.current) return;
+      if (!dirtyRef.current) {
+        countPerf("skippedAutosaves", 1, { reason: "clean-project" });
+        return;
+      }
+      if (projectRevisionRef.current <= savedProjectRevisionRef.current) {
+        dirtyRef.current = false;
+        countPerf("skippedAutosaves", 1, { reason: "clean-project-revision" });
+        return;
+      }
+      if (isStorageCriticalOperationActive()) {
+        countPerf("skippedAutosaves", 1, { reason: "critical-storage-operation" });
+        return;
+      }
       const snap = projectRef.current;
+      const revision = projectRevisionRef.current;
+      countPerf("autosaveAttempts", 1, { kind: "periodic-project" });
       saveProject(snap)
         .then(() => {
-          lastSavedAtRef.current = Date.now();
-          dirtyRef.current = false;
+          if (projectRevisionRef.current === revision) {
+            savedProjectRevisionRef.current = revision;
+            savedDraftRevisionRef.current = Math.max(savedDraftRevisionRef.current, revision);
+            dirtyRef.current = dirtyRevisionRef.current > revision;
+          }
         })
         .catch(() => {
           /* ignore quota errors — next tick will retry */
         });
     }, autosaveSec * 1000);
-    return () => window.clearInterval(handle);
+    return () => {
+      window.clearInterval(handle);
+      untrackInterval();
+    };
   }, [autosaveSec, isTransient]);
 
   // beforeunload: best-effort flush of the draft slot so a tab close
@@ -875,6 +966,7 @@ function Studio() {
     const onBeforeUnload = () => {
       if (!dirtyRef.current) return;
       try {
+        countPerf("autosaveAttempts", 1, { kind: "beforeunload-draft" });
         saveDraft(projectRef.current);
       } catch {
         /* ignore */
@@ -883,6 +975,29 @@ function Studio() {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
+
+  const handleDroppedAudioFiles = (files: File[]) => {
+    const f = files[0];
+    if (!f) return;
+    try {
+      assertSampleImportAllowed(f);
+      if (isLargeSample(f)) {
+        getStore().setStatus(
+          `Large sample (${formatBytes(f.size)}). Import may take a moment.`,
+          "warn",
+        );
+      }
+      perfMark("sample-import:drop", { size: f.size, type: f.type });
+      getStore().set({
+        pendingSample: {
+          blob: f,
+          defaultName: f.name.replace(/\.[^.]+$/, "") || "Imported",
+        },
+      });
+    } catch (err) {
+      getStore().setStatus((err as Error).message, "error");
+    }
+  };
 
   // ---- health + recovery banners (populated by bootstrap) ----
   const [healthReport, setHealthReport] = useState<HealthReport | null>(
@@ -1042,20 +1157,11 @@ function Studio() {
           <Header />
         </div>
         <MobileStudio />
-        <HelpDialog />
+        <Suspense fallback={null}>
+          <HelpDialog />
+        </Suspense>
         <StatusToast />
-        <DropZone
-          onFiles={(files) => {
-            const f = files[0];
-            if (!f) return;
-            getStore().set({
-              pendingSample: {
-                blob: f,
-                defaultName: f.name.replace(/\.[^.]+$/, "") || "Imported",
-              },
-            });
-          }}
-        />
+        <DropZone onFiles={handleDroppedAudioFiles} />
         <PendingSampleHost />
       </div>
     );
@@ -1250,21 +1356,12 @@ function Studio() {
         </>
       )}
 
-      <HelpDialog />
+      <Suspense fallback={null}>
+        <HelpDialog />
+      </Suspense>
       <StatusToast />
       <PwaUpdateToast />
-      <DropZone
-        onFiles={(files) => {
-          const f = files[0];
-          if (!f) return;
-          getStore().set({
-            pendingSample: {
-              blob: f,
-              defaultName: f.name.replace(/\.[^.]+$/, "") || "Imported",
-            },
-          });
-        }}
-      />
+      <DropZone onFiles={handleDroppedAudioFiles} />
       <PendingSampleHost />
       <StudioFooter />
 
@@ -1469,7 +1566,15 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
         return <GuitarPanel track={track} />;
       case "drums":
         return showChopLab ? (
-          <ChopLab track={track} />
+          <Suspense
+            fallback={
+              <div className="panel-inset rounded-md p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Loading Chop Lab...
+              </div>
+            }
+          >
+            <ChopLab track={track} />
+          </Suspense>
         ) : (
           <DrumPads track={track} />
         );

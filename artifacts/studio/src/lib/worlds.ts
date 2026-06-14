@@ -20,7 +20,17 @@ export interface WelcomeSynthDesc {
   duration: number;
 }
 
-export interface StudioWorld extends ThemeDef {
+export type WorldId =
+  | "dojo-dark"
+  | "demon-truck-garage"
+  | "neon-rooftop"
+  | "lofi-smoke-room"
+  | "cyber-temple"
+  | "arcade-alley"
+  | (string & {});
+
+export interface StudioWorld extends Omit<ThemeDef, "id"> {
+  id: WorldId;
   kitId: string;
   demoId: string;
   visualizerVariant: VisualizerVariant;
@@ -30,15 +40,6 @@ export interface StudioWorld extends ThemeDef {
   swatchColors: string[];
   isCustom?: boolean;
 }
-
-export type WorldId =
-  | "dojo-dark"
-  | "demon-truck-garage"
-  | "neon-rooftop"
-  | "lofi-smoke-room"
-  | "cyber-temple"
-  | "arcade-alley"
-  | (string & {});
 
 export const WORLDS: StudioWorld[] = [
   {

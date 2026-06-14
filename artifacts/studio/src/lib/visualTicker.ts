@@ -15,6 +15,7 @@
  *   // on unmount:
  *   unsub();
  */
+import { trackRafLoop } from "../utils/performanceDiagnostics";
 
 type TickCallback = (timestamp: number) => void;
 
@@ -25,6 +26,7 @@ class VisualTicker {
   private minIntervalMs = 1000 / 25;
   private lastTick = 0;
   private paused = false;
+  private untrackRafLoop: (() => void) | null = null;
 
   constructor() {
     if (typeof document !== "undefined") {
@@ -74,6 +76,7 @@ class VisualTicker {
 
   private _start(): void {
     if (this.rafId !== 0) return;
+    if (!this.untrackRafLoop) this.untrackRafLoop = trackRafLoop("visualTicker");
     this.rafId = requestAnimationFrame((ts) => this._loop(ts));
   }
 
@@ -81,6 +84,8 @@ class VisualTicker {
     this.rafId = 0;
 
     if (this.paused || this.subs.size === 0) {
+      this.untrackRafLoop?.();
+      this.untrackRafLoop = null;
       return;
     }
 
