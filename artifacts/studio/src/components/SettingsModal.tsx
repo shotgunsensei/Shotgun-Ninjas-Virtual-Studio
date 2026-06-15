@@ -501,7 +501,7 @@ function WorkletDrumsToggleRow() {
       hint={
         workletReady
           ? "Routes kick and snare through the audio thread for sample-accurate timing. Toggle to A/B compare against the main-thread Tone.Player path."
-          : "AudioWorklet not yet active — enable audio first to use this path."
+          : "AudioWorklet path is disabled by default during stabilization. Set VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1 for profiling builds."
       }
     >
       <Switch

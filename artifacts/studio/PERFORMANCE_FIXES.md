@@ -897,3 +897,67 @@ Date: 2026-06-14
   them only if profiling builds are acceptable, or gate them behind an env var
   after the next trace is captured.
 - Playwright command exit behavior still needs a separate cleanup pass.
+
+---
+
+## 2026-06-15 Runtime Profile Recheck Patch
+
+### Root Causes Confirmed
+
+- Cold production `/studio` load still contains multi-second startup long tasks.
+  Latest short profile captured a 1,862 ms startup long task and 2,879 ms total
+  startup long-task time.
+- The current release blocker is now earlier than demo load: after audio
+  unlock, the first Play path does not transition the UI to Pause in production
+  profiling and leaves CDP metrics calls timing out.
+- The AudioWorklet path should not be treated as stable for default runtime
+  sessions yet. It remains opt-in for profiling with
+  `VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1`.
+
+### Fixes Applied
+
+- Added an opt-in gate for AudioWorklet initialization so failed worklet setup
+  is not retried during normal unlock/play/project-load paths.
+- Added a 5 s `Tone.start()` timeout and scheduled audio startup outside the
+  direct unlock click handler to reduce click-task blocking.
+- Added a defensive `AudioEngine.play()` guard that refuses to call
+  `Tone.Transport.start()` until the underlying AudioContext reports
+  `running`.
+- Updated transport callers so Play/Record UI state changes only after the
+  audio engine accepts the transport start.
+- Hardened `scripts/runtime-profile.mjs` so stuck scenarios produce JSON
+  evidence instead of aborting the run:
+  - CDP metrics timeout with failure records.
+  - Empty metrics placeholders for unresponsive pages.
+  - Muted headless Chromium audio output.
+  - `noWaitAfter` for SPA transport clicks.
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | TypeScript completed cleanly after the runtime guard changes. |
+| `npm run build` | Pass with warnings | Build completed. Existing sourcemap lookup, dynamic/static import overlap, and large bundle warnings remain. |
+| `npm run test` | Partial / timeout | Earlier in this pass all 4 Playwright tests printed `ok`, but the command wrapper timed out after 240 s and did not exit cleanly. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Fail | Cold load passed; audio startup/play/pause scenario failed; all downstream scenarios failed because metrics timed out afterward. |
+
+### Runtime Evidence
+
+- Latest profile artifact:
+  `runtime-profile/runtime-profile-1781535822280.json`.
+- Cold load passed in 4,004 ms with 23.86 MB JS heap, 3,496 browser metric
+  nodes, 5,735 JS event listeners, and 2,344 DOM elements.
+- Audio startup/play/pause failed after 42,252 ms. The Play click completed, but
+  the profiler timed out waiting for the Pause button, then post-scenario CDP
+  metrics timed out.
+
+### Release Safety
+
+Not release-safe.
+
+The exact next blocking issue is to isolate the synchronous work or audio
+subsystem wait triggered by the first Play click after audio unlock. The next
+patch should add marks around `AudioEngine.play()`, `Tone.Transport.start()`,
+transport scheduled callbacks, and any graph realization that happens during
+that first Play, then make that path bounded and non-blocking before attempting
+the 10-minute playback acceptance run again.

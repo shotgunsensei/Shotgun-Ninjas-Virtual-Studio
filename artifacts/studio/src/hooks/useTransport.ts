@@ -57,8 +57,12 @@ export function useTransport() {
     const endTiming = startPerfTimer("transport-play");
     try {
       await ensureUnlocked();
-      audio.play();
-      getStore().set({ isPlaying: true });
+      const started = audio.play();
+      if (started) {
+        getStore().set({ isPlaying: true });
+      } else {
+        getStore().setStatus("Audio is still starting. Try Play again in a moment.", "warn");
+      }
     } finally {
       endTiming();
     }
@@ -162,7 +166,11 @@ export function useTransport() {
       const bpm = proj.bpm;
       const beatMs = (60 / bpm) * 1000;
       const countInBeats = (proj.countInBars ?? 1) * 4;
-      audio.play();
+      const started = audio.play();
+      if (!started) {
+        getStore().setStatus("Audio is still starting. Try Record again in a moment.", "warn");
+        return;
+      }
       let n = 0;
       const intervalId = window.setInterval(() => {
         n++;
@@ -191,9 +199,13 @@ export function useTransport() {
         countInTimers: { interval: intervalId, timeout: timeoutId },
       });
     } else {
-      audio.play();
-      getStore().set({ isPlaying: true });
-      await startRecording();
+      const started = audio.play();
+      if (started) {
+        getStore().set({ isPlaying: true });
+        await startRecording();
+      } else {
+        getStore().setStatus("Audio is still starting. Try Record again in a moment.", "warn");
+      }
     }
   }, [ensureUnlocked]);
 

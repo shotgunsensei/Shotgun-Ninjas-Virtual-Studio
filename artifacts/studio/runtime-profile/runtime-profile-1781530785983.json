@@ -1,0 +1,121 @@
+{
+  "date": "2026-06-15T13:39:52.030Z",
+  "browser": "148.0.7778.96",
+  "productionPreviewUrl": "http://127.0.0.1:5173",
+  "playbackMinutes": 10,
+  "consoleMessages": [],
+  "pageErrors": [],
+  "scenarios": [
+    {
+      "name": "cold-load",
+      "status": "pass",
+      "error": null,
+      "notes": [],
+      "durationMs": 5774,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 24.1,
+        "jsHeapTotalMB": 94.77,
+        "nodes": 3502,
+        "jsEventListeners": 5735,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 2.935,
+        "layoutCount": 33,
+        "recalcStyleCount": 41,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2344,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "self",
+              "startTime": 57,
+              "duration": 270
+            },
+            {
+              "name": "self",
+              "startTime": 368,
+              "duration": 1368
+            },
+            {
+              "name": "self",
+              "startTime": 1743,
+              "duration": 257
+            },
+            {
+              "name": "self",
+              "startTime": 2021,
+              "duration": 179
+            }
+          ],
+          "controllerChanges": 1
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 23.59,
+        "nodes": 3494,
+        "jsEventListeners": 5735,
+        "taskDurationSec": 2.935
+      },
+      "longTasks": {
+        "count": 4,
+        "maxMs": 1368,
+        "totalMs": 2074,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 368,
+            "duration": 1368
+          },
+          {
+            "name": "self",
+            "startTime": 57,
+            "duration": 270
+          },
+          {
+            "name": "self",
+            "startTime": 1743,
+            "duration": 257
+          },
+          {
+            "name": "self",
+            "startTime": 2021,
+            "duration": 179
+          }
+        ]
+      }
+    }
+  ]
+}

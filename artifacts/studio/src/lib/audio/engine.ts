@@ -50,6 +50,9 @@ import {
   untrackTransportEvent,
 } from "../../utils/performanceDiagnostics";
 
+const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
+const AUDIO_START_TIMEOUT_MS = 5_000;
+
 // Re-export voice primitives so existing call sites that import from
 // `./engine` (export.ts, components) keep compiling without churn.
 export {
@@ -182,6 +185,7 @@ class AudioEngine {
   private soloSet = new Set<string>();
   unlocked = false;
   private disposed = false;
+  private audioStartScheduled = false;
   private workletInitAttempted = false;
   private workletUnavailable = false;
   private noteEverPlayed = false;
@@ -230,14 +234,8 @@ class AudioEngine {
     if (this.unlocked) return;
     const endInit = startPerfTimer("audio-engine-init");
     try {
-      await Tone.start();
-
-      await this.tryInitWorkletsOnce();
-
-      // Phase 6: start the lookahead scheduler.
-      lookaheadScheduler.start();
-
       this.unlocked = true;
+      this.scheduleAudioContextStart();
     } finally {
       endInit();
     }
@@ -248,9 +246,49 @@ class AudioEngine {
     return this.unlock();
   }
 
+  private async startToneWithTimeout(): Promise<void> {
+    let timeoutId: number | null = null;
+    try {
+      await Promise.race([
+        Tone.start(),
+        new Promise<void>((_, reject) => {
+          timeoutId = window.setTimeout(
+            () => reject(new Error(`Tone.start() timed out after ${AUDIO_START_TIMEOUT_MS} ms`)),
+            AUDIO_START_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } catch (err) {
+      const details = describeError(err);
+      console.warn("[AudioEngine] AudioContext start did not complete promptly.", details, err);
+    } finally {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    }
+  }
+
+  private scheduleAudioContextStart(): void {
+    if (this.audioStartScheduled) return;
+    this.audioStartScheduled = true;
+    window.setTimeout(() => {
+      void (async () => {
+        await this.startToneWithTimeout();
+        await this.tryInitWorkletsOnce();
+        lookaheadScheduler.start();
+      })();
+    }, 0);
+  }
+
   private async tryInitWorkletsOnce(): Promise<void> {
     if (this.workletInitAttempted || this.workletUnavailable || workletManager.fallback) return;
     this.workletInitAttempted = true;
+    if (!AUDIO_WORKLETS_ENABLED) {
+      this.workletUnavailable = true;
+      workletManager.markUnavailable(
+        "AudioWorklet path disabled by default; set VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1 for profiling.",
+      );
+      setWorkletPlayerEnabled(false);
+      return;
+    }
     try {
       const toneCtx = Tone.getContext();
       const rawCtx = toneCtx.rawContext as AudioContext;
@@ -558,9 +596,13 @@ class AudioEngine {
     return this.playbackState;
   }
 
-  play() {
-    if (this.noAudio) return;
-    if (this.playbackState === "starting" || this.playbackState === "playing") return;
+  play(): boolean {
+    if (this.noAudio) return false;
+    if (this.playbackState === "starting" || this.playbackState === "playing") return true;
+    if (!this.isAudioContextRunning()) {
+      this.scheduleAudioContextStart();
+      return false;
+    }
     // Releasing any held panic mute is a no-op when no panic is active,
     // so this is safe to call on every play.
     this.playbackState = "starting";
@@ -575,9 +617,18 @@ class AudioEngine {
         transport.start();
       }
       this.playbackState = "playing";
+      return true;
     } catch (err) {
       this.playbackState = "error";
       throw err;
+    }
+  }
+
+  private isAudioContextRunning(): boolean {
+    try {
+      return (Tone.getContext().rawContext as AudioContext | undefined)?.state === "running";
+    } catch {
+      return false;
     }
   }
   pause() {

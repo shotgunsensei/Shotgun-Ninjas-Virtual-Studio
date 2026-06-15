@@ -8,6 +8,7 @@ const PLAYBACK_MINUTES = Number(process.env.STUDIO_PROFILE_MINUTES ?? "10");
 const OUT_DIR = join(process.cwd(), "runtime-profile");
 const RUN_ID = Date.now();
 const OUT_PATH = join(OUT_DIR, `runtime-profile-${RUN_ID}.json`);
+const METRICS_TIMEOUT_MS = 10_000;
 
 mkdirSync(OUT_DIR, { recursive: true });
 
@@ -125,11 +126,54 @@ function scenarioTimeoutMs(name) {
   return 90_000;
 }
 
+function emptyMetrics(error) {
+  return {
+    jsHeapUsedMB: 0,
+    jsHeapTotalMB: 0,
+    nodes: null,
+    jsEventListeners: null,
+    documents: null,
+    frames: null,
+    taskDurationSec: 0,
+    layoutCount: null,
+    recalcStyleCount: null,
+    dom: {
+      title: "",
+      url: "",
+      bodyPerf: "",
+      hidden: null,
+      elements: 0,
+      canvases: 0,
+      dialogs: 0,
+      serviceWorkerController: null,
+      serviceWorkerScript: null,
+      cacheNames: [],
+      longTasks: [],
+      controllerChanges: 0,
+      metricsError: error?.message || String(error),
+    },
+  };
+}
+
 async function scenario(name, page, cdp, fn) {
   console.log(`START ${name}`);
-  const before = await browserMetrics(page, cdp);
+  let before;
   const started = Date.now();
   const result = { name, status: "pass", error: null, notes: [] };
+  try {
+    before = await metricsWithTimeout(page, cdp, `${name}:before`);
+  } catch (err) {
+    before = emptyMetrics(err);
+    result.status = "fail";
+    result.error = err?.stack || err?.message || String(err);
+    result.durationMs = Date.now() - started;
+    result.before = before;
+    result.after = before;
+    result.delta = { jsHeapUsedMB: 0, nodes: null, jsEventListeners: null, taskDurationSec: 0 };
+    result.longTasks = { count: 0, maxMs: 0, totalMs: 0, top: [] };
+    console.log(`END ${name} ${result.status} ${result.durationMs}ms`);
+    return result;
+  }
   try {
     const timeoutMs = scenarioTimeoutMs(name);
     await Promise.race([
@@ -142,7 +186,14 @@ async function scenario(name, page, cdp, fn) {
     result.status = "fail";
     result.error = err?.stack || err?.message || String(err);
   }
-  const after = await browserMetrics(page, cdp);
+  let after;
+  try {
+    after = await metricsWithTimeout(page, cdp, `${name}:after`);
+  } catch (err) {
+    result.status = "fail";
+    result.error = `${result.error ? `${result.error}\n` : ""}${err?.stack || err?.message || String(err)}`;
+    after = before;
+  }
   result.durationMs = Date.now() - started;
   result.before = before;
   result.after = after;
@@ -160,9 +211,18 @@ async function scenario(name, page, cdp, fn) {
   return result;
 }
 
+async function metricsWithTimeout(page, cdp, label) {
+  return Promise.race([
+    browserMetrics(page, cdp),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Metrics collection timed out for ${label}`)), METRICS_TIMEOUT_MS),
+    ),
+  ]);
+}
+
 async function clickMaybe(page, locator, timeout = 2_000) {
   try {
-    await locator.first().click({ timeout });
+    await locator.first().click({ timeout, noWaitAfter: true });
     return true;
   } catch {
     return false;
@@ -175,9 +235,9 @@ async function openStudio(page) {
 }
 
 async function loadDemo(page, id) {
-  await page.getByTestId("open-load-dialog").click();
+  await page.getByTestId("open-load-dialog").click({ noWaitAfter: true });
   await page.getByTestId("demo-list").waitFor({ timeout: 10_000 });
-  await page.getByTestId(`demo-load-${id}`).click();
+  await page.getByTestId(`demo-load-${id}`).click({ noWaitAfter: true });
   await page.getByTestId("demo-list").waitFor({ state: "hidden", timeout: 20_000 });
 }
 
@@ -187,17 +247,17 @@ async function enableAudio(page) {
 }
 
 async function playPauseStopPanic(page) {
-  await page.getByRole("button", { name: /^play$/i }).click();
+  await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
   await page.waitForTimeout(1_000);
-  await page.getByRole("button", { name: /^pause$/i }).click();
+  await page.getByRole("button", { name: /^pause$/i }).click({ noWaitAfter: true });
   await page.waitForTimeout(300);
-  await page.getByRole("button", { name: /^play$/i }).click();
+  await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
   await page.waitForTimeout(700);
-  await page.getByRole("button", { name: /^stop$/i }).click();
+  await page.getByRole("button", { name: /^stop$/i }).click({ noWaitAfter: true });
   await page.waitForTimeout(300);
-  await page.getByRole("button", { name: /panic/i }).click();
+  await page.getByRole("button", { name: /panic/i }).click({ noWaitAfter: true });
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: /^play$/i }).click();
+  await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
   await page.waitForTimeout(1_500);
 }
 
@@ -319,7 +379,7 @@ async function serviceWorkerUpdateSimulation(page, result) {
 async function main() {
   const browser = await chromium.launch({
     headless: true,
-    args: ["--autoplay-policy=no-user-gesture-required"],
+    args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"],
   });
   const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();

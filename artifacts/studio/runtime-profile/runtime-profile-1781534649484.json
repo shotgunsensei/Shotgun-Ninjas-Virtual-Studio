@@ -1,0 +1,241 @@
+{
+  "date": "2026-06-15T14:44:56.922Z",
+  "browser": "148.0.7778.96",
+  "productionPreviewUrl": "http://127.0.0.1:5173",
+  "playbackMinutes": 0.1,
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    }
+  ],
+  "pageErrors": [],
+  "scenarios": [
+    {
+      "name": "cold-load",
+      "status": "pass",
+      "error": null,
+      "notes": [],
+      "durationMs": 4086,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 23.86,
+        "jsHeapTotalMB": 94.77,
+        "nodes": 3496,
+        "jsEventListeners": 5735,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 3.929,
+        "layoutCount": 25,
+        "recalcStyleCount": 36,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2344,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "self",
+              "startTime": 33,
+              "duration": 466
+            },
+            {
+              "name": "self",
+              "startTime": 598,
+              "duration": 1804
+            },
+            {
+              "name": "self",
+              "startTime": 2409,
+              "duration": 222
+            },
+            {
+              "name": "self",
+              "startTime": 2658,
+              "duration": 221
+            }
+          ],
+          "controllerChanges": 1
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 23.35,
+        "nodes": 3488,
+        "jsEventListeners": 5735,
+        "taskDurationSec": 3.929
+      },
+      "longTasks": {
+        "count": 4,
+        "maxMs": 1804,
+        "totalMs": 2713,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 598,
+            "duration": 1804
+          },
+          {
+            "name": "self",
+            "startTime": 33,
+            "duration": 466
+          },
+          {
+            "name": "self",
+            "startTime": 2409,
+            "duration": 222
+          },
+          {
+            "name": "self",
+            "startTime": 2658,
+            "duration": 221
+          }
+        ]
+      }
+    },
+    {
+      "name": "audio-startup-panic-replay",
+      "status": "fail",
+      "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^pause$/i })\u001b[22m\n\n    at playPauseStopPanic (C:\\Dev\\Shotgun-Ninjas-Virtual-Studio\\artifacts\\studio\\scripts\\runtime-profile.mjs:209:56)\n    at async file:///C:/Dev/Shotgun-Ninjas-Virtual-Studio/artifacts/studio/scripts/runtime-profile.mjs:380:5\n    at async scenario (C:\\Dev\\Shotgun-Ninjas-Virtual-Studio\\artifacts\\studio\\scripts\\runtime-profile.mjs:136:5)\n    at async main (C:\\Dev\\Shotgun-Ninjas-Virtual-Studio\\artifacts\\studio\\scripts\\runtime-profile.mjs:378:16)\nError: Metrics collection timed out for audio-startup-panic-replay:after\n    at Timeout._onTimeout (file:///C:/Dev/Shotgun-Ninjas-Virtual-Studio/artifacts/studio/scripts/runtime-profile.mjs:175:31)\n    at listOnTimeout (node:internal/timers:605:17)\n    at process.processTimers (node:internal/timers:541:7)",
+      "notes": [],
+      "durationMs": 42260,
+      "before": {
+        "jsHeapUsedMB": 24.4,
+        "jsHeapTotalMB": 95.07,
+        "nodes": 3502,
+        "jsEventListeners": 5748,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 3.949,
+        "layoutCount": 32,
+        "recalcStyleCount": 43,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2344,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "self",
+              "startTime": 33,
+              "duration": 466
+            },
+            {
+              "name": "self",
+              "startTime": 598,
+              "duration": 1804
+            },
+            {
+              "name": "self",
+              "startTime": 2409,
+              "duration": 222
+            },
+            {
+              "name": "self",
+              "startTime": 2658,
+              "duration": 221
+            }
+          ],
+          "controllerChanges": 1
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 24.4,
+        "jsHeapTotalMB": 95.07,
+        "nodes": 3502,
+        "jsEventListeners": 5748,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 3.949,
+        "layoutCount": 32,
+        "recalcStyleCount": 43,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2344,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "self",
+              "startTime": 33,
+              "duration": 466
+            },
+            {
+              "name": "self",
+              "startTime": 598,
+              "duration": 1804
+            },
+            {
+              "name": "self",
+              "startTime": 2409,
+              "duration": 222
+            },
+            {
+              "name": "self",
+              "startTime": 2658,
+              "duration": 221
+            }
+          ],
+          "controllerChanges": 1
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 0,
+        "nodes": 0,
+        "jsEventListeners": 0,
+        "taskDurationSec": 0
+      },
+      "longTasks": {
+        "count": 0,
+        "maxMs": 0,
+        "totalMs": 0,
+        "top": []
+      }
+    }
+  ]
+}

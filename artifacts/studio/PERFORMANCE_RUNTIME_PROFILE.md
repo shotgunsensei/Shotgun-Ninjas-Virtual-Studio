@@ -182,3 +182,86 @@ Not verified in this pass:
 
 Reason: production preview starts in the foreground, but background preview
 processes did not remain reachable across sandbox tool calls in this session.
+
+---
+
+## 2026-06-15 Production Profile Recheck
+
+Scope: production preview runtime stress verification after the worklet fallback
+cleanup commit and the follow-up audio-startup guards in this pass.
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | `tsc -p tsconfig.json --noEmit` completed cleanly after the transport/audio guard changes. |
+| `npm run build` | Pass with warnings | Client, SSR, and prerender completed. Existing sourcemap lookup, static/dynamic import overlap, and large chunk warnings remain. |
+| `npm run test` | Partial / timeout | The 4 Playwright tests printed `ok`, but the command wrapper timed out after 240 s and did not exit cleanly. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Fail | Cold load passed; audio startup/play/pause/panic scenario failed and left CDP metrics unresponsive for downstream scenarios. |
+
+### Evidence Captured
+
+Profile artifacts from this pass:
+
+- `runtime-profile/runtime-profile-1781533322849.json`
+- `runtime-profile/runtime-profile-1781535357713.json`
+- `runtime-profile/runtime-profile-1781535626004.json`
+- `runtime-profile/runtime-profile-1781535822280.json`
+
+Latest measured short production profile:
+
+| Scenario | Status | Evidence |
+| --- | --- | --- |
+| Cold load | Pass | `runtime-profile-1781535822280.json`: 4,004 ms scenario duration, 23.86 MB JS heap, 3,496 browser metric nodes, 5,735 JS event listeners, 2,344 DOM elements. |
+| Audio startup / play / pause / stop / panic / replay | Fail | Play click completed, but Pause never appeared. Playwright timed out waiting for `getByRole('button', { name: /^pause$/i })`, then post-scenario CDP metrics timed out. |
+| 10-minute playback with mixer/scope | Fail / blocked | Could not start; before-scenario metrics timed out after the failed audio startup scenario. |
+| Mixer stress | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| Visualizer Performance Mode stress | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| Repeated preset switching | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| Repeated project load/unload | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| Sample import small/large | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| Save/load/autosave | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| JSON export/import/malformed JSON | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| WAV export default/demo | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+| Service worker cache update simulation | Fail / blocked | Metrics timed out because the page remained unhealthy after audio startup. |
+
+Cold-load Long Task API evidence from the latest short profile:
+
+| Long task | Duration |
+| --- | ---: |
+| Largest startup task | 1,862 ms |
+| Second startup task | 452 ms |
+| Third startup task | 313 ms |
+| Fourth startup task | 252 ms |
+| Total captured startup long-task time | 2,879 ms |
+
+### Fixes Applied During This Recheck
+
+- Disabled the AudioWorklet path by default unless
+  `VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1` is set, so the unstable worklet rewire
+  path does not retry during normal runtime profiling.
+- Changed `AudioEngine.unlock()` to mark the app unlocked quickly and schedule
+  Tone startup/worklet probing outside the direct click handler.
+- Added a 5 s guard around `Tone.start()` so a stuck AudioContext startup is
+  logged instead of awaited indefinitely.
+- Added a defensive transport-start guard: `AudioEngine.play()` now refuses to
+  enter `Tone.Transport.start()` unless the underlying AudioContext is already
+  `running`.
+- Updated `useTransport()` so the UI only flips to playing/recording when the
+  engine accepts the transport start.
+- Hardened `scripts/runtime-profile.mjs` with CDP metrics timeouts, empty
+  metrics failure records, muted headless Chromium audio output, and
+  `noWaitAfter` on SPA transport clicks.
+
+### Confirmed Remaining Bottleneck
+
+The studio is still not release-safe. In production preview, audio startup/play
+can leave the page unresponsive enough that Playwright cannot observe the Pause
+state and CDP metrics calls time out. The full 10-minute playback acceptance
+test has not started successfully.
+
+Exact next blocking issue: isolate why the first transport Play click after
+audio unlock prevents the app from reaching Pause state and makes CDP metrics
+unresponsive. The likely remaining surface is synchronous work triggered by
+`Tone.Transport.start()` or scheduled transport callbacks after the
+AudioContext/Tone startup path, not AudioWorklet retry churn.
