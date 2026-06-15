@@ -1,4 +1,5 @@
 import * as Tone from "tone";
+import { firstPlayMark, firstPlayMeasure } from "../../performance/firstPlayTrace";
 import type {
   MelodicEngine,
   MelodicPresetDef,
@@ -343,7 +344,12 @@ const SALAMANDER_URLS: Record<string, string> = {
  * (Tone.PolySynth | Tone.Sampler | PolyPluck).
  */
 export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
+  const started = performance.now();
   const r = def.synth;
+  firstPlayMark("instrument-factory:buildPresetVoice:start", {
+    presetId: def.id,
+    engine: r.engine,
+  });
   // The synth fallback is returned synchronously below so the track is
   // immediately playable. The engine (see `engine.attachInstrument`)
   // separately drives `tryLoadMelodicSampler(def.layers, ...)` and
@@ -351,15 +357,17 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
   // is reachable — keeping this function focused on synth construction.
   switch (r.engine) {
     case "sampler":
-      return new Tone.Sampler({
+      firstPlayMark("audio-node:create", { kind: "sampler", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.Sampler({
         urls: SALAMANDER_URLS,
         baseUrl: SALAMANDER_BASE,
         release: secsFromNorm(r.release, 0, 2.0),
         attack: secsFromNorm(r.attack, 0, 0.4),
         volume: -8,
-      });
+      }));
     case "fmkeys":
-      return new Tone.PolySynth(Tone.FMSynth, {
+      firstPlayMark("audio-node:create", { kind: "fmkeys", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.FMSynth, {
         harmonicity: 8,
         modulationIndex: 5.2,
         oscillator: { type: "sine" },
@@ -372,9 +380,10 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
           release: 0.4,
         },
         volume: -12,
-      });
+      }));
     case "polysaw":
-      return new Tone.PolySynth(Tone.MonoSynth, {
+      firstPlayMark("audio-node:create", { kind: "polysaw", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.MonoSynth, {
         oscillator: { type: "sawtooth" },
         filter: { Q: 1 + r.resonance * 8, frequency: 200, type: "lowpass", rolloff: -24 },
         envelope: adsr(r, 0.01, 0.4, 0.65, 1.1),
@@ -387,9 +396,10 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
           octaves: 3.5,
         },
         volume: -16,
-      });
+      }));
     case "monosaw":
-      return new Tone.PolySynth(Tone.MonoSynth, {
+      firstPlayMark("audio-node:create", { kind: "monosaw", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.MonoSynth, {
         oscillator: { type: "sawtooth" },
         portamento: r.glide,
         filter: { Q: 1 + r.resonance * 8, frequency: 600, type: "lowpass", rolloff: -24 },
@@ -403,9 +413,10 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
           octaves: 3,
         },
         volume: -14,
-      });
+      }));
     case "pluck":
-      return new PolyPluck(
+      firstPlayMark("audio-node:create", { kind: "pluck", presetId: def.id });
+      return markPresetVoice(def.id, started, new PolyPluck(
         {
           attackNoise: 0.6,
           dampening: 4500,
@@ -414,29 +425,32 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
           volume: -8,
         },
         8,
-      );
+      ));
     case "pad":
-      return new Tone.PolySynth(Tone.AMSynth, {
+      firstPlayMark("audio-node:create", { kind: "pad", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.AMSynth, {
         harmonicity: 1.5,
         oscillator: { type: "sawtooth" },
         modulation: { type: "sine" },
         envelope: adsr(r, 0.4, 1.2, 0.8, 1.6),
         modulationEnvelope: { attack: 0.6, decay: 0.5, sustain: 0.5, release: 1.2 },
         volume: -16,
-      });
+      }));
     case "sub":
-      return new Tone.PolySynth(Tone.Synth, {
+      firstPlayMark("audio-node:create", { kind: "sub", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "sine" },
         envelope: adsr(r, 0.01, 0.5, 0.7, 1.0),
         volume: -6,
-      });
+      }));
     case "808":
       // Real 808: single mono voice with portamento for legato slides,
       // a per-note pitch-envelope dive, and a sidechain duck on the
       // post-voice gain that emulates the kick-pump 808 basses usually
       // sit under. All three behaviors come from the recipe's
       // mono/pitchEnv/sidechain/glide fields.
-      return new Mono808Voice({
+      firstPlayMark("audio-node:create", { kind: "808", presetId: def.id });
+      return markPresetVoice(def.id, started, new Mono808Voice({
         portamento: Math.max(r.glide, r.mono ? 0.04 : 0),
         envelope: adsr(r, 0.005, 0.6, 0.7, 0.8),
         filter: { Q: 1.5, frequency: 200, type: "lowpass", rolloff: -24 },
@@ -451,9 +465,10 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
         pitchEnvSemis: r.pitchEnv ?? 0,
         sidechain: r.sidechain ?? 0,
         volume: -6,
-      });
+      }));
     case "bell":
-      return new Tone.PolySynth(Tone.FMSynth, {
+      firstPlayMark("audio-node:create", { kind: "bell", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.FMSynth, {
         harmonicity: 3.01,
         modulationIndex: 14,
         oscillator: { type: "sine" },
@@ -461,9 +476,10 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
         modulation: { type: "sine" },
         modulationEnvelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.8 },
         volume: -14,
-      });
+      }));
     case "brass":
-      return new Tone.PolySynth(Tone.MonoSynth, {
+      firstPlayMark("audio-node:create", { kind: "brass", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.MonoSynth, {
         oscillator: { type: "sawtooth" },
         portamento: r.glide,
         filter: { Q: 1.0, frequency: 1200, type: "lowpass", rolloff: -24 },
@@ -477,17 +493,25 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
           octaves: 3,
         },
         volume: -14,
-      });
+      }));
     case "softkeys":
-      return new Tone.PolySynth(Tone.AMSynth, {
+      firstPlayMark("audio-node:create", { kind: "softkeys", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.AMSynth, {
         harmonicity: 1.0,
         oscillator: { type: "triangle" },
         modulation: { type: "sine" },
         envelope: adsr(r, 0.05, 0.6, 0.4, 0.7),
         modulationEnvelope: { attack: 0.05, decay: 0.3, sustain: 0.3, release: 0.5 },
         volume: -12,
-      });
+      }));
   }
+}
+
+function markPresetVoice<T extends MelodicVoice>(presetId: string, started: number, voice: T): T {
+  firstPlayMeasure("instrument-factory:buildPresetVoice", started, performance.now(), {
+    presetId,
+  });
+  return voice;
 }
 
 function secsFromNorm(norm: number, min: number, max: number) {

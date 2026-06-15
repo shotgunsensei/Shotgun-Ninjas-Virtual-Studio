@@ -52,7 +52,7 @@ import { useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { getChopEngine } from "./lib/audio/chopEngine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
-import { defaultProject, flushMixToEngine, getStore, resetStore, useStore } from "./store";
+import { defaultProject, getStore, resetStore, useStore } from "./store";
 import {
   getLastProjectId,
   getLastSavedInfo,
@@ -171,12 +171,9 @@ function bootstrap() {
     } else if (project) {
       resetStore(project);
     }
-    try {
-      for (const t of project!.tracks) audio.ensureTrack(t);
-      flushMixToEngine(project!);
-    } catch (err) {
-      console.error("bootstrap engine init failed", err);
-    }
+    // Do not realize track voices during bootstrap. First-play profiling
+    // showed eager graph construction here could block audio startup before
+    // the user ever pressed Play; transport prep now owns bounded scheduling.
     // Project health: surface missing samples / orphaned data so the
     // user can act on it before they edit on top of broken state.
     try {
@@ -1069,8 +1066,7 @@ function Studio() {
         const recovered = await hydrateDraft(snap);
         audio.stop();
         resetStore(recovered);
-        for (const t of recovered.tracks) audio.ensureTrack(t);
-        flushMixToEngine(recovered);
+        // Track graph realization is deferred to transport prep.
         setHealthReport(checkProjectHealth(recovered));
         getStore().setStatus("Autosave restored", "info");
       } else {
@@ -1101,8 +1097,7 @@ function Studio() {
       const recovered = await hydrateDraft(snap);
       audio.stop();
       resetStore(recovered);
-      for (const t of recovered.tracks) audio.ensureTrack(t);
-      flushMixToEngine(recovered);
+      // Track graph realization is deferred to transport prep.
       setDraftAvailable(null);
       clearBootstrapResult("draftAvailable");
       setHealthReport(checkProjectHealth(recovered));

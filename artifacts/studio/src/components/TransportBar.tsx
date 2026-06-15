@@ -19,6 +19,7 @@ import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
 import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
 import { useGamepad } from "../lib/performance/gamepad";
 import { visualTicker } from "../lib/visualTicker";
+import { firstPlayMark } from "../lib/performance/firstPlayTrace";
 
 const AudioDiagnosticsPanel = lazy(() =>
   import("./AudioDiagnosticsPanel").then((m) => ({ default: m.AudioDiagnosticsPanel })),
@@ -59,7 +60,14 @@ export function TransportBar() {
         <Button
           size="icon"
           variant="outline"
-          onClick={isPlaying ? pause : play}
+          onClick={() => {
+            firstPlayMark("ui.play-button:onClick", { isPlaying });
+            if (isPlaying) {
+              pause();
+            } else {
+              void play();
+            }
+          }}
           className="h-10 w-10 rounded-md"
           aria-label={isPlaying ? "Pause" : "Play"}
         >

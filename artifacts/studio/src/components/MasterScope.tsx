@@ -3,6 +3,7 @@ import { audio } from "../lib/audio/engine";
 import { useSettings } from "../lib/settings";
 import { visualTicker } from "../lib/visualTicker";
 import { startPerfTimer } from "../utils/performanceDiagnostics";
+import { firstPlayMark, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
 
 /**
  * Tiny master oscilloscope drawn on a canvas. Pulls a waveform from a
@@ -36,7 +37,12 @@ export function MasterScope({
     c.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    const analyser = audio.getMasterAnalyser?.(performanceMode ? 128 : 256);
+    const analyser = getFirstPlayFlags().disableAnalyzers
+      ? null
+      : audio.getMasterAnalyser?.(performanceMode ? 128 : 256);
+    if (!analyser) {
+      firstPlayMark("master-scope:analyser-skipped");
+    }
     const prefersReduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;

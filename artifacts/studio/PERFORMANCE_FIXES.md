@@ -961,3 +961,69 @@ patch should add marks around `AudioEngine.play()`, `Tone.Transport.start()`,
 transport scheduled callbacks, and any graph realization that happens during
 that first Play, then make that path bounded and non-blocking before attempting
 the 10-minute playback acceptance run again.
+
+---
+
+## 2026-06-15 First-Play Freeze Repair
+
+### Root Cause Confirmed
+
+The first-Play blocker was not `Tone.Transport.start()` by itself. The
+isolation matrix showed that Transport starts quickly when project schedules,
+transport callbacks, or graph builds are suppressed.
+
+Confirmed root cause:
+
+- `App.tsx` eagerly built all track voices during bootstrap/recovery via
+  `audio.ensureTrack()` and `flushMixToEngine()`.
+- `useTransport()` could arm schedule prep immediately after first Play,
+  allowing `ensureTrack()` / `buildVoice()` / Transport scheduling to run while
+  playback was active.
+
+That violated the first-Play invariant: pressing Play must not construct audio
+graphs or bulk-register project schedules.
+
+### Fixes Applied
+
+- Added `src/lib/performance/firstPlayTrace.ts`, a local-only ring buffer
+  enabled by `?snFirstPlayTrace=1` or `localStorage["sn:firstPlayTrace"]="1"`.
+- Added debug isolation flags:
+  `snDisableProjectSchedules`, `snDisableTransportCallbacks`,
+  `snDisableGraphBuildOnPlay`, `snUseMinimalAudioGraph`,
+  `snDisableWorldAudio`, and `snDisableAnalyzers`.
+- Added first-Play marks/measures around UI Play, `useTransport.play()`,
+  `AudioEngine.play()`, `Tone.Transport.start()`, schedule prep,
+  `ensureTrack()`, `buildVoice()`, instrument factories, node creation,
+  analyser creation, `flushMixToEngine()`, and store writes.
+- Removed eager bootstrap/recovery track graph realization from `App.tsx`.
+- Deferred project schedule prep until after first Play is confirmed, and
+  prevented prep from running while playback is active.
+- Made `snDisableAnalyzers=1` skip analyser creation in `MasterScope` without
+  throwing through React render.
+- Extended `scripts/runtime-profile.mjs` with a first-Play isolation matrix and
+  JSON trace capture.
+
+### Verification
+
+| Command / profile | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | TypeScript completed cleanly. |
+| `npm run build` | Pass with warnings | Build completed with existing sourcemap, import-overlap, and large chunk warnings. |
+| `npm run test` | Partial / timeout | 4 Playwright tests printed `ok`, but the command wrapper timed out after 240 s and did not exit cleanly. |
+| First-play matrix | Pass | All seven matrix scenarios passed in production preview. |
+| Short 0.1-minute runtime profile | Partial / fail | First Play, audio startup/panic/replay, Trap Starter short playback, mixer stress, and sample import passed; later stress/export/import scenarios failed. |
+
+Latest profile artifacts:
+
+- `runtime-profile/runtime-profile-1781555968920.json`
+- `runtime-profile/runtime-profile-1781556158517.json`
+
+### Release Safety
+
+Not release-safe.
+
+First Play is no longer the immediate blocker: Pause appears after Play and CDP
+metrics remain responsive. The next blocker is the broader runtime stress path:
+Trap Starter still emits a 9.65 s long task, mixer stress grows JS listeners by
+15,275, and visualizer/preset/project-load/save/import/export scenarios still
+fail in the short profile. The 10-minute playback acceptance test was not run.

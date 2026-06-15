@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import { audio } from "../lib/audio/engine";
 import { getStore, useStore, makeId } from "../store";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { startPerfTimer } from "../utils/performanceDiagnostics";
+import { firstPlayMark, firstPlayMeasure, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
 
 /**
  * Hook providing the play/pause/stop/record actions for the transport bar.
@@ -13,6 +14,8 @@ import { startPerfTimer } from "../utils/performanceDiagnostics";
 
 export function useTransport() {
   const audioUnlocked = useStore((s) => s.audioUnlocked);
+  const isPlaying = useStore((s) => s.isPlaying);
+  const [projectSchedulesArmed, setProjectSchedulesArmed] = useState(false);
 
   // Fingerprint that changes only when clip structure or BPM changes —
   // NOT on fader/mute/name edits. Prevents rescheduling audio on every
@@ -46,8 +49,10 @@ export function useTransport() {
 
   const ensureUnlocked = useCallback(async () => {
     if (!audioUnlocked) {
+      firstPlayMark("useTransport.ensureUnlocked:before");
       await audio.unlock();
       window.requestAnimationFrame(() => {
+        firstPlayMark("useTransport.ensureUnlocked:set-audioUnlocked");
         getStore().set({ audioUnlocked: true });
       });
     }
@@ -55,18 +60,41 @@ export function useTransport() {
 
   const play = useCallback(async () => {
     const endTiming = startPerfTimer("transport-play");
+    const startedAt = performance.now();
+    firstPlayMark("useTransport.play:start", {
+      audioUnlocked,
+      transportState: audio.state,
+      playbackState: audio.getPlaybackState(),
+    });
     try {
       await ensureUnlocked();
+      firstPlayMark("useTransport.play:before-engine-play", {
+        transportState: audio.state,
+        playbackState: audio.getPlaybackState(),
+      });
       const started = audio.play();
+      firstPlayMark("useTransport.play:after-engine-play", {
+        started,
+        transportState: audio.state,
+        playbackState: audio.getPlaybackState(),
+      });
       if (started) {
         getStore().set({ isPlaying: true });
+        window.setTimeout(() => {
+          firstPlayMark("project-schedule:armed-after-first-play");
+          setProjectSchedulesArmed(true);
+        }, 0);
       } else {
         getStore().setStatus("Audio is still starting. Try Play again in a moment.", "warn");
       }
     } finally {
+      firstPlayMeasure("useTransport.play", startedAt, performance.now(), {
+        transportState: audio.state,
+        playbackState: audio.getPlaybackState(),
+      });
       endTiming();
     }
-  }, [ensureUnlocked]);
+  }, [audioUnlocked, ensureUnlocked]);
 
   const pause = useCallback(() => {
     audio.pause();
@@ -217,6 +245,21 @@ export function useTransport() {
     audioIds: [],
   });
   useEffect(() => {
+    if (!audioUnlocked) {
+      firstPlayMark("project-schedule:deferred-until-audio-unlocked");
+      return;
+    }
+    if (!projectSchedulesArmed) {
+      firstPlayMark("project-schedule:deferred-until-first-play");
+      return;
+    }
+    if (isPlaying || audio.getPlaybackState() === "playing") {
+      firstPlayMark("project-schedule:deferred-while-playing", {
+        isPlaying,
+        playbackState: audio.getPlaybackState(),
+      });
+      return;
+    }
     let cancelled = false;
     const noteIds: number[] = [];
     const audioPlayers: Tone.Player[] = [];
@@ -226,6 +269,17 @@ export function useTransport() {
       new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
     const run = async () => {
+      const flags = getFirstPlayFlags();
+      firstPlayMark("project-schedule:run:start", {
+        disableProjectSchedules: flags.disableProjectSchedules,
+        disableTransportCallbacks: flags.disableTransportCallbacks,
+        disableGraphBuildOnPlay: flags.disableGraphBuildOnPlay,
+        useMinimalAudioGraph: flags.useMinimalAudioGraph,
+      });
+      if (flags.disableProjectSchedules || flags.disableTransportCallbacks) {
+        firstPlayMark("project-schedule:skipped");
+        return;
+      }
       const tracks = getStore().state.project.tracks;
       const keepTrackIds = new Set(tracks.map((t) => t.id));
       for (const id of audio.getActiveTrackIds()) {
@@ -240,7 +294,21 @@ export function useTransport() {
 
       for (const t of tracks) {
         if (cancelled) break;
-        audio.ensureTrack(t);
+        firstPlayMark("project-schedule:track", {
+          trackId: t.id,
+          kind: t.kind,
+          noteClips: t.noteClips.length,
+          audioClips: t.audioClips.length,
+        });
+        try {
+          audio.ensureTrack(t);
+        } catch (err) {
+          firstPlayMark("project-schedule:ensureTrack-error", {
+            trackId: t.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
         for (const c of t.noteClips) {
           if (cancelled) break;
           noteIds.push(...audio.scheduleClip(t, c));
@@ -264,10 +332,20 @@ export function useTransport() {
         return;
       }
       scheduledRef.current = { noteIds, audioPlayers, audioIds };
+      firstPlayMark("project-schedule:run:complete", {
+        noteIds: noteIds.length,
+        audioIds: audioIds.length,
+        audioPlayers: audioPlayers.length,
+      });
     };
 
     const timeoutId = window.setTimeout(() => {
-      void run();
+      void run().catch((err) => {
+        firstPlayMark("project-schedule:run:error", {
+          message: err instanceof Error ? err.message : String(err),
+        });
+        getStore().setStatus("Playback prep failed. Press Panic, then try again.", "error");
+      });
     }, 250);
 
     return () => {
@@ -276,7 +354,7 @@ export function useTransport() {
       audio.cancelScheduled([...noteIds, ...audioIds]);
       audio.disposeScheduledAudioPlayers(audioPlayers);
     };
-  }, [scheduleKey]);
+  }, [audioUnlocked, isPlaying, projectSchedulesArmed, scheduleKey]);
 
   // Apply mute/solo to engine only when those flags actually change.
   useEffect(() => {

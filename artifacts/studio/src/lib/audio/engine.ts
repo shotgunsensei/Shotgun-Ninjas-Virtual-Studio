@@ -49,9 +49,16 @@ import {
   trackTransportEvent,
   untrackTransportEvent,
 } from "../../utils/performanceDiagnostics";
+import {
+  firstPlayMark,
+  firstPlayMeasure,
+  getFirstPlayFlags,
+  isFirstPlayTraceEnabled,
+} from "../performance/firstPlayTrace";
 
 const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 const AUDIO_START_TIMEOUT_MS = 5_000;
+const FIRST_PLAY_WATCHDOG_MS = 2_000;
 
 // Re-export voice primitives so existing call sites that import from
 // `./engine` (export.ts, components) keep compiling without churn.
@@ -189,6 +196,8 @@ class AudioEngine {
   private workletInitAttempted = false;
   private workletUnavailable = false;
   private noteEverPlayed = false;
+  private firstPlayAttempted = false;
+  private playBlockedByWatchdog = false;
 
   private firstQwertyShown = false;
   private firstMidiShown = false;
@@ -249,6 +258,10 @@ class AudioEngine {
   private async startToneWithTimeout(): Promise<void> {
     let timeoutId: number | null = null;
     try {
+      firstPlayMark("tone-start:before", {
+        contextState: this.getAudioContextState(),
+      });
+      const started = performance.now();
       await Promise.race([
         Tone.start(),
         new Promise<void>((_, reject) => {
@@ -258,8 +271,12 @@ class AudioEngine {
           );
         }),
       ]);
+      firstPlayMeasure("tone-start", started, performance.now(), {
+        contextState: this.getAudioContextState(),
+      });
     } catch (err) {
       const details = describeError(err);
+      firstPlayMark("tone-start:error", details);
       console.warn("[AudioEngine] AudioContext start did not complete promptly.", details, err);
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -269,13 +286,14 @@ class AudioEngine {
   private scheduleAudioContextStart(): void {
     if (this.audioStartScheduled) return;
     this.audioStartScheduled = true;
-    window.setTimeout(() => {
-      void (async () => {
-        await this.startToneWithTimeout();
-        await this.tryInitWorkletsOnce();
-        lookaheadScheduler.start();
-      })();
-    }, 0);
+    firstPlayMark("audio-context-start:scheduled", {
+      contextState: this.getAudioContextState(),
+    });
+    void (async () => {
+      await this.startToneWithTimeout();
+      await this.tryInitWorkletsOnce();
+      lookaheadScheduler.start();
+    })();
   }
 
   private async tryInitWorkletsOnce(): Promise<void> {
@@ -392,6 +410,11 @@ class AudioEngine {
   private masterAnalyser: Tone.Analyser | null = null;
   private masterAnalyserSize = 0;
   getMasterAnalyser(size = 256): Tone.Analyser {
+    if (getFirstPlayFlags().disableAnalyzers) {
+      firstPlayMark("master-analyser:disabled", { size });
+      throw new Error("Master analyser disabled by snDisableAnalyzers profiling flag");
+    }
+    firstPlayMark("master-analyser:ensure", { size });
     const boundedSize = Math.max(32, Math.min(2048, size));
     if (!this.masterAnalyser || this.masterAnalyserSize !== boundedSize) {
       if (this.masterAnalyser) {
@@ -597,30 +620,89 @@ class AudioEngine {
   }
 
   play(): boolean {
+    const flags = getFirstPlayFlags();
+    const traceFirstPlay = isFirstPlayTraceEnabled() && !this.firstPlayAttempted;
+    if (traceFirstPlay) {
+      this.firstPlayAttempted = true;
+      firstPlayMark("AudioEngine.play:first-attempt", {
+        contextState: this.getAudioContextState(),
+        transportState: Tone.getTransport().state,
+        playbackState: this.playbackState,
+        flags,
+      });
+    } else {
+      firstPlayMark("AudioEngine.play:enter", {
+        contextState: this.getAudioContextState(),
+        transportState: Tone.getTransport().state,
+        playbackState: this.playbackState,
+      });
+    }
     if (this.noAudio) return false;
+    if (this.playBlockedByWatchdog) {
+      firstPlayMark("AudioEngine.play:blocked-watchdog");
+      return false;
+    }
     if (this.playbackState === "starting" || this.playbackState === "playing") return true;
     if (!this.isAudioContextRunning()) {
+      firstPlayMark("AudioEngine.play:context-not-running", {
+        contextState: this.getAudioContextState(),
+      });
       this.scheduleAudioContextStart();
       return false;
     }
     // Releasing any held panic mute is a no-op when no panic is active,
     // so this is safe to call on every play.
     this.playbackState = "starting";
+    let watchdogId: number | null = null;
+    if (traceFirstPlay) {
+      watchdogId = window.setTimeout(() => {
+        if (this.playbackState !== "starting") return;
+        this.playbackState = "error";
+        this.playBlockedByWatchdog = true;
+        firstPlayMark("AudioEngine.play:watchdog-timeout", {
+          timeoutMs: FIRST_PLAY_WATCHDOG_MS,
+          contextState: this.getAudioContextState(),
+          transportState: Tone.getTransport().state,
+        });
+      }, FIRST_PLAY_WATCHDOG_MS);
+    }
+    const started = performance.now();
     try {
       this.masterChain.releasePanicHold();
       if (this.metronomeEnabled && this.metronomeId === null) {
+        firstPlayMark("AudioEngine.play:metronome-reschedule");
         this.setMetronome(true);
       }
-      this.ensureAutomationScheduler();
-      const transport = Tone.getTransport();
-      if (transport.state !== "started") {
-        transport.start();
+      if (!flags.disableTransportCallbacks) {
+        this.ensureAutomationScheduler();
+      } else {
+        firstPlayMark("AudioEngine.play:automation-skipped");
       }
+      const transport = Tone.getTransport();
+      firstPlayMark("Tone.Transport.start:before", {
+        contextState: this.getAudioContextState(),
+        transportState: transport.state,
+      });
+      const transportStart = performance.now();
+      if (transport.state !== "started") {
+        transport.start("+0.05");
+      }
+      firstPlayMeasure("Tone.Transport.start", transportStart, performance.now(), {
+        contextState: this.getAudioContextState(),
+        transportState: transport.state,
+      });
       this.playbackState = "playing";
+      firstPlayMeasure("AudioEngine.play", started, performance.now(), {
+        contextState: this.getAudioContextState(),
+        transportState: transport.state,
+      });
       return true;
     } catch (err) {
       this.playbackState = "error";
+      firstPlayMark("AudioEngine.play:error", describeError(err));
       throw err;
+    } finally {
+      if (watchdogId !== null) window.clearTimeout(watchdogId);
     }
   }
 
@@ -629,6 +711,14 @@ class AudioEngine {
       return (Tone.getContext().rawContext as AudioContext | undefined)?.state === "running";
     } catch {
       return false;
+    }
+  }
+
+  private getAudioContextState(): AudioContextState | "unknown" {
+    try {
+      return (Tone.getContext().rawContext as AudioContext | undefined)?.state ?? "unknown";
+    } catch {
+      return "unknown";
     }
   }
   pause() {
@@ -651,6 +741,11 @@ class AudioEngine {
     if (this.noAudio) return;
     if (this.playbackState === "stopping") return;
     this.playbackState = "stopping";
+    this.playBlockedByWatchdog = false;
+    firstPlayMark("AudioEngine.stop:enter", {
+      transportState: Tone.getTransport().state,
+      contextState: this.getAudioContextState(),
+    });
     try {
       Tone.getTransport().stop();
       Tone.getTransport().position = 0;
@@ -659,6 +754,9 @@ class AudioEngine {
         releaseAllNotes(v.poly);
       }
       this.playbackState = "stopped";
+      firstPlayMark("AudioEngine.stop:complete", {
+        transportState: Tone.getTransport().state,
+      });
     } catch (err) {
       this.playbackState = "error";
       throw err;
@@ -691,6 +789,11 @@ class AudioEngine {
   panicStopAll() {
     const transport = Tone.getTransport();
     this.playbackState = "stopping";
+    this.playBlockedByWatchdog = false;
+    firstPlayMark("AudioEngine.panic:enter", {
+      transportState: transport.state,
+      contextState: this.getAudioContextState(),
+    });
     try {
       transport.stop();
       transport.position = 0;
@@ -718,6 +821,9 @@ class AudioEngine {
 
       this.masterChain.duckForPanic();
       this.playbackState = "stopped";
+      firstPlayMark("AudioEngine.panic:complete", {
+        transportState: transport.state,
+      });
     } catch {
       this.playbackState = "error";
     }
@@ -819,6 +925,24 @@ class AudioEngine {
   // ---- tracks ----
   ensureTrack(track: Track) {
     if (this.noAudio) return;
+    const flags = getFirstPlayFlags();
+    const duringPlay = this.playbackState === "starting" || this.playbackState === "playing";
+    const hadVoice = this.voices.has(track.id);
+    firstPlayMark("ensureTrack:enter", {
+      trackId: track.id,
+      kind: track.kind,
+      duringPlay,
+      hadVoice,
+    });
+    if (duringPlay && flags.disableGraphBuildOnPlay) {
+      firstPlayMark("ensureTrack:blocked-during-play", { trackId: track.id });
+      throw new Error(`ensureTrack(${track.id}) called during Play`);
+    }
+    if (flags.useMinimalAudioGraph) {
+      firstPlayMark("ensureTrack:skipped-minimal-graph", { trackId: track.id });
+      return;
+    }
+    const started = performance.now();
     let v = this.voices.get(track.id);
     if (!v) {
       v = this.buildVoice(track);
@@ -858,6 +982,11 @@ class AudioEngine {
         }
       }
     }
+    firstPlayMeasure("ensureTrack", started, performance.now(), {
+      trackId: track.id,
+      kind: track.kind,
+      created: !hadVoice,
+    });
   }
 
   removeTrack(trackId: string) {
@@ -1584,6 +1713,21 @@ class AudioEngine {
    */
   scheduleClip(track: Track, clip: NoteClip): number[] {
     const ids: number[] = [];
+    const flags = getFirstPlayFlags();
+    if (flags.disableProjectSchedules || flags.disableTransportCallbacks) {
+      firstPlayMark("scheduleClip:skipped", {
+        trackId: track.id,
+        clipId: clip.id,
+        disableProjectSchedules: flags.disableProjectSchedules,
+        disableTransportCallbacks: flags.disableTransportCallbacks,
+      });
+      return ids;
+    }
+    firstPlayMark("scheduleClip:enter", {
+      trackId: track.id,
+      clipId: clip.id,
+      noteCount: clip.notes.length,
+    });
     const v = this.voices.get(track.id);
     if (!v) return ids;
     const startBeats = clip.start;
@@ -1605,6 +1749,12 @@ class AudioEngine {
       const t = startBeats + ev.time;
       let id = -1;
       id = Tone.getTransport().schedule((time) => {
+        firstPlayMark("transport-callback:note-clip", {
+          trackId: track.id,
+          clipId: clip.id,
+          beat: t,
+          audioTime: time,
+        });
         const bpm = Tone.getTransport().bpm.value;
         // Per-step probability gate (independent of groove template prob).
         if (ev.probability !== undefined && ev.probability < 1) {
@@ -1752,8 +1902,23 @@ class AudioEngine {
       reversed?: boolean;
     },
   ): { id: number; player: Tone.Player } | null {
+    const flags = getFirstPlayFlags();
+    if (flags.disableProjectSchedules || flags.disableTransportCallbacks) {
+      firstPlayMark("scheduleAudioClip:skipped", {
+        trackId: track.id,
+        clipId: clip.id,
+        disableProjectSchedules: flags.disableProjectSchedules,
+        disableTransportCallbacks: flags.disableTransportCallbacks,
+      });
+      return null;
+    }
     const v = this.voices.get(track.id);
     if (!v || !clip.blob) return null;
+    firstPlayMark("scheduleAudioClip:player-create", {
+      trackId: track.id,
+      clipId: clip.id,
+      durationSec: clip.durationSec,
+    });
     const url = URL.createObjectURL(clip.blob);
     const player = new Tone.Player(url).connect(v.channel);
     player.autostart = false;
@@ -1778,6 +1943,11 @@ class AudioEngine {
     const duration = Math.max(0, clip.durationSec);
     let evId = -1;
     evId = Tone.getTransport().schedule((time) => {
+      firstPlayMark("transport-callback:audio-clip", {
+        trackId: track.id,
+        clipId: clip.id,
+        audioTime: time,
+      });
       try {
         player.start(time, offset, duration);
       } catch {
@@ -1896,10 +2066,12 @@ class AudioEngine {
   private ensureEqNodes(v: TrackVoice) {
     let changed = false;
     if (!v.hpf) {
+      firstPlayMark("effect-node:create", { kind: "hpf" });
       v.hpf = new Tone.Filter({ frequency: 20, type: "highpass", rolloff: -24 });
       changed = true;
     }
     if (!v.eq3) {
+      firstPlayMark("effect-node:create", { kind: "eq3" });
       v.eq3 = new Tone.EQ3({ low: 0, mid: 0, high: 0, lowFrequency: 200, highFrequency: 3200 });
       changed = true;
     }
@@ -1908,52 +2080,70 @@ class AudioEngine {
 
   private ensureDriveNode(v: TrackVoice) {
     if (v.drive) return;
+    firstPlayMark("effect-node:create", { kind: "drive" });
     v.drive = new Tone.Distortion({ distortion: 0, wet: 0 });
     this.rewireTrackFxChain(v);
   }
 
   private ensureChorusNode(v: TrackVoice) {
     if (v.chorus) return;
+    firstPlayMark("effect-node:create", { kind: "chorus" });
     v.chorus = new Tone.Chorus({ frequency: 1.2, depth: 0.4, wet: 0 }).start();
     this.rewireTrackFxChain(v);
   }
 
   private ensureCompressorNode(v: TrackVoice) {
     if (v.comp) return;
+    firstPlayMark("effect-node:create", { kind: "compressor" });
     v.comp = new Tone.Compressor({ threshold: 0, ratio: 1, attack: 0.01, release: 0.18, knee: 8 });
     this.rewireTrackFxChain(v);
   }
 
   private ensureBitcrusherNode(v: TrackVoice) {
     if (v.bitcrusher) return;
+    firstPlayMark("effect-node:create", { kind: "bitcrusher" });
     v.bitcrusher = new Tone.BitCrusher(16);
     this.rewireTrackFxChain(v);
   }
 
   private ensureWidenerNode(v: TrackVoice) {
     if (v.widener) return;
+    firstPlayMark("effect-node:create", { kind: "widener" });
     v.widener = new Tone.StereoWidener({ width: 0.5 });
     this.rewireTrackFxChain(v);
   }
 
   private buildVoice(track: Track): TrackVoice {
+    const started = performance.now();
+    firstPlayMark("buildVoice:enter", {
+      trackId: track.id,
+      kind: track.kind,
+      preset: track.preset,
+      kitId: track.kitId,
+      presetId: track.presetId,
+    });
     const untrackVoice = trackAudioResource("track-voice");
+    firstPlayMark("audio-node:create", { kind: "channel", trackId: track.id });
     const channel = new Tone.Channel({ volume: 0 });
     // Freeverb is an algorithmic reverb (Schroeder/Moorer) — instantaneous
     // to create unlike Tone.Reverb which generates a convolution IR buffer
     // via OfflineAudioContext and blocks the main thread for ~6-8 s per
     // instance. With 5+ tracks this was causing a 45-50 s freeze on load.
+    firstPlayMark("effect-node:create", { kind: "reverb", trackId: track.id });
     const reverb = new Tone.Freeverb({ roomSize: 0.65, dampening: 3000, wet: 0 });
+    firstPlayMark("effect-node:create", { kind: "delay", trackId: track.id });
     const delay = new Tone.FeedbackDelay({
       delayTime: "8n",
       feedback: 0.35,
       wet: 0,
     });
+    firstPlayMark("effect-node:create", { kind: "filter", trackId: track.id });
     const filter = new Tone.Filter({
       frequency: 18000,
       type: "lowpass",
       rolloff: -12,
     });
+    firstPlayMark("analyser-node:create", { kind: "meter", trackId: track.id });
     const meter = new Tone.Meter({ smoothing: 0.7 });
     // Default chain is intentionally lean. Optional mixer/effect nodes are
     // inserted lazily by the setters above when a real non-default setting
@@ -1967,6 +2157,7 @@ class AudioEngine {
     // v2 sends — one gain per named bus, tapped post-fader off the channel.
     const sends = new Map<SendBusId, Tone.Gain>();
     for (const busId of SEND_BUS_IDS) {
+      firstPlayMark("audio-node:create", { kind: "send-gain", trackId: track.id, busId });
       const g = new Tone.Gain(0);
       channel.connect(g);
       const bus = this.masterChain.getBus(busId);
@@ -2022,9 +2213,14 @@ class AudioEngine {
     };
     this.attachInstrument(voice, track);
     if (track.kind === "vocals") {
+      firstPlayMark("audio-node:create", { kind: "user-media", trackId: track.id });
       voice.mic = new Tone.UserMedia();
       voice.mic.connect(filter);
     }
+    firstPlayMeasure("buildVoice", started, performance.now(), {
+      trackId: track.id,
+      kind: track.kind,
+    });
     return voice;
   }
 
@@ -2036,19 +2232,38 @@ class AudioEngine {
    * old projects keep working unchanged.
    */
   private attachInstrument(v: TrackVoice, track: Track) {
+    const started = performance.now();
+    firstPlayMark("attachInstrument:enter", {
+      trackId: track.id,
+      kind: track.kind,
+      kitId: track.kitId,
+      presetId: track.presetId,
+    });
     const { kind, preset } = track;
     const target = v.filter;
     if (kind === "drums") {
       if (track.kitId) {
+        firstPlayMark("instrument-factory:buildKit", {
+          trackId: track.id,
+          kitId: track.kitId,
+        });
         v.kitId = track.kitId;
         v.kit = buildKit(findKit(track.kitId), target, v.reverb, v.delay);
       } else {
+        firstPlayMark("instrument-factory:buildDrumKit", {
+          trackId: track.id,
+          preset,
+        });
         const drums = buildDrumKit(preset as import("../../types").DrumsPreset);
         v.drums = drums;
         (Object.keys(drums) as DrumPiece[]).forEach((k) =>
           drums[k].connect(target),
         );
       }
+      firstPlayMeasure("attachInstrument", started, performance.now(), {
+        trackId: track.id,
+        kind,
+      });
       return;
     }
     if (kind === "vocals") {
@@ -2056,27 +2271,48 @@ class AudioEngine {
         { reverb: v.reverb, delay: v.delay, filter: v.filter },
         preset as VocalsPreset,
       );
+      firstPlayMeasure("attachInstrument", started, performance.now(), {
+        trackId: track.id,
+        kind,
+      });
       return;
     }
     // melodic — v2 preset id wins.
     if (track.presetId) {
       const def = findPreset(track.presetId);
       if (def) {
+        firstPlayMark("instrument-factory:buildPresetVoice", {
+          trackId: track.id,
+          presetId: track.presetId,
+        });
         v.presetId = track.presetId;
         const poly = buildPresetVoice(def);
         v.poly = poly;
         poly.connect(target);
         announceSamplerLoadIfNeeded(poly);
         this.maybeAttachMelodicSampler(v, def, track.presetId);
+        firstPlayMeasure("attachInstrument", started, performance.now(), {
+          trackId: track.id,
+          kind,
+        });
         return;
       }
     }
+    firstPlayMark("instrument-factory:buildMelodicVoice", {
+      trackId: track.id,
+      kind,
+      preset,
+    });
     const poly = buildMelodicVoice(kind, preset);
     if (poly) {
       v.poly = poly;
       poly.connect(target);
       if (kind === "piano") announceSamplerLoadIfNeeded(poly);
     }
+    firstPlayMeasure("attachInstrument", started, performance.now(), {
+      trackId: track.id,
+      kind,
+    });
   }
 }
 

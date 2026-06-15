@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const BASE_URL = process.env.STUDIO_PROFILE_URL ?? "http://127.0.0.1:5173";
 const PLAYBACK_MINUTES = Number(process.env.STUDIO_PROFILE_MINUTES ?? "10");
+const MATRIX_ONLY = process.env.STUDIO_PROFILE_MATRIX_ONLY === "1";
 const OUT_DIR = join(process.cwd(), "runtime-profile");
 const RUN_ID = Date.now();
 const OUT_PATH = join(OUT_DIR, `runtime-profile-${RUN_ID}.json`);
@@ -92,6 +93,8 @@ async function browserMetrics(page, cdp) {
       "caches" in window ? caches.keys().catch(() => []) : Promise.resolve([]),
     longTasks: window.__SN_RUNTIME_PROFILE__?.longTasks ?? [],
     controllerChanges: window.__SN_RUNTIME_PROFILE__?.controllerChanges ?? 0,
+    firstPlayTrace: window.__SN_FIRST_PLAY_TRACE__?.dump?.() ?? [],
+    firstPlayFlags: window.__SN_FIRST_PLAY_TRACE__?.flags?.() ?? null,
   }));
   return {
     jsHeapUsedMB: Number(((metric.JSHeapUsedSize ?? 0) / 1024 / 1024).toFixed(2)),
@@ -150,6 +153,8 @@ function emptyMetrics(error) {
       cacheNames: [],
       longTasks: [],
       controllerChanges: 0,
+      firstPlayTrace: [],
+      firstPlayFlags: null,
       metricsError: error?.message || String(error),
     },
   };
@@ -229,9 +234,36 @@ async function clickMaybe(page, locator, timeout = 2_000) {
   }
 }
 
-async function openStudio(page) {
-  await page.goto(`${BASE_URL}/studio`, { waitUntil: "domcontentloaded" });
+async function openStudio(page, query = "") {
+  await page.goto(`${BASE_URL}/studio${query}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("header", { timeout: 30_000 });
+}
+
+async function firstPlayProbe(page, result) {
+  await enableAudio(page);
+  const enableSnap = await page.evaluate(() => ({
+    audioButtonVisible: !!document.querySelector('button[aria-label="Play"]'),
+    trace: window.__SN_FIRST_PLAY_TRACE__?.dump?.() ?? [],
+  }));
+  result.notes.push({ enableAudio: enableSnap });
+
+  const playClickReturned = await clickMaybe(page, page.locator('button[aria-label="Play"]'), 10_000);
+  await page.waitForTimeout(1_500);
+  const pauseAppears = await page.locator('button[aria-label="Pause"]').count().then((n) => n > 0).catch(() => false);
+  const state = await page.evaluate(() => ({
+    pauseAppears: !!document.querySelector('button[aria-label="Pause"]'),
+    playAppears: !!document.querySelector('button[aria-label="Play"]'),
+    trace: window.__SN_FIRST_PLAY_TRACE__?.dump?.() ?? [],
+  }));
+  result.notes.push({
+    playClickReturned,
+    pauseAppears,
+    domState: state,
+    ensureTrackDuringPlay: state.trace.filter((e) => e.phase === "ensureTrack:enter" && e.detail?.duringPlay),
+    buildVoiceDuringPlay: state.trace.filter((e) => e.phase === "buildVoice:enter"),
+  });
+  if (!playClickReturned) throw new Error("Play click did not return");
+  if (!pauseAppears && !state.pauseAppears) throw new Error("Pause did not appear after Play");
 }
 
 async function loadDemo(page, id) {
@@ -410,6 +442,43 @@ async function main() {
     };
     writeFileSync(OUT_PATH, JSON.stringify(partial, null, 2));
   };
+
+  const firstPlayMatrix = [
+    ["first-play-baseline", "?snFirstPlayTrace=1"],
+    ["first-play-no-project-schedules", "?snFirstPlayTrace=1&snDisableProjectSchedules=1"],
+    ["first-play-no-transport-callbacks", "?snFirstPlayTrace=1&snDisableTransportCallbacks=1"],
+    ["first-play-no-graph-build-during-play", "?snFirstPlayTrace=1&snDisableGraphBuildOnPlay=1"],
+    ["first-play-minimal-audio-graph", "?snFirstPlayTrace=1&snUseMinimalAudioGraph=1"],
+    ["first-play-no-world-audio", "?snFirstPlayTrace=1&snDisableWorldAudio=1"],
+    ["first-play-no-analyzers", "?snFirstPlayTrace=1&snDisableAnalyzers=1"],
+  ];
+
+  for (const [name, query] of firstPlayMatrix) {
+    const matrixPage = await context.newPage();
+    const matrixCdp = await context.newCDPSession(matrixPage);
+    await matrixCdp.send("Performance.enable");
+    await installProfileHooks(matrixPage);
+    matrixPage.on("console", (msg) => {
+      if (["error", "warning"].includes(msg.type())) {
+        consoleMessages.push({ type: msg.type(), text: `[${name}] ${msg.text()}` });
+      }
+    });
+    matrixPage.on("pageerror", (err) =>
+      pageErrors.push(`[${name}] ${err.stack || err.message}`),
+    );
+    results.push(await scenario(name, matrixPage, matrixCdp, async (r) => {
+      await openStudio(matrixPage, query);
+      await firstPlayProbe(matrixPage, r);
+    }));
+    await matrixPage.close().catch(() => {});
+    writeSummary();
+  }
+
+  if (MATRIX_ONLY) {
+    console.log(OUT_PATH);
+    await browser.close();
+    return;
+  }
 
   results.push(await scenario("cold-load", page, cdp, async () => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });

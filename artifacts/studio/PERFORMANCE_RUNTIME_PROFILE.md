@@ -265,3 +265,59 @@ audio unlock prevents the app from reaching Pause state and makes CDP metrics
 unresponsive. The likely remaining surface is synchronous work triggered by
 `Tone.Transport.start()` or scheduled transport callbacks after the
 AudioContext/Tone startup path, not AudioWorklet retry churn.
+
+---
+
+## 2026-06-15 First-Play Repair Recheck
+
+Profile artifacts:
+
+- First-play matrix: `runtime-profile/runtime-profile-1781555968920.json`
+- Short full profile: `runtime-profile/runtime-profile-1781556158517.json`
+
+### First-Play Matrix
+
+| Scenario | Status | Evidence |
+| --- | --- | --- |
+| Baseline | Pass | Play click returned, Pause appeared, CDP metrics remained responsive. |
+| No project schedules | Pass | Confirms schedules were part of the previous failure surface. |
+| No transport callbacks | Pass | Confirms callbacks/scheduling were part of the previous failure surface. |
+| No graph build during Play | Pass | No `ensureTrack()` / `buildVoice()` ran during first Play. |
+| Minimal audio graph | Pass | Tone Transport itself starts in isolation. |
+| No world audio | Pass | World audio was not the first-Play blocker. |
+| No analyzers | Pass | Master analyser creation was not required for first Play. |
+
+Measured baseline first Play:
+
+- `useTransport.play`: 1.5 ms
+- `AudioEngine.play`: 0.6 ms
+- `Tone.Transport.start`: 0.6 ms
+- `ensureTrack()` during first Play: 0
+- `buildVoice()` during first Play: 0
+
+### Short Runtime Profile
+
+| Scenario | Status | Evidence |
+| --- | --- | --- |
+| First-play matrix | Pass | All seven matrix cases passed. |
+| Cold load | Pass | 2,608 ms scenario duration. |
+| Audio startup / panic / replay | Pass | Play/Pause/Stop/Panic/replay path completed. |
+| Trap Starter 0.1-minute playback with mixer/scope | Pass with severe long-task risk | Scenario passed, but captured a 9,651 ms long task and 14,169 ms total long-task time. |
+| Mixer stress | Pass with leak risk | Scenario passed, but JS listeners increased by 15,275. |
+| Visualizer Performance Mode stress | Fail | Locator click timed out after 30 s. |
+| Repeated preset switching | Fail | Locator click timed out after 5 s. |
+| Repeated project load/unload | Fail | Locator click timed out after 30 s. |
+| Sample import small/large | Pass with long-task risk | Passed, but captured a 2,233 ms long task. |
+| Save/load/autosave | Fail | Locator click timed out after 30 s. |
+| JSON export/import/malformed JSON | Fail | Locator click timed out after 30 s. |
+| WAV export default/demo | Fail | Locator click timed out after 30 s. |
+| Service worker update simulation | Fail | `spawnSync npm.cmd EINVAL` in the harness. |
+
+### Release Safety
+
+Not release-safe.
+
+First Play is fixed enough for the production matrix: Pause appears and CDP
+metrics remain responsive. The 10-minute acceptance run was not attempted
+because the short profile still fails later stress scenarios and still captures
+multi-second long tasks.

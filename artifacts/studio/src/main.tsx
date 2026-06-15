@@ -5,8 +5,10 @@ import { AppRouter } from "./router";
 import "./index.css";
 import { disposePwaRuntime, initPwa } from "./lib/pwa";
 import { perfMark } from "./utils/performanceDiagnostics";
+import { installFirstPlayTrace, uninstallFirstPlayTrace } from "./lib/performance/firstPlayTrace";
 
 perfMark("app-startup:main-entry");
+installFirstPlayTrace();
 initPwa();
 
 function Loading() {
@@ -30,6 +32,7 @@ createRoot(document.getElementById("root")!).render(
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     disposePwaRuntime();
+    uninstallFirstPlayTrace();
     void import("./lib/audio/engine").then(({ audio }) => audio.dispose());
   });
 }

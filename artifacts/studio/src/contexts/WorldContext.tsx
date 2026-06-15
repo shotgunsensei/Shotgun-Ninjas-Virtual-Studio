@@ -25,6 +25,7 @@ import { playWorldWelcome, startAmbientLoop, type AmbientLoop } from "../lib/wor
 import { getStore } from "../store";
 import { audio } from "../lib/audio/engine";
 import type { DrumKitId } from "../types";
+import { firstPlayMark, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
 
 const AMBIENT_VOLUME = 0.10;
 
@@ -45,6 +46,7 @@ const WorldContext = createContext<WorldContextValue | null>(null);
 /** Returns true when the user or system prefers reduced motion/audio. */
 function _prefersReducedAudio(): boolean {
   try {
+    if (getFirstPlayFlags().disableWorldAudio) return true;
     if (document.documentElement.classList.contains("studio-reduce-motion")) return true;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
   } catch {
@@ -208,6 +210,10 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Play welcome cue — resume AudioContext if needed (browsers suspend by default)
+      if (getFirstPlayFlags().disableWorldAudio) {
+        firstPlayMark("world-audio:welcome-skipped");
+        return;
+      }
       try {
         const ctx = getAudioCtx();
         const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();

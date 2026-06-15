@@ -1,4 +1,5 @@
 import * as Tone from "tone";
+import { firstPlayMark, firstPlayMeasure } from "../../performance/firstPlayTrace";
 import type { DrumPiece } from "../voices";
 import { tryLoadDrumSamples, type DrumSampleBank } from "./samples";
 import type {
@@ -941,6 +942,11 @@ export function buildKit(
   reverbBus: Tone.InputNode | null,
   delayBus: Tone.InputNode | null,
 ): KitVoice {
+  const started = performance.now();
+  firstPlayMark("instrument-factory:buildKit:start", {
+    kitId: def.id,
+    pieces: Object.keys(def.pieces).length,
+  });
   const pieces = new Map<DrumPiece, PieceVoice>();
   for (const pieceId of Object.keys(def.pieces) as DrumPiece[]) {
     const pdef = def.pieces[pieceId];
@@ -961,13 +967,18 @@ export function buildKit(
       origTrigger(time, velocity);
     };
   }
-  return {
+  const kit = {
     id: def.id,
     pieces,
     dispose: () => {
       for (const pv of pieces.values()) pv.dispose();
     },
   };
+  firstPlayMeasure("instrument-factory:buildKit", started, performance.now(), {
+    kitId: def.id,
+    pieces: pieces.size,
+  });
+  return kit;
 }
 
 function buildPieceVoice(
@@ -976,16 +987,21 @@ function buildPieceVoice(
   reverbBus: Tone.InputNode | null,
   delayBus: Tone.InputNode | null,
 ): PieceVoice {
+  const started = performance.now();
+  firstPlayMark("instrument-factory:buildPieceVoice:start", { piece: def.id });
   // Per-piece chain: pool -> filter -> gate -> channel -> output, plus sends.
   // The `gate` (AmplitudeEnvelope) is what gives the per-piece "decay"
   // knob audible effect: each hit re-triggers the envelope and its
   // release time is scaled by the user `decayMul` setting.
+  firstPlayMark("audio-node:create", { kind: "piece-channel", piece: def.id });
   const channel = new Tone.Channel({ volume: 0, pan: def.defaultPan });
+  firstPlayMark("effect-node:create", { kind: "piece-filter", piece: def.id });
   const filter = new Tone.Filter({
     frequency: cutoffNormToHz(def.defaultCutoff),
     type: "lowpass",
     rolloff: -12,
   });
+  firstPlayMark("effect-node:create", { kind: "piece-gate", piece: def.id });
   const gate = new Tone.AmplitudeEnvelope({
     attack: 0.001,
     decay: 0.01,
@@ -996,7 +1012,9 @@ function buildPieceVoice(
   gate.connect(channel);
   channel.connect(output);
 
+  firstPlayMark("audio-node:create", { kind: "piece-reverb-send", piece: def.id });
   const reverbSend = new Tone.Gain(def.defaultReverbSend);
+  firstPlayMark("audio-node:create", { kind: "piece-delay-send", piece: def.id });
   const delaySend = new Tone.Gain(def.defaultDelaySend);
   channel.connect(reverbSend);
   channel.connect(delaySend);
@@ -1040,6 +1058,10 @@ function buildPieceVoice(
       delaySend.dispose();
     },
   };
+  firstPlayMeasure("instrument-factory:buildPieceVoice", started, performance.now(), {
+    piece: def.id,
+    poolSize,
+  });
 
   // Default trigger uses the synth pool. If real samples become
   // available via the async resolver below, we swap to a sample-bank

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { audio } from "./lib/audio/engine";
+import { firstPlayMark, getFirstPlayFlags } from "./lib/performance/firstPlayTrace";
 import { DEFAULT_MASTER_BUS } from "./lib/audio/master";
 import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
 import { wireTrackAutomationTargets } from "./lib/plugins/automation";
@@ -208,6 +209,12 @@ class Store {
 
   set(updater: Partial<typeof this.state> | ((s: typeof this.state) => Partial<typeof this.state>)) {
     const patch = typeof updater === "function" ? updater(this.state) : updater;
+    firstPlayMark("store.set", {
+      keys: Object.keys(patch),
+      isPlaying: patch.isPlaying,
+      isRecording: patch.isRecording,
+      audioUnlocked: patch.audioUnlocked,
+    });
     const projectChanged =
       Object.prototype.hasOwnProperty.call(patch, "project") &&
       patch.project !== undefined &&
@@ -223,6 +230,9 @@ class Store {
   }
 
   patchProject(patch: Partial<Project>) {
+    firstPlayMark("store.patchProject", {
+      keys: Object.keys(patch),
+    });
     this.state = {
       ...this.state,
       project: { ...this.state.project, ...patch, updatedAt: Date.now() },
@@ -1248,6 +1258,13 @@ export function flushAutomationToEngine(project: Project) {
  * the audio state matches the data store on the next sound.
  */
 export function flushMixToEngine(project: Project) {
+  firstPlayMark("flushMixToEngine:enter", {
+    tracks: project.tracks.length,
+  });
+  if (getFirstPlayFlags().useMinimalAudioGraph) {
+    firstPlayMark("flushMixToEngine:skipped-minimal-graph");
+    return;
+  }
   if (project.masterBus) audio.setMasterBus(project.masterBus);
   for (const t of project.tracks) {
     if (t.eq) audio.setTrackEq(t.id, t.eq);
