@@ -1027,3 +1027,75 @@ metrics remain responsive. The next blocker is the broader runtime stress path:
 Trap Starter still emits a 9.65 s long task, mixer stress grows JS listeners by
 15,275, and visualizer/preset/project-load/save/import/export scenarios still
 fail in the short profile. The 10-minute playback acceptance test was not run.
+
+---
+
+## 2026-06-15 Post-First-Play Listener Profiling Patch
+
+### Root Causes Confirmed
+
+- First Play remains fixed when listener tracing is kept out of first-play
+  bootstrap.
+- The earlier suspected mixer listener leak is not confirmed as an app-owned
+  mixer leak. In the latest traced mixer stress run, `store.subscribe`,
+  `visualTicker`, and Tone.Transport counts stayed bounded.
+- Chrome's `JSEventListeners` counter still grows during mixer stress, but the
+  app-owned profiler attributes only a net `+2` active records during the mixer
+  scenario.
+- The highest confirmed listener/subscription pressure comes from Web
+  Audio/Tone internals after audio startup and demo load, especially
+  `ConstantSourceNode:ended` and AudioWorkletNode error/processorerror
+  listeners.
+- Trap Starter improved from the prior `9.65 s` largest long task to `6.18 s`,
+  but this is still a blocking runtime performance issue.
+
+### Fixes Applied
+
+- Added `src/lib/performance/listenerTrace.ts`.
+- Exposed `window.__SN_LISTENER_TRACE__` with `snapshot()`,
+  `dumpTopStacks()`, `clear()`, `start()`, and `stop()`.
+- Gated listener tracing behind `?snListenerTrace=1` or
+  `localStorage["sn:listenerTrace"] = "1"`.
+- Deferred actual EventTarget monkey-patching until `start()` is called after
+  the app shell is visible. Early bootstrap patching was tested and rejected
+  because it could prevent the studio from reaching the header.
+- Added explicit tracing for `visualTicker` subscribers, store subscriptions,
+  and Tone.Transport IDs.
+- Updated `scripts/runtime-profile.mjs` to capture listener snapshots around
+  mixer, visualizer, and repeated project-load checkpoints.
+- Added clear profile table fields for visual ticker, Transport, and trace
+  deltas.
+- Added Windows-safe service-worker rebuild command in the runtime profile
+  harness.
+- Added demo/project timing markers around demo load/reset/mix/automation
+  paths.
+- Created `PERFORMANCE_LISTENER_PROFILE.md`.
+- Created `PERFORMANCE_DEMO_LOAD_PROFILE.md`.
+
+### Validation
+
+| Command / profile | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | TypeScript completed cleanly. |
+| `npm run build` | Pass with warnings | Existing sourcemap, import-overlap, and large chunk warnings remain. |
+| First-play matrix in production preview | Pass | All seven first-play scenarios passed. |
+| Short production runtime profile | Fail | First-play, cold load, audio startup, Trap Starter short playback, mixer stress, and sample import passed; later stress/export/import/SW scenarios still failed. |
+
+Latest profile artifacts:
+
+- `runtime-profile/runtime-profile-1781558234222.json`
+- `runtime-profile/runtime-profile-1781574687932.json`
+
+### Remaining Risks
+
+- Trap Starter still has a `6.18 s` long task.
+- Sample import still has a `1.02 s` long task.
+- Audio startup still has a `980 ms` long task.
+- Web Audio/Tone listener counts are high and need source-mapped audio-node
+  lifecycle investigation.
+- Visualizer/preset/project-load/save/import/export scenarios still timeout.
+- 10-minute playback acceptance has not been run and must not be claimed.
+
+### Release Safety
+
+Not release-safe.

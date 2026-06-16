@@ -418,7 +418,11 @@ async function malformedJsonImport(page) {
 
 async function serviceWorkerUpdateSimulation(page, result) {
   const beforeCaches = await page.evaluate(() => caches.keys());
-  execFileSync("npm.cmd", ["run", "build"], { cwd: process.cwd(), stdio: "pipe" });
+  if (process.platform === "win32") {
+    execFileSync("cmd.exe", ["/c", "npm", "run", "build"], { cwd: process.cwd(), stdio: "pipe" });
+  } else {
+    execFileSync("npm", ["run", "build"], { cwd: process.cwd(), stdio: "pipe" });
+  }
   const update = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.getRegistration();
     if (!reg) return { registered: false };

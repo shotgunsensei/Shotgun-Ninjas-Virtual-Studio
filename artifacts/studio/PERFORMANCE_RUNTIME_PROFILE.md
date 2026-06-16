@@ -321,3 +321,64 @@ First Play is fixed enough for the production matrix: Pause appears and CDP
 metrics remain responsive. The 10-minute acceptance run was not attempted
 because the short profile still fails later stress scenarios and still captures
 multi-second long tasks.
+
+---
+
+## 2026-06-15 Post-First-Play Listener / Runtime Profile
+
+Latest profile artifacts:
+
+- First-play matrix recheck: `runtime-profile/runtime-profile-1781558234222.json`
+- Short full profile: `runtime-profile/runtime-profile-1781574687932.json`
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `npm run typecheck` | Pass | TypeScript completed cleanly after listener tracing and demo-load instrumentation. |
+| `npm run build` | Pass with warnings | Production build completed. Existing sourcemap, dynamic/static import overlap, and large chunk warnings remain. |
+| Production preview + `STUDIO_PROFILE_MATRIX_ONLY=1 node scripts/runtime-profile.mjs` | Pass | All seven first-play matrix scenarios passed. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Fail | First-play, cold load, audio startup, Trap Starter short playback, mixer stress, and sample import passed. Visualizer, preset/project load, save/load, JSON, WAV, and SW scenarios still failed. |
+
+### Short Profile Results
+
+| Scenario | Status | Largest long task | Key finding |
+| --- | --- | ---: | --- |
+| First-play matrix | Pass | 647 ms max baseline | First Play did not regress. |
+| Cold load | Pass | 300 ms | Listener trace starts after header to avoid bootstrap perturbation. |
+| Audio startup / panic / replay | Pass | 980 ms | Web Audio/Tone startup still creates many `ConstantSourceNode:ended` listeners. |
+| Trap Starter short playback | Pass with blocker | 6,183 ms | Improved from prior 9.65 s but still a multi-second long task. |
+| Mixer stress | Pass with warning | 0 ms captured | App-owned listener trace stayed bounded; Chrome listener metric still grew by 15,293. |
+| Visualizer Performance Mode stress | Fail | 0 ms captured | Harness timed out waiting for Performance Mode toggle after prior stress state. |
+| Repeated preset switching | Fail | 0 ms captured | Locator timeout. |
+| Repeated project load/unload | Fail | 0 ms captured | Locator timeout. |
+| Sample import small/large | Pass with blocker | 1,023 ms | Main-thread sample import/waveform work still blocks. |
+| Save/load/autosave | Fail | 147 ms | Locator timeout. |
+| JSON export/import | Fail | 0 ms captured | Locator timeout. |
+| WAV export default/demo | Fail | 0 ms captured | Locator timeout. |
+| Service worker cache update | Fail | 0 ms captured | Harness used `npm.cmd` directly; patched afterward to use `cmd.exe /c npm run build` on Windows. |
+
+### Listener Trace Findings
+
+See `PERFORMANCE_LISTENER_PROFILE.md`.
+
+Mixer open/close 20x did not show unbounded app-owned listener growth:
+
+- `visualTicker` subscriber delta: `0`
+- `store.subscribe` delta: `0`
+- Tone.Transport event delta: `0`
+- ListenerTrace active delta: `+2`
+
+The high listener counts are concentrated in Web Audio/Tone internals:
+
+- `ConstantSourceNode:ended`: about 2,000 after audio startup.
+- `AudioWorkletNode:error`: 40 after startup, 88 after Trap Starter load.
+- `AudioWorkletNode:processorerror`: 40 after startup, 88 after Trap Starter load.
+
+### Release Safety
+
+Not release-safe.
+
+The 10-minute production playback acceptance test was not run because the short
+profile still fails later stress scenarios and Trap Starter still has a `6.18 s`
+long task.
