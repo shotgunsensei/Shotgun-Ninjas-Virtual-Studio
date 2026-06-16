@@ -382,3 +382,49 @@ Not release-safe.
 The 10-minute production playback acceptance test was not run because the short
 profile still fails later stress scenarios and Trap Starter still has a `6.18 s`
 long task.
+
+---
+
+## 2026-06-16 Audio Node Trace Runtime Profile
+
+Latest profile artifacts:
+
+- First-play matrix: `runtime-profile/runtime-profile-1781620541263.json`
+- Short full profile with `audioNodeTrace`: `runtime-profile/runtime-profile-1781620678141.json`
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Production build completed with existing sourcemap/import-overlap/large chunk warnings. |
+| Production preview + `STUDIO_PROFILE_MATRIX_ONLY=1 node scripts/runtime-profile.mjs` | Pass | All seven first-play matrix scenarios passed. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Fail overall | First-play, cold load, audio startup, Trap Starter short playback, mixer stress, sample import, and service-worker update passed. Visualizer, repeated preset/project load, save/load, JSON, and WAV scenarios failed. |
+| `corepack pnpm run test --reporter=line --workers=1` | Timeout | Four Playwright tests started but the process did not exit before 600 s. |
+| `.\\node_modules\\.bin\\playwright.cmd test --reporter=line --workers=1` | Timeout | Same timeout after enumerating four tests. |
+
+### Short Profile Results
+
+| Scenario | Status | Largest long task | AudioWorklet delta | Key finding |
+| --- | --- | ---: | ---: | --- |
+| First-play matrix | Pass | 702 ms max | 0 | First Play still passes. |
+| Cold load | Pass | 337 ms | 0 | Trace starts after shell, with app-owned listeners bounded. |
+| Audio startup / panic / replay | Pass | 2,542 ms | 0 | Tone ConstantSourceNode/GainNode churn dominates. |
+| Trap Starter short playback | Pass with blocker | 7,417 ms | 0 | Still a multi-second long task; not caused by default worklet creation. |
+| Mixer stress | Pass | 0 ms | 0 | App-owned trace counters stayed bounded, but Chrome listener count rose by 16,485. |
+| Visualizer Performance Mode stress | Fail | 0 ms | 0 | Performance Mode button click was blocked by an open modal overlay. |
+| Repeated preset switching | Fail | 0 ms | 0 | Locator failed after prior stress state. |
+| Repeated project load/unload | Fail | 0 ms | 0 | Scenario did not complete full acceptance. |
+| Sample import small/large | Pass with blocker | 1,338 ms | 0 | Main-thread import/waveform work still blocks. |
+| Save/load/autosave | Fail | 191 ms | 0 | Locator failure after modal state. |
+| JSON export/import | Fail | 0 ms | 0 | Locator failure after modal state. |
+| WAV export default/demo | Fail | 0 ms | 0 | Locator failure after modal state. |
+| Service worker cache update | Pass | 0 ms | 0 | Windows rebuild harness path now works. |
+
+### Release Safety
+
+Not release-safe.
+
+Default AudioWorklet node creation is now verified as zero, but the short
+profile still fails multiple stress scenarios and captures multi-second
+long tasks. The 10-minute playback acceptance test was not run.

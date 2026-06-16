@@ -55,6 +55,7 @@ import {
   getFirstPlayFlags,
   isFirstPlayTraceEnabled,
 } from "../performance/firstPlayTrace";
+import { trackToneCreate, trackToneDispose } from "../performance/audioNodeTrace";
 
 const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 const AUDIO_START_TIMEOUT_MS = 5_000;
@@ -420,11 +421,13 @@ class AudioEngine {
       if (this.masterAnalyser) {
         try {
           this.masterAnalyser.dispose();
+          trackToneDispose("analyser", `master:${this.masterAnalyserSize}`);
         } catch {
           // ignore analyser disposal races
         }
       }
       const a = new Tone.Analyser("waveform", boundedSize);
+      trackToneCreate("analyser", `master:${boundedSize}`);
       // tap the post-master signal so the scope reflects what the user
       // actually hears (post FX, post limiter)
       this.masterChain.input.connect(a);
@@ -1921,11 +1924,13 @@ class AudioEngine {
     });
     const url = URL.createObjectURL(clip.blob);
     const player = new Tone.Player(url).connect(v.channel);
+    trackToneCreate("scheduledPlayer", track.id);
     player.autostart = false;
     // Phase 11: honour the reversed flag
     if (clip.reversed) player.reverse = true;
     this.activeAudioPlayers.add(player);
     const origDispose = player.dispose.bind(player);
+    let playerTraceActive = true;
     player.dispose = () => {
       this.activeAudioPlayers.delete(player);
       const resource = this.audioClipResources.get(player);
@@ -1936,6 +1941,10 @@ class AudioEngine {
         } catch {
           // ignore
         }
+      }
+      if (playerTraceActive) {
+        playerTraceActive = false;
+        trackToneDispose("scheduledPlayer", track.id);
       }
       return origDispose();
     };
@@ -2068,11 +2077,13 @@ class AudioEngine {
     if (!v.hpf) {
       firstPlayMark("effect-node:create", { kind: "hpf" });
       v.hpf = new Tone.Filter({ frequency: 20, type: "highpass", rolloff: -24 });
+      trackToneCreate("effectModule", "hpf");
       changed = true;
     }
     if (!v.eq3) {
       firstPlayMark("effect-node:create", { kind: "eq3" });
       v.eq3 = new Tone.EQ3({ low: 0, mid: 0, high: 0, lowFrequency: 200, highFrequency: 3200 });
+      trackToneCreate("effectModule", "eq3");
       changed = true;
     }
     if (changed) this.rewireTrackFxChain(v);
@@ -2082,6 +2093,7 @@ class AudioEngine {
     if (v.drive) return;
     firstPlayMark("effect-node:create", { kind: "drive" });
     v.drive = new Tone.Distortion({ distortion: 0, wet: 0 });
+    trackToneCreate("effectModule", "drive");
     this.rewireTrackFxChain(v);
   }
 
@@ -2089,6 +2101,7 @@ class AudioEngine {
     if (v.chorus) return;
     firstPlayMark("effect-node:create", { kind: "chorus" });
     v.chorus = new Tone.Chorus({ frequency: 1.2, depth: 0.4, wet: 0 }).start();
+    trackToneCreate("effectModule", "chorus");
     this.rewireTrackFxChain(v);
   }
 
@@ -2096,6 +2109,7 @@ class AudioEngine {
     if (v.comp) return;
     firstPlayMark("effect-node:create", { kind: "compressor" });
     v.comp = new Tone.Compressor({ threshold: 0, ratio: 1, attack: 0.01, release: 0.18, knee: 8 });
+    trackToneCreate("effectModule", "compressor");
     this.rewireTrackFxChain(v);
   }
 
@@ -2103,6 +2117,7 @@ class AudioEngine {
     if (v.bitcrusher) return;
     firstPlayMark("effect-node:create", { kind: "bitcrusher" });
     v.bitcrusher = new Tone.BitCrusher(16);
+    trackToneCreate("effectModule", "bitcrusher");
     this.rewireTrackFxChain(v);
   }
 
@@ -2110,6 +2125,7 @@ class AudioEngine {
     if (v.widener) return;
     firstPlayMark("effect-node:create", { kind: "widener" });
     v.widener = new Tone.StereoWidener({ width: 0.5 });
+    trackToneCreate("effectModule", "widener");
     this.rewireTrackFxChain(v);
   }
 
@@ -2123,6 +2139,7 @@ class AudioEngine {
       presetId: track.presetId,
     });
     const untrackVoice = trackAudioResource("track-voice");
+    trackToneCreate("trackVoice", `${track.kind}:${track.id}`);
     firstPlayMark("audio-node:create", { kind: "channel", trackId: track.id });
     const channel = new Tone.Channel({ volume: 0 });
     // Freeverb is an algorithmic reverb (Schroeder/Moorer) — instantaneous
@@ -2194,20 +2211,42 @@ class AudioEngine {
           voice.mic.dispose();
         }
         filter.dispose();
-        voice.drive?.dispose();
-        voice.chorus?.dispose();
-        voice.widener?.dispose();
+        if (voice.drive) {
+          voice.drive.dispose();
+          trackToneDispose("effectModule", "drive");
+        }
+        if (voice.chorus) {
+          voice.chorus.dispose();
+          trackToneDispose("effectModule", "chorus");
+        }
+        if (voice.widener) {
+          voice.widener.dispose();
+          trackToneDispose("effectModule", "widener");
+        }
         delay.dispose();
         reverb.dispose();
-        voice.hpf?.dispose();
-        voice.eq3?.dispose();
-        voice.comp?.dispose();
-        voice.bitcrusher?.dispose();
+        if (voice.hpf) {
+          voice.hpf.dispose();
+          trackToneDispose("effectModule", "hpf");
+        }
+        if (voice.eq3) {
+          voice.eq3.dispose();
+          trackToneDispose("effectModule", "eq3");
+        }
+        if (voice.comp) {
+          voice.comp.dispose();
+          trackToneDispose("effectModule", "compressor");
+        }
+        if (voice.bitcrusher) {
+          voice.bitcrusher.dispose();
+          trackToneDispose("effectModule", "bitcrusher");
+        }
         for (const g of sends.values()) {
           try { g.dispose(); } catch { /* ignore */ }
         }
         meter.dispose();
         channel.dispose();
+        trackToneDispose("trackVoice", `${track.kind}:${track.id}`);
         untrackVoice();
       },
     };

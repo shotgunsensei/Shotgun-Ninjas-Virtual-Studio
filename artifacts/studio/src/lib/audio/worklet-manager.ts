@@ -13,6 +13,8 @@
  *   sn-saturation      — SaturationProcessor (asymmetric, optional 2× oversampling)
  */
 
+import { recordAudioWorkletViolation } from "../performance/audioNodeTrace";
+
 const PROCESSOR_CODE = /* js */ `
 // ─────────────────────────────────────────────────────── MetronomeProcessor ──
 class MetronomeProcessor extends AudioWorkletProcessor {
@@ -268,6 +270,7 @@ registerProcessor('sn-saturation', SaturationProcessor);
 `;
 
 type WorkletNodeKind = 'metronome' | 'sample-player' | 'soft-clipper' | 'limiter' | 'saturation';
+const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 
 const PROCESSOR_NAMES: Record<WorkletNodeKind, string> = {
   'metronome':     'sn-metronome',
@@ -414,6 +417,11 @@ class WorkletManager {
    * Safe to call multiple times — idempotent once registered.
    */
   async register(context: AudioContext): Promise<boolean> {
+    if (!AUDIO_WORKLETS_ENABLED) {
+      recordAudioWorkletViolation("AudioWorklet register attempted without VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1");
+      this.markUnavailable("AudioWorklet path disabled by default; set VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1 for profiling.");
+      return false;
+    }
     if (this._fallback) return false;
     if (!this.supported) {
       this.markUnavailable("AudioWorkletNode is not supported");
@@ -455,6 +463,11 @@ class WorkletManager {
 
   /** Create a typed AudioWorkletNode or null if not registered. */
   createNode(kind: WorkletNodeKind, context: AudioContext, options?: AudioWorkletNodeOptions): AudioWorkletNode | null {
+    if (!AUDIO_WORKLETS_ENABLED) {
+      recordAudioWorkletViolation("AudioWorkletNode creation attempted without VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1", { kind });
+      this.markUnavailable("AudioWorklet path disabled by default; set VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1 for profiling.");
+      return null;
+    }
     if (!this._registered || this._fallback) return null;
     try {
       const nativeContext = resolveNativeContext(context);
@@ -509,6 +522,10 @@ class WorkletManager {
    * ping/pong round-trip timing). Call once after registration succeeds.
    */
   startCpuProbe(context: AudioContext): void {
+    if (!AUDIO_WORKLETS_ENABLED) {
+      recordAudioWorkletViolation("AudioWorklet CPU probe attempted without VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1");
+      return;
+    }
     if (!this._registered || this._probeNode) return;
     try {
       const node = new AudioWorkletNode(context, 'sn-metronome');

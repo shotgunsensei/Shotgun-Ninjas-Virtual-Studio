@@ -96,6 +96,7 @@ async function browserMetrics(page, cdp) {
     firstPlayTrace: window.__SN_FIRST_PLAY_TRACE__?.dump?.() ?? [],
     firstPlayFlags: window.__SN_FIRST_PLAY_TRACE__?.flags?.() ?? null,
     listenerTrace: window.__SN_LISTENER_TRACE__?.snapshot?.() ?? null,
+    audioNodeTrace: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
   }));
   return {
     jsHeapUsedMB: Number(((metric.JSHeapUsedSize ?? 0) / 1024 / 1024).toFixed(2)),
@@ -156,9 +157,15 @@ function emptyMetrics(error) {
       controllerChanges: 0,
       firstPlayTrace: [],
       firstPlayFlags: null,
+      listenerTrace: null,
+      audioNodeTrace: null,
       metricsError: error?.message || String(error),
     },
   };
+}
+
+function audioNodeDelta(before, after, field) {
+  return (after.dom.audioNodeTrace?.[field] ?? 0) - (before.dom.audioNodeTrace?.[field] ?? 0);
 }
 
 async function scenario(name, page, cdp, fn) {
@@ -222,6 +229,13 @@ async function scenario(name, page, cdp, fn) {
     traceActiveTotal:
       (after.dom.listenerTrace?.activeTotal ?? 0) -
       (before.dom.listenerTrace?.activeTotal ?? 0),
+    audioWorkletNodes: audioNodeDelta(before, after, "activeAudioWorkletNodes"),
+    audioConstantSourceNodes: audioNodeDelta(before, after, "activeConstantSourceNodes"),
+    audioSourceNodes: audioNodeDelta(before, after, "activeSourceNodes"),
+    audioAnalyzers: audioNodeDelta(before, after, "activeAnalyzers"),
+    audioTrackVoices: audioNodeDelta(before, after, "activeTrackVoices"),
+    audioScheduledPlayers: audioNodeDelta(before, after, "activeScheduledPlayers"),
+    audioTransportEvents: audioNodeDelta(before, after, "activeTransportEvents"),
     taskDurationSec: Number((after.taskDurationSec - before.taskDurationSec).toFixed(3)),
   };
   result.longTasks = summarizeLongTasks(before, after);
@@ -257,10 +271,22 @@ async function captureListenerTrace(page, result, label) {
   return snapshot;
 }
 
+async function captureAudioNodeTrace(page, result, label) {
+  const snapshot = await page.evaluate((snapLabel) => ({
+    label: snapLabel,
+    at: Math.round(performance.now()),
+    snapshot: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
+    topStacks: window.__SN_AUDIO_NODE_TRACE__?.dumpTopStacks?.(10) ?? [],
+  }), label);
+  result.notes.push({ audioNodeTrace: snapshot });
+  return snapshot;
+}
+
 async function openStudio(page, query = "") {
   await page.goto(`${BASE_URL}/studio${query}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("header", { timeout: 30_000 });
   await page.evaluate(() => window.__SN_LISTENER_TRACE__?.start?.()).catch(() => undefined);
+  await page.evaluate(() => window.__SN_AUDIO_NODE_TRACE__?.start?.()).catch(() => undefined);
 }
 
 async function firstPlayProbe(page, result) {
@@ -516,21 +542,27 @@ async function main() {
   results.push(await scenario("cold-load", page, cdp, async () => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("body", { timeout: 15_000 });
-    await openStudio(page, "?snListenerTrace=1");
+    await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1");
   }));
   writeSummary();
 
   results.push(await scenario("audio-startup-panic-replay", page, cdp, async (r) => {
+    await captureAudioNodeTrace(page, r, "audio-startup:before-enable");
     await enableAudio(page);
+    await captureAudioNodeTrace(page, r, "audio-startup:after-enable");
     await playPauseStopPanic(page);
+    await captureAudioNodeTrace(page, r, "audio-startup:after-panic-replay");
     r.notes.push("Headless Chromium can verify transport UI and post-panic replay state, not actual speaker audibility.");
   }));
   writeSummary();
 
   results.push(await scenario("load-trap-and-10-minute-playback-mixer-scope", page, cdp, async (r) => {
+    await captureAudioNodeTrace(page, r, "trap-starter:before-load");
     await loadDemo(page, "trap-starter");
+    await captureAudioNodeTrace(page, r, "trap-starter:after-load");
     await enableAudio(page);
     await page.getByRole("button", { name: /^play$/i }).click();
+    await captureAudioNodeTrace(page, r, "trap-starter:after-play");
     await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
     const checkpoints = Math.max(1, Math.floor(PLAYBACK_MINUTES * 2));
@@ -543,6 +575,14 @@ async function main() {
         nodes: snap.nodes,
         listeners: snap.jsEventListeners,
         longTasks: snap.dom.longTasks.length,
+        audioNodeTrace: snap.dom.audioNodeTrace
+          ? {
+              activeTrackVoices: snap.dom.audioNodeTrace.activeTrackVoices,
+              activeScheduledPlayers: snap.dom.audioNodeTrace.activeScheduledPlayers,
+              activeTransportEvents: snap.dom.audioNodeTrace.activeTransportEvents,
+              activeAudioWorkletNodes: snap.dom.audioNodeTrace.activeAudioWorkletNodes,
+            }
+          : null,
       });
     }
   }));
@@ -550,22 +590,28 @@ async function main() {
 
   results.push(await scenario("mixer-stress", page, cdp, async (r) => {
     await captureListenerTrace(page, r, "mixer:before-stress");
+    await captureAudioNodeTrace(page, r, "mixer:before-stress");
     await toggleMixer(page, 20, r);
     await toggleMuteSolo(page, 20);
     await captureListenerTrace(page, r, "mixer:after-mute-solo");
+    await captureAudioNodeTrace(page, r, "mixer:after-mute-solo");
     await clickMaybe(page, page.getByRole("button", { name: /hide mixer/i }), 1_000);
     await page.waitForTimeout(5_000);
     await captureListenerTrace(page, r, "mixer:after-close-idle");
+    await captureAudioNodeTrace(page, r, "mixer:after-close-idle");
   }));
   writeSummary();
 
   results.push(await scenario("visualizer-performance-mode-stress", page, cdp, async (r) => {
     await captureListenerTrace(page, r, "visualizer:before-stress");
+    await captureAudioNodeTrace(page, r, "visualizer:before-stress");
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
     await captureListenerTrace(page, r, "visualizer:after-open");
+    await captureAudioNodeTrace(page, r, "visualizer:after-open");
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
     await page.waitForTimeout(1_000);
     await captureListenerTrace(page, r, "visualizer:after-close");
+    await captureAudioNodeTrace(page, r, "visualizer:after-close");
     await page.getByRole("button", { name: /toggle performance mode/i }).click();
     await page.waitForTimeout(1_000);
     await captureListenerTrace(page, r, "visualizer:perf-on");
@@ -575,8 +621,10 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("repeated-preset-switching", page, cdp, async () => {
+  results.push(await scenario("repeated-preset-switching", page, cdp, async (r) => {
+    await captureAudioNodeTrace(page, r, "preset-switch:before");
     await switchPresets(page, 20);
+    await captureAudioNodeTrace(page, r, "preset-switch:after");
   }));
   writeSummary();
 
@@ -586,11 +634,13 @@ async function main() {
       await loadDemo(page, ids[i % ids.length]);
       if ([0, 4, 9, 19].includes(i)) {
         await captureListenerTrace(page, r, `project-load:after-${i + 1}`);
+        await captureAudioNodeTrace(page, r, `project-load:after-${i + 1}`);
       }
       await page.waitForTimeout(200);
     }
     await page.waitForTimeout(5_000);
     await captureListenerTrace(page, r, "project-load:after-idle");
+    await captureAudioNodeTrace(page, r, "project-load:after-idle");
   }));
   writeSummary();
 
@@ -659,6 +709,10 @@ async function main() {
     traceActiveDelta: r.delta?.traceActiveTotal ?? null,
     visualTickerDelta: r.delta?.visualTickerSubscribers ?? null,
     transportEventsDelta: r.delta?.transportEvents ?? null,
+    audioWorkletNodesDelta: r.delta?.audioWorkletNodes ?? null,
+    activeTrackVoicesDelta: r.delta?.audioTrackVoices ?? null,
+    scheduledPlayersDelta: r.delta?.audioScheduledPlayers ?? null,
+    audioTransportDelta: r.delta?.audioTransportEvents ?? null,
   })));
   console.log(OUT_PATH);
 

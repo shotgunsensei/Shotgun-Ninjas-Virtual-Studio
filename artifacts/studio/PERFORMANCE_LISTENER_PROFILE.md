@@ -124,3 +124,36 @@ Confirmed safe changes in this pass:
   startup.
 - AudioWorkletNode error/processorerror listener counts continue to appear and
   should be traced to the exact library path before patching.
+
+---
+
+## 2026-06-16 Audio Node Trace Follow-Up
+
+Latest traced profile:
+
+- `runtime-profile/runtime-profile-1781620678141.json`
+
+The new `audioNodeTrace` pass confirms the high listener pressure is not caused
+by default app AudioWorklet use:
+
+- `activeAudioWorkletNodes`: `0` in audio startup, Trap Starter, mixer stress,
+  and every profile scenario delta.
+- Worklet manager now blocks `register`, `createNode`, and CPU probe paths
+  unless `VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1`.
+
+The remaining high listener/node churn is concentrated in Tone internal source
+creation:
+
+- After audio startup / panic / replay: top trace includes
+  `node-connect:ConstantSourceNode=1006`.
+- After Trap Starter play: top trace includes
+  `node-connect:ConstantSourceNode=1996`,
+  `node-create:GainNode=1879`, and `node-create:GainNode=1858`.
+- The profiler also sees matching `ConstantSourceNode:ended` listener removals,
+  `ConstantSourceNode.stop`, and disconnect calls, so this is high churn with
+  partial cleanup rather than a confirmed app-owned listener leak.
+
+Remaining listener risk: Tone/standardized-audio-context still creates a large
+number of ConstantSourceNode/GainNode objects during playback and graph
+construction. The next patch should reduce app-triggered Tone voice/source
+creation rather than patch mixer listeners.

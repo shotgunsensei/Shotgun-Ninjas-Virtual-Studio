@@ -2,6 +2,10 @@ import {
   trackListenerTransportEvent,
   untrackListenerTransportEvent,
 } from "../lib/performance/listenerTrace";
+import {
+  trackAudioTraceTransportEvent,
+  untrackAudioTraceTransportEvent,
+} from "../lib/performance/audioNodeTrace";
 
 type CounterName =
   | "activeRafLoops"
@@ -152,6 +156,7 @@ export function trackInterval(label: string): () => void {
 
 export function trackTransportEvent(id: number, label: string): number {
   trackListenerTransportEvent(id, label);
+  trackAudioTraceTransportEvent(id, label);
   if (!DEV) return id;
   if (!activeTransportEvents.has(id)) {
     activeTransportEvents.add(id);
@@ -163,6 +168,7 @@ export function trackTransportEvent(id: number, label: string): number {
 
 export function untrackTransportEvent(id: number, label?: string): void {
   untrackListenerTransportEvent(id);
+  untrackAudioTraceTransportEvent(id, label);
   if (!DEV) return;
   if (activeTransportEvents.delete(id)) {
     counters.activeToneTransportEventIds = activeTransportEvents.size;

@@ -955,6 +955,86 @@ Date: 2026-06-14
 
 Not release-safe.
 
+---
+
+## 2026-06-16 Web Audio / Tone Node Lifecycle Profiling
+
+### Root Causes Confirmed
+
+- Default app AudioWorklet creation is now confirmed zero in the traced
+  production runtime profile.
+- The worklet path now has a hard guard inside `WorkletManager`, so a direct
+  call to `register`, `createNode`, or `startCpuProbe` cannot create blob URLs,
+  worklet modules, or AudioWorkletNodes unless
+  `VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1`.
+- Chrome listener growth is still present, but the new trace attributes the hot
+  path to Tone/standardized-audio-context ConstantSourceNode/GainNode churn,
+  not mixer React listeners.
+- Trap Starter and audio startup remain blocked by multi-second main-thread
+  work. The latest traced profile shows a `7,417 ms` Trap Starter long task and
+  a `2,542 ms` audio startup/panic/replay long task.
+
+### Fixes Applied
+
+- Added `src/lib/performance/audioNodeTrace.ts`.
+- Exposed `window.__SN_AUDIO_NODE_TRACE__` with `snapshot()`,
+  `dumpTopStacks()`, `clear()`, `start()`, and `stop()`.
+- Gated audio-node tracing behind `?snAudioNodeTrace=1` or
+  `localStorage["sn:audioNodeTrace"] = "1"`.
+- Traced Web Audio node creation, connect/disconnect, scheduled source
+  start/stop, audio-node listeners, MessagePort messages, worklet module adds,
+  and AudioWorkletNode construction.
+- Added Tone ownership counters for app-owned track voices, scheduled players,
+  effect modules, master analysers, and Transport events.
+- Added audio-node snapshots and deltas to `scripts/runtime-profile.mjs`.
+- Added defensive AudioWorklet default-disabled guards to
+  `src/lib/audio/worklet-manager.ts`.
+- Created `PERFORMANCE_AUDIO_NODE_PROFILE.md`.
+- Updated listener, demo-load, runtime, and fixes docs with the new evidence.
+
+### Verification
+
+| Command / profile | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Build completed with existing sourcemap/import-overlap/large chunk warnings. |
+| First-play matrix in production preview | Pass | All seven scenarios passed. Artifact: `runtime-profile/runtime-profile-1781620541263.json`. |
+| Short production runtime profile | Fail overall | AudioWorklet deltas stayed zero, but visualizer/preset/project/load/export scenarios still failed and long tasks remain. Artifact: `runtime-profile/runtime-profile-1781620678141.json`. |
+| `corepack pnpm run test --reporter=line --workers=1` | Timeout | Four Playwright tests started but the process did not exit before 600 s. |
+| `.\\node_modules\\.bin\\playwright.cmd test --reporter=line --workers=1` | Timeout | Same timeout after enumerating four tests. |
+
+### Before / After Observations
+
+- Before this pass, AudioWorkletNode listener counts were suspected but not
+  separated from Tone/Web Audio internals.
+- After this pass, default AudioWorkletNode creation is measured as zero across
+  the short profile.
+- ConstantSourceNode/GainNode churn is confirmed as the next audio lifecycle
+  hotspot:
+  - audio startup after panic/replay top stack:
+    `node-connect:ConstantSourceNode=1006`
+  - Trap Starter after play top stack:
+    `node-connect:ConstantSourceNode=1996`
+- Mixer stress remains bounded in app-owned tracing but still raises Chrome
+  `JSEventListeners`, which now appears tied to Web Audio/Tone rather than
+  mixer UI ownership.
+
+### Remaining Risks
+
+- Trap Starter largest long task is still above target at `7,417 ms`.
+- Audio startup/panic/replay largest long task is still above target at
+  `2,542 ms`.
+- Sample import still has a `1,338 ms` long task.
+- Visualizer, repeated preset/project load, save/load, JSON, and WAV scenarios
+  still fail in the short profile.
+- Playwright tests did not complete within 600 s in this environment.
+- 10-minute playback acceptance was not run because the short profile still
+  fails.
+
+### Release Safety
+
+Not release-safe.
+
 The exact next blocking issue is to isolate the synchronous work or audio
 subsystem wait triggered by the first Play click after audio unlock. The next
 patch should add marks around `AudioEngine.play()`, `Tone.Transport.start()`,

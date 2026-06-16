@@ -82,3 +82,36 @@ creation during demo load and post-load panel mounting.
   nodes or analyzer/worklet fallback objects.
 - 10-minute playback was not attempted because the short profile still fails
   later stress scenarios.
+
+---
+
+## 2026-06-16 Audio Node Trace Update
+
+Latest traced short profile:
+
+- `runtime-profile/runtime-profile-1781620678141.json`
+
+Trap Starter short playback still passed functionally but regressed on
+long-task duration in this instrumented run:
+
+- Largest long task: `7,417 ms`
+- Total long-task time: `12,061 ms`
+- `audioWorkletNodesDelta`: `0`
+- `activeTrackVoicesDelta`: `0` for the scenario because five voices already
+  existed from the previous audio startup scenario
+- `audioTransportDelta`: `-1`
+
+Audio-node trace checkpoints:
+
+- `trap-starter:before-load`: `activeTrackVoices=5`,
+  `activeAudioWorkletNodes=0`
+- `trap-starter:after-load`: `activeTrackVoices=5`,
+  `activeAudioWorkletNodes=0`
+- `trap-starter:after-play`: `activeTrackVoices=5`,
+  `activeAudioWorkletNodes=0`, top stack
+  `node-connect:ConstantSourceNode=1996`
+
+Conclusion: the Trap Starter blocker is not default AudioWorklet creation. The
+remaining blocker is Tone/Web Audio source and gain churn during playback and
+schedule preparation, with ConstantSourceNode/GainNode creation dominating the
+captured stacks.
