@@ -13,6 +13,7 @@ import type {
   NoteEvent,
   Project,
 } from "../types";
+import { startPerfTimer } from "../utils/performanceDiagnostics";
 
 /**
  * Built-in demo project library. Each demo is built on the fly from
@@ -984,21 +985,43 @@ export function findDemo(id: string): DemoDefinition | undefined {
  * their copy.
  */
 export function loadDemo(id: string): boolean {
+  const endLoadDemo = startPerfTimer("demo.load", { id });
   const def = findDemo(id);
-  if (!def) return false;
-  const project = def.build();
-  audio.stop();
-  resetStore(project);
-  const store = getStore();
-  store.set({
-    isTransientProject: true,
-    selectedTrackId: project.tracks[0]?.id ?? "",
-    selectedClipId: null,
-    showHelp: false,
-    showOnboarding: false,
-  });
-  store.setStatus(`Loaded demo: ${def.name}`, "info");
-  return true;
+  if (!def) {
+    endLoadDemo();
+    return false;
+  }
+  try {
+    const endBuild = startPerfTimer("demo.build", { id });
+    const project = def.build();
+    endBuild();
+
+    const endStop = startPerfTimer("demo.audio-stop", { id });
+    audio.stop();
+    endStop();
+
+    const endReset = startPerfTimer("demo.reset-store", {
+      id,
+      tracks: project.tracks.length,
+    });
+    resetStore(project);
+    endReset();
+
+    const endStorePatch = startPerfTimer("demo.post-reset-store", { id });
+    const store = getStore();
+    store.set({
+      isTransientProject: true,
+      selectedTrackId: project.tracks[0]?.id ?? "",
+      selectedClipId: null,
+      showHelp: false,
+      showOnboarding: false,
+    });
+    store.setStatus(`Loaded demo: ${def.name}`, "info");
+    endStorePatch();
+    return true;
+  } finally {
+    endLoadDemo();
+  }
 }
 
 /**
@@ -1008,27 +1031,49 @@ export function loadDemo(id: string): boolean {
  * persists it to IndexedDB on the first change.
  */
 export function remixDemo(id: string): boolean {
+  const endRemixDemo = startPerfTimer("demo.remix", { id });
   const def = findDemo(id);
-  if (!def) return false;
-  const base = def.build();
-  const project: Project = {
-    ...base,
-    id: `remix-${def.id}-${makeId()}`,
-    name: `${def.name} (remix)`,
-    updatedAt: Date.now(),
-  };
-  audio.stop();
-  resetStore(project);
-  const store = getStore();
-  store.set({
-    isTransientProject: false,
-    selectedTrackId: project.tracks[0]?.id ?? "",
-    selectedClipId: null,
-    showHelp: false,
-    showOnboarding: false,
-  });
-  store.setStatus(`Remixed "${def.name}" — autosave is on`, "info");
-  return true;
+  if (!def) {
+    endRemixDemo();
+    return false;
+  }
+  try {
+    const endBuild = startPerfTimer("demo.remix-build", { id });
+    const base = def.build();
+    const project: Project = {
+      ...base,
+      id: `remix-${def.id}-${makeId()}`,
+      name: `${def.name} (remix)`,
+      updatedAt: Date.now(),
+    };
+    endBuild();
+
+    const endStop = startPerfTimer("demo.remix-audio-stop", { id });
+    audio.stop();
+    endStop();
+
+    const endReset = startPerfTimer("demo.remix-reset-store", {
+      id,
+      tracks: project.tracks.length,
+    });
+    resetStore(project);
+    endReset();
+
+    const endStorePatch = startPerfTimer("demo.remix-post-reset-store", { id });
+    const store = getStore();
+    store.set({
+      isTransientProject: false,
+      selectedTrackId: project.tracks[0]?.id ?? "",
+      selectedClipId: null,
+      showHelp: false,
+      showOnboarding: false,
+    });
+    store.setStatus(`Remixed "${def.name}" - autosave is on`, "info");
+    endStorePatch();
+    return true;
+  } finally {
+    endRemixDemo();
+  }
 }
 
 // Re-export defaultProject so callers that already import demos don't

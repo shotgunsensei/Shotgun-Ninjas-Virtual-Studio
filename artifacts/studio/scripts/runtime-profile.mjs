@@ -95,6 +95,7 @@ async function browserMetrics(page, cdp) {
     controllerChanges: window.__SN_RUNTIME_PROFILE__?.controllerChanges ?? 0,
     firstPlayTrace: window.__SN_FIRST_PLAY_TRACE__?.dump?.() ?? [],
     firstPlayFlags: window.__SN_FIRST_PLAY_TRACE__?.flags?.() ?? null,
+    listenerTrace: window.__SN_LISTENER_TRACE__?.snapshot?.() ?? null,
   }));
   return {
     jsHeapUsedMB: Number(((metric.JSHeapUsedSize ?? 0) / 1024 / 1024).toFixed(2)),
@@ -209,6 +210,18 @@ async function scenario(name, page, cdp, fn) {
       after.jsEventListeners != null && before.jsEventListeners != null
         ? after.jsEventListeners - before.jsEventListeners
         : null,
+    visualTickerSubscribers:
+      (after.dom.listenerTrace?.byLabel?.visualTicker ?? 0) -
+      (before.dom.listenerTrace?.byLabel?.visualTicker ?? 0),
+    storeSubscriptions:
+      (after.dom.listenerTrace?.byLabel?.["store.subscribe"] ?? 0) -
+      (before.dom.listenerTrace?.byLabel?.["store.subscribe"] ?? 0),
+    transportEvents:
+      (after.dom.listenerTrace?.activeTransportEvents ?? 0) -
+      (before.dom.listenerTrace?.activeTransportEvents ?? 0),
+    traceActiveTotal:
+      (after.dom.listenerTrace?.activeTotal ?? 0) -
+      (before.dom.listenerTrace?.activeTotal ?? 0),
     taskDurationSec: Number((after.taskDurationSec - before.taskDurationSec).toFixed(3)),
   };
   result.longTasks = summarizeLongTasks(before, after);
@@ -234,9 +247,20 @@ async function clickMaybe(page, locator, timeout = 2_000) {
   }
 }
 
+async function captureListenerTrace(page, result, label) {
+  const snapshot = await page.evaluate((snapLabel) => ({
+    label: snapLabel,
+    at: Math.round(performance.now()),
+    snapshot: window.__SN_LISTENER_TRACE__?.snapshot?.() ?? null,
+  }), label);
+  result.notes.push({ listenerTrace: snapshot });
+  return snapshot;
+}
+
 async function openStudio(page, query = "") {
   await page.goto(`${BASE_URL}/studio${query}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("header", { timeout: 30_000 });
+  await page.evaluate(() => window.__SN_LISTENER_TRACE__?.start?.()).catch(() => undefined);
 }
 
 async function firstPlayProbe(page, result) {
@@ -293,13 +317,18 @@ async function playPauseStopPanic(page) {
   await page.waitForTimeout(1_500);
 }
 
-async function toggleMixer(page, count) {
+async function toggleMixer(page, count, result) {
+  if (result) await captureListenerTrace(page, result, "mixer:before-cycles");
   for (let i = 0; i < count; i++) {
     const hidden = await clickMaybe(page, page.getByRole("button", { name: /hide mixer/i }), 1_000);
     if (!hidden) await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
+    if (result && [0, 4, 19].includes(i)) {
+      await captureListenerTrace(page, result, `mixer:after-toggle-${i + 1}`);
+    }
     await page.waitForTimeout(150);
   }
   await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
+  if (result) await captureListenerTrace(page, result, "mixer:after-open");
 }
 
 async function toggleMuteSolo(page, count) {
@@ -483,7 +512,7 @@ async function main() {
   results.push(await scenario("cold-load", page, cdp, async () => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("body", { timeout: 15_000 });
-    await openStudio(page);
+    await openStudio(page, "?snListenerTrace=1");
   }));
   writeSummary();
 
@@ -515,19 +544,30 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("mixer-stress", page, cdp, async () => {
-    await toggleMixer(page, 20);
+  results.push(await scenario("mixer-stress", page, cdp, async (r) => {
+    await captureListenerTrace(page, r, "mixer:before-stress");
+    await toggleMixer(page, 20, r);
     await toggleMuteSolo(page, 20);
+    await captureListenerTrace(page, r, "mixer:after-mute-solo");
+    await clickMaybe(page, page.getByRole("button", { name: /hide mixer/i }), 1_000);
+    await page.waitForTimeout(5_000);
+    await captureListenerTrace(page, r, "mixer:after-close-idle");
   }));
   writeSummary();
 
-  results.push(await scenario("visualizer-performance-mode-stress", page, cdp, async () => {
+  results.push(await scenario("visualizer-performance-mode-stress", page, cdp, async (r) => {
+    await captureListenerTrace(page, r, "visualizer:before-stress");
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
+    await captureListenerTrace(page, r, "visualizer:after-open");
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
+    await page.waitForTimeout(1_000);
+    await captureListenerTrace(page, r, "visualizer:after-close");
     await page.getByRole("button", { name: /toggle performance mode/i }).click();
     await page.waitForTimeout(1_000);
+    await captureListenerTrace(page, r, "visualizer:perf-on");
     await page.getByRole("button", { name: /toggle performance mode/i }).click();
     await page.waitForTimeout(1_000);
+    await captureListenerTrace(page, r, "visualizer:perf-off");
   }));
   writeSummary();
 
@@ -536,12 +576,17 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("repeated-project-load-unload", page, cdp, async () => {
+  results.push(await scenario("repeated-project-load-unload", page, cdp, async (r) => {
     const ids = ["trap-starter", "boom-bap-dojo", "cyber-ninja", "lofi-smoke-loop"];
     for (let i = 0; i < 20; i++) {
       await loadDemo(page, ids[i % ids.length]);
+      if ([0, 4, 9, 19].includes(i)) {
+        await captureListenerTrace(page, r, `project-load:after-${i + 1}`);
+      }
       await page.waitForTimeout(200);
     }
+    await page.waitForTimeout(5_000);
+    await captureListenerTrace(page, r, "project-load:after-idle");
   }));
   writeSummary();
 
@@ -598,6 +643,19 @@ async function main() {
     scenarios: results,
   };
   writeFileSync(OUT_PATH, JSON.stringify(summary, null, 2));
+  console.table(results.map((r) => ({
+    scenario: r.name,
+    status: r.status,
+    durationMs: r.durationMs,
+    largestLongTaskMs: r.longTasks?.maxMs ?? 0,
+    totalLongTaskMs: r.longTasks?.totalMs ?? 0,
+    heapDeltaMB: r.delta?.jsHeapUsedMB ?? null,
+    domNodesDelta: r.delta?.nodes ?? null,
+    jsListenersDelta: r.delta?.jsEventListeners ?? null,
+    traceActiveDelta: r.delta?.traceActiveTotal ?? null,
+    visualTickerDelta: r.delta?.visualTickerSubscribers ?? null,
+    transportEventsDelta: r.delta?.transportEvents ?? null,
+  })));
   console.log(OUT_PATH);
 
   await browser.close();

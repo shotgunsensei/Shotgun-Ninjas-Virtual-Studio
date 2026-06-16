@@ -1,3 +1,4 @@
+import "./lib/performance/listenerTrace";
 import { createRoot } from "react-dom/client";
 import { Suspense } from "react";
 import { Router } from "wouter";
@@ -6,6 +7,7 @@ import "./index.css";
 import { disposePwaRuntime, initPwa } from "./lib/pwa";
 import { perfMark } from "./utils/performanceDiagnostics";
 import { installFirstPlayTrace, uninstallFirstPlayTrace } from "./lib/performance/firstPlayTrace";
+import { uninstallListenerTrace } from "./lib/performance/listenerTrace";
 
 perfMark("app-startup:main-entry");
 installFirstPlayTrace();
@@ -32,6 +34,7 @@ createRoot(document.getElementById("root")!).render(
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     disposePwaRuntime();
+    uninstallListenerTrace();
     uninstallFirstPlayTrace();
     void import("./lib/audio/engine").then(({ audio }) => audio.dispose());
   });

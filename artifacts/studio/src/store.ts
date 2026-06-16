@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { audio } from "./lib/audio/engine";
 import { firstPlayMark, getFirstPlayFlags } from "./lib/performance/firstPlayTrace";
+import { trackListenerSubscription } from "./lib/performance/listenerTrace";
+import { startPerfTimer } from "./utils/performanceDiagnostics";
 import { DEFAULT_MASTER_BUS } from "./lib/audio/master";
 import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
 import { wireTrackAutomationTargets } from "./lib/plugins/automation";
@@ -200,7 +202,11 @@ class Store {
 
   subscribe = (fn: Listener) => {
     this.listeners.add(fn);
+    const untrack = trackListenerSubscription("store.subscribe", {
+      listeners: this.listeners.size,
+    });
     return () => {
+      untrack();
       this.listeners.delete(fn);
     };
   };
@@ -1192,47 +1198,59 @@ export function getStore(initial?: Project) {
 }
 
 export function resetStore(project: Project) {
+  const endResetStore = startPerfTimer("project.resetStore", {
+    tracks: project.tracks.length,
+    name: project.name,
+  });
   audio.cancelAllProjectSchedules();
-  if (storeInstance) {
-    // Mutate the existing instance so React subscriptions (bound to the
-    // current Store via `useSyncExternalStore`) keep working. This is
-    // important for in-place project swaps like `loadDemo` that don't
-    // trigger a full page reload.
-    const fresh = new Store(project).state;
-    // Seed chopLab runtime state from the project's persisted chopLab field
-    // so markers, slice settings, and sample name are available immediately.
-    if (project.chopLab) {
-      fresh.chopLab = {
-        ...fresh.chopLab,
-        markers: project.chopLab.markers,
-        sliceSettings: project.chopLab.sliceSettings,
-        sensitivity: project.chopLab.sensitivity,
-        sampleName: project.chopLab.sampleName,
-        sampleBlobKey: project.chopLab.sampleBlobKey,
-        sampleBlob: project.chopLab.sampleBlob,
-      };
+  try {
+    const endStoreReplace = startPerfTimer("project.resetStore:replace", {
+      tracks: project.tracks.length,
+    });
+    if (storeInstance) {
+      // Mutate the existing instance so React subscriptions (bound to the
+      // current Store via `useSyncExternalStore`) keep working. This is
+      // important for in-place project swaps like `loadDemo` that don't
+      // trigger a full page reload.
+      const fresh = new Store(project).state;
+      // Seed chopLab runtime state from the project's persisted chopLab field
+      // so markers, slice settings, and sample name are available immediately.
+      if (project.chopLab) {
+        fresh.chopLab = {
+          ...fresh.chopLab,
+          markers: project.chopLab.markers,
+          sliceSettings: project.chopLab.sliceSettings,
+          sensitivity: project.chopLab.sensitivity,
+          sampleName: project.chopLab.sampleName,
+          sampleBlobKey: project.chopLab.sampleBlobKey,
+          sampleBlob: project.chopLab.sampleBlob,
+        };
+      }
+      storeInstance.set(fresh);
+    } else {
+      storeInstance = new Store(project);
+      // Seed chopLab from project on first init too.
+      if (project.chopLab) {
+        storeInstance.state.chopLab = {
+          ...storeInstance.state.chopLab,
+          markers: project.chopLab.markers,
+          sliceSettings: project.chopLab.sliceSettings,
+          sensitivity: project.chopLab.sensitivity,
+          sampleName: project.chopLab.sampleName,
+          sampleBlobKey: project.chopLab.sampleBlobKey,
+          sampleBlob: project.chopLab.sampleBlob,
+        };
+      }
     }
-    storeInstance.set(fresh);
-  } else {
-    storeInstance = new Store(project);
-    // Seed chopLab from project on first init too.
-    if (project.chopLab) {
-      storeInstance.state.chopLab = {
-        ...storeInstance.state.chopLab,
-        markers: project.chopLab.markers,
-        sliceSettings: project.chopLab.sliceSettings,
-        sensitivity: project.chopLab.sensitivity,
-        sampleName: project.chopLab.sampleName,
-        sampleBlobKey: project.chopLab.sampleBlobKey,
-        sampleBlob: project.chopLab.sampleBlob,
-      };
-    }
+    endStoreReplace();
+    // Re-seed engine-level globals from the freshly loaded project so
+    // persisted humanization is active immediately, not on next user edit.
+    audio.setGlobalGroove(project.globalGroove);
+    flushMixToEngine(project);
+    flushAutomationToEngine(project);
+  } finally {
+    endResetStore();
   }
-  // Re-seed engine-level globals from the freshly loaded project so
-  // persisted humanization is active immediately, not on next user edit.
-  audio.setGlobalGroove(project.globalGroove);
-  flushMixToEngine(project);
-  flushAutomationToEngine(project);
 }
 
 /**
@@ -1241,6 +1259,9 @@ export function resetStore(project: Project) {
  * any saved automation data is active immediately on playback.
  */
 export function flushAutomationToEngine(project: Project) {
+  const endFlushAutomation = startPerfTimer("project.flushAutomationToEngine", {
+    tracks: project.tracks.length,
+  });
   for (const t of project.tracks) {
     if (t.automationLanes && t.automationLanes.length > 0) {
       audio.setTrackAutomation(t.id, t.automationLanes);
@@ -1250,6 +1271,7 @@ export function flushAutomationToEngine(project: Project) {
     project.modulationSources ?? [],
     project.modulationRoutings ?? [],
   );
+  endFlushAutomation();
 }
 
 /**
@@ -1258,39 +1280,52 @@ export function flushAutomationToEngine(project: Project) {
  * the audio state matches the data store on the next sound.
  */
 export function flushMixToEngine(project: Project) {
+  const endFlushMix = startPerfTimer("project.flushMixToEngine", {
+    tracks: project.tracks.length,
+  });
   firstPlayMark("flushMixToEngine:enter", {
     tracks: project.tracks.length,
   });
   if (getFirstPlayFlags().useMinimalAudioGraph) {
     firstPlayMark("flushMixToEngine:skipped-minimal-graph");
+    endFlushMix();
     return;
   }
-  if (project.masterBus) audio.setMasterBus(project.masterBus);
-  for (const t of project.tracks) {
-    if (t.eq) audio.setTrackEq(t.id, t.eq);
-    if (t.sends) {
-      for (const [busId, amount] of Object.entries(t.sends) as [
-        SendBusId,
-        number,
-      ][]) {
-        audio.setTrackSend(t.id, busId, amount);
+  try {
+    if (project.masterBus) audio.setMasterBus(project.masterBus);
+    for (const t of project.tracks) {
+      const endTrack = startPerfTimer("project.flushMixToEngine:track", {
+        trackId: t.id,
+        kind: t.kind,
+      });
+      if (t.eq) audio.setTrackEq(t.id, t.eq);
+      if (t.sends) {
+        for (const [busId, amount] of Object.entries(t.sends) as [
+          SendBusId,
+          number,
+        ][]) {
+          audio.setTrackSend(t.id, busId, amount);
+        }
       }
-    }
-    if (t.fxRack) {
-      for (const [moduleId, settings] of Object.entries(t.fxRack) as [
-        FxModuleId,
-        FxModuleSettings,
-      ][]) {
-        audio.setEffectModule(t.id, moduleId, settings);
+      if (t.fxRack) {
+        for (const [moduleId, settings] of Object.entries(t.fxRack) as [
+          FxModuleId,
+          FxModuleSettings,
+        ][]) {
+          audio.setEffectModule(t.id, moduleId, settings);
+        }
       }
+      // Wire automatable plugin parameters for this track so the automation
+      // system can address them via "{trackId}:{pluginId}:{parameterId}".
+      wireTrackAutomationTargets(
+        t.id,
+        (moduleId, patch) => audio.setEffectModule(t.id, moduleId, patch),
+        (params) => audio.setSoundParams(t.id, params),
+      );
+      endTrack();
     }
-    // Wire automatable plugin parameters for this track so the automation
-    // system can address them via "{trackId}:{pluginId}:{parameterId}".
-    wireTrackAutomationTargets(
-      t.id,
-      (moduleId, patch) => audio.setEffectModule(t.id, moduleId, patch),
-      (params) => audio.setSoundParams(t.id, params),
-    );
+  } finally {
+    endFlushMix();
   }
 }
 

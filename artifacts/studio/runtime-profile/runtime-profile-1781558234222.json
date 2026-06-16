@@ -1,0 +1,5162 @@
+{
+  "date": "2026-06-15T21:17:43.948Z",
+  "browser": "148.0.7778.96",
+  "productionPreviewUrl": "http://127.0.0.1:5173",
+  "playbackMinutes": 10,
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "[first-play-baseline] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "[first-play-no-project-schedules] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "[first-play-no-transport-callbacks] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "[first-play-no-graph-build-during-play] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "[first-play-minimal-audio-graph] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "[first-play-no-world-audio] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    },
+    {
+      "type": "error",
+      "text": "[first-play-no-analyzers] Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"
+    }
+  ],
+  "pageErrors": [],
+  "scenarios": [
+    {
+      "name": "first-play-baseline",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 769.1,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 170,
+                  "duration": 570,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 811.9,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 967.4,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 1121.1,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1126.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1243.2,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 819,
+                  "duration": 362,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1345.6,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 1282,
+                  "duration": 55,
+                  "currentPhase": "longtask",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1438.9,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1439.1,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1439.3,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1468,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1489.3,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1489.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 769.1,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 170,
+                  "duration": 570,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 811.9,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 967.4,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 1121.1,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1126.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1243.2,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 819,
+                  "duration": 362,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1345.6,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 1282,
+                  "duration": 55,
+                  "currentPhase": "longtask",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1438.9,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1439.1,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1439.3,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1468,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1489.3,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1489.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2520.8,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2521,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2521.1,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2521.2,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": false,
+                    "disableTransportCallbacks": false,
+                    "disableGraphBuildOnPlay": false,
+                    "useMinimalAudioGraph": false,
+                    "disableWorldAudio": false,
+                    "disableAnalyzers": false
+                  }
+                }
+              },
+              {
+                "t": 2521.3,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2521.9,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.5
+              },
+              {
+                "t": 2522,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.7
+              },
+              {
+                "t": 2522,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2522,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2522.4,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1.5
+              },
+              {
+                "t": 2540.8,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2541.1,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2585,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2588,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 4087,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 17.84,
+        "jsHeapTotalMB": 31.52,
+        "nodes": 3596,
+        "jsEventListeners": 3867,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.733,
+        "layoutCount": 56,
+        "recalcStyleCount": 143,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 58,
+              "duration": 108
+            },
+            {
+              "name": "self",
+              "startTime": 170,
+              "duration": 570
+            },
+            {
+              "name": "self",
+              "startTime": 819,
+              "duration": 362
+            },
+            {
+              "name": "unknown",
+              "startTime": 1282,
+              "duration": 55
+            }
+          ],
+          "controllerChanges": 1,
+          "firstPlayTrace": [
+            {
+              "t": 769.1,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 170,
+                "duration": 570,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 811.9,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 967.4,
+              "phase": "master-analyser:ensure",
+              "detail": {
+                "size": 256
+              }
+            },
+            {
+              "t": 1121.1,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1126.8,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1243.2,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 819,
+                "duration": 362,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1345.6,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 1282,
+                "duration": 55,
+                "currentPhase": "longtask",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1438.9,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1439.1,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1439.3,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.2
+            },
+            {
+              "t": 1468,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1489.3,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1489.6,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2520.8,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2521,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2521.1,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2521.2,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": false,
+                  "disableTransportCallbacks": false,
+                  "disableGraphBuildOnPlay": false,
+                  "useMinimalAudioGraph": false,
+                  "disableWorldAudio": false,
+                  "disableAnalyzers": false
+                }
+              }
+            },
+            {
+              "t": 2521.3,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2521.9,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.5
+            },
+            {
+              "t": 2522,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.7
+            },
+            {
+              "t": 2522,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2522,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2522.4,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1.5
+            },
+            {
+              "t": 2540.8,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2541.1,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2585,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2588,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": false,
+            "disableTransportCallbacks": false,
+            "disableGraphBuildOnPlay": false,
+            "useMinimalAudioGraph": false,
+            "disableWorldAudio": false,
+            "disableAnalyzers": false
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.33,
+        "nodes": 3588,
+        "jsEventListeners": 3867,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.733
+      },
+      "longTasks": {
+        "count": 4,
+        "maxMs": 570,
+        "totalMs": 1095,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 170,
+            "duration": 570
+          },
+          {
+            "name": "self",
+            "startTime": 819,
+            "duration": 362
+          },
+          {
+            "name": "unknown",
+            "startTime": 58,
+            "duration": 108
+          },
+          {
+            "name": "unknown",
+            "startTime": 1282,
+            "duration": 55
+          }
+        ]
+      }
+    },
+    {
+      "name": "first-play-no-project-schedules",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 609.7,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 165,
+                  "duration": 426,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 635.5,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 752,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 866.4,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 871.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 963.9,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 641,
+                  "duration": 279,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1158.7,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1158.9,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1159,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.1
+              },
+              {
+                "t": 1173.7,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1193.2,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1193.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 609.7,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 165,
+                  "duration": 426,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 635.5,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 752,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 866.4,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 871.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 963.9,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 641,
+                  "duration": 279,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1158.7,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1158.9,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1159,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.1
+              },
+              {
+                "t": 1173.7,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1193.2,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1193.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2240.9,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2241.2,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2241.2,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2241.5,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": true,
+                    "disableTransportCallbacks": false,
+                    "disableGraphBuildOnPlay": false,
+                    "useMinimalAudioGraph": false,
+                    "disableWorldAudio": false,
+                    "disableAnalyzers": false
+                  }
+                }
+              },
+              {
+                "t": 2241.5,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2241.9,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.4
+              },
+              {
+                "t": 2241.9,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.4
+              },
+              {
+                "t": 2241.9,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2242,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2242.3,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1.3
+              },
+              {
+                "t": 2259.1,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2259.3,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2273.2,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2276,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 3806,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 17.79,
+        "jsHeapTotalMB": 31.77,
+        "nodes": 3594,
+        "jsEventListeners": 3866,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.525,
+        "layoutCount": 54,
+        "recalcStyleCount": 136,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1&snDisableProjectSchedules=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 25,
+              "duration": 100
+            },
+            {
+              "name": "self",
+              "startTime": 165,
+              "duration": 426
+            },
+            {
+              "name": "self",
+              "startTime": 641,
+              "duration": 279
+            }
+          ],
+          "controllerChanges": 0,
+          "firstPlayTrace": [
+            {
+              "t": 609.7,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 165,
+                "duration": 426,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 635.5,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 752,
+              "phase": "master-analyser:ensure",
+              "detail": {
+                "size": 256
+              }
+            },
+            {
+              "t": 866.4,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 871.8,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 963.9,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 641,
+                "duration": 279,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1158.7,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1158.9,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1159,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.1
+            },
+            {
+              "t": 1173.7,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1193.2,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1193.4,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2240.9,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2241.2,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2241.2,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2241.5,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": true,
+                  "disableTransportCallbacks": false,
+                  "disableGraphBuildOnPlay": false,
+                  "useMinimalAudioGraph": false,
+                  "disableWorldAudio": false,
+                  "disableAnalyzers": false
+                }
+              }
+            },
+            {
+              "t": 2241.5,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2241.9,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.4
+            },
+            {
+              "t": 2241.9,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.4
+            },
+            {
+              "t": 2241.9,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2242,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2242.3,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1.3
+            },
+            {
+              "t": 2259.1,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2259.3,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2273.2,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2276,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": true,
+            "disableTransportCallbacks": false,
+            "disableGraphBuildOnPlay": false,
+            "useMinimalAudioGraph": false,
+            "disableWorldAudio": false,
+            "disableAnalyzers": false
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.28,
+        "nodes": 3586,
+        "jsEventListeners": 3866,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.525
+      },
+      "longTasks": {
+        "count": 3,
+        "maxMs": 426,
+        "totalMs": 805,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 165,
+            "duration": 426
+          },
+          {
+            "name": "self",
+            "startTime": 641,
+            "duration": 279
+          },
+          {
+            "name": "unknown",
+            "startTime": 25,
+            "duration": 100
+          }
+        ]
+      }
+    },
+    {
+      "name": "first-play-no-transport-callbacks",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 642.1,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 135,
+                  "duration": 451,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 668.2,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 783.9,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 880.4,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 886.5,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 983.4,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 672,
+                  "duration": 274,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1132.2,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1132.3,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1132.4,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.1
+              },
+              {
+                "t": 1144.5,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1162.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1162.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 642.1,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 135,
+                  "duration": 451,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 668.2,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 783.9,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 880.4,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 886.5,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 983.4,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 672,
+                  "duration": 274,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1132.2,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1132.3,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1132.4,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.1
+              },
+              {
+                "t": 1144.5,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1162.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1162.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2227.8,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2228.1,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2228.1,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2228.2,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": false,
+                    "disableTransportCallbacks": true,
+                    "disableGraphBuildOnPlay": false,
+                    "useMinimalAudioGraph": false,
+                    "disableWorldAudio": false,
+                    "disableAnalyzers": false
+                  }
+                }
+              },
+              {
+                "t": 2228.3,
+                "phase": "AudioEngine.play:automation-skipped"
+              },
+              {
+                "t": 2228.4,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2228.6,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 2228.6,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.3
+              },
+              {
+                "t": 2228.6,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2228.7,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2228.9,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1
+              },
+              {
+                "t": 2243.7,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2243.9,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2253.5,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2256.3,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 3779,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 18.02,
+        "jsHeapTotalMB": 31.52,
+        "nodes": 3598,
+        "jsEventListeners": 3866,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.484,
+        "layoutCount": 55,
+        "recalcStyleCount": 137,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1&snDisableTransportCallbacks=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 25,
+              "duration": 85
+            },
+            {
+              "name": "self",
+              "startTime": 135,
+              "duration": 451
+            },
+            {
+              "name": "self",
+              "startTime": 672,
+              "duration": 274
+            }
+          ],
+          "controllerChanges": 0,
+          "firstPlayTrace": [
+            {
+              "t": 642.1,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 135,
+                "duration": 451,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 668.2,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 783.9,
+              "phase": "master-analyser:ensure",
+              "detail": {
+                "size": 256
+              }
+            },
+            {
+              "t": 880.4,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 886.5,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 983.4,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 672,
+                "duration": 274,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1132.2,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1132.3,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1132.4,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.1
+            },
+            {
+              "t": 1144.5,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1162.4,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1162.6,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2227.8,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2228.1,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2228.1,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2228.2,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": false,
+                  "disableTransportCallbacks": true,
+                  "disableGraphBuildOnPlay": false,
+                  "useMinimalAudioGraph": false,
+                  "disableWorldAudio": false,
+                  "disableAnalyzers": false
+                }
+              }
+            },
+            {
+              "t": 2228.3,
+              "phase": "AudioEngine.play:automation-skipped"
+            },
+            {
+              "t": 2228.4,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2228.6,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.2
+            },
+            {
+              "t": 2228.6,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.3
+            },
+            {
+              "t": 2228.6,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2228.7,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2228.9,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1
+            },
+            {
+              "t": 2243.7,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2243.9,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2253.5,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2256.3,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": false,
+            "disableTransportCallbacks": true,
+            "disableGraphBuildOnPlay": false,
+            "useMinimalAudioGraph": false,
+            "disableWorldAudio": false,
+            "disableAnalyzers": false
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.51,
+        "nodes": 3590,
+        "jsEventListeners": 3866,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.484
+      },
+      "longTasks": {
+        "count": 3,
+        "maxMs": 451,
+        "totalMs": 810,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 135,
+            "duration": 451
+          },
+          {
+            "name": "self",
+            "startTime": 672,
+            "duration": 274
+          },
+          {
+            "name": "unknown",
+            "startTime": 25,
+            "duration": 85
+          }
+        ]
+      }
+    },
+    {
+      "name": "first-play-no-graph-build-during-play",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 696.3,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 160,
+                  "duration": 478,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 731.6,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 862.9,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 988.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 996.5,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1109,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 740,
+                  "duration": 325,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1260.5,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 1192,
+                  "duration": 60,
+                  "currentPhase": "longtask",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1317,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1317.1,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1317.3,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1340.4,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1369.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1369.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 696.3,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 160,
+                  "duration": 478,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 731.6,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 862.9,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 988.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 996.5,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1109,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 740,
+                  "duration": 325,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1260.5,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 1192,
+                  "duration": 60,
+                  "currentPhase": "longtask",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1317,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1317.1,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1317.3,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1340.4,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1369.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1369.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2496,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2496.3,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2496.4,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2496.6,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": false,
+                    "disableTransportCallbacks": false,
+                    "disableGraphBuildOnPlay": true,
+                    "useMinimalAudioGraph": false,
+                    "disableWorldAudio": false,
+                    "disableAnalyzers": false
+                  }
+                }
+              },
+              {
+                "t": 2496.7,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2497.1,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.4
+              },
+              {
+                "t": 2497.1,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.5
+              },
+              {
+                "t": 2497.3,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2497.3,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2497.5,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1.3
+              },
+              {
+                "t": 2518.1,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2518.3,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2530.1,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2533.1,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 4068,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 18.33,
+        "jsHeapTotalMB": 31.02,
+        "nodes": 3603,
+        "jsEventListeners": 3866,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.758,
+        "layoutCount": 62,
+        "recalcStyleCount": 130,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1&snDisableGraphBuildOnPlay=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 32,
+              "duration": 102
+            },
+            {
+              "name": "self",
+              "startTime": 160,
+              "duration": 478
+            },
+            {
+              "name": "self",
+              "startTime": 740,
+              "duration": 325
+            },
+            {
+              "name": "unknown",
+              "startTime": 1192,
+              "duration": 60
+            }
+          ],
+          "controllerChanges": 0,
+          "firstPlayTrace": [
+            {
+              "t": 696.3,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 160,
+                "duration": 478,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 731.6,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 862.9,
+              "phase": "master-analyser:ensure",
+              "detail": {
+                "size": 256
+              }
+            },
+            {
+              "t": 988.8,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 996.5,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1109,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 740,
+                "duration": 325,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1260.5,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 1192,
+                "duration": 60,
+                "currentPhase": "longtask",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1317,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1317.1,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1317.3,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.2
+            },
+            {
+              "t": 1340.4,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1369.4,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1369.6,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2496,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2496.3,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2496.4,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2496.6,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": false,
+                  "disableTransportCallbacks": false,
+                  "disableGraphBuildOnPlay": true,
+                  "useMinimalAudioGraph": false,
+                  "disableWorldAudio": false,
+                  "disableAnalyzers": false
+                }
+              }
+            },
+            {
+              "t": 2496.7,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2497.1,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.4
+            },
+            {
+              "t": 2497.1,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.5
+            },
+            {
+              "t": 2497.3,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2497.3,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2497.5,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1.3
+            },
+            {
+              "t": 2518.1,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2518.3,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2530.1,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2533.1,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": false,
+            "disableTransportCallbacks": false,
+            "disableGraphBuildOnPlay": true,
+            "useMinimalAudioGraph": false,
+            "disableWorldAudio": false,
+            "disableAnalyzers": false
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.82,
+        "nodes": 3595,
+        "jsEventListeners": 3866,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.758
+      },
+      "longTasks": {
+        "count": 4,
+        "maxMs": 478,
+        "totalMs": 965,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 160,
+            "duration": 478
+          },
+          {
+            "name": "self",
+            "startTime": 740,
+            "duration": 325
+          },
+          {
+            "name": "unknown",
+            "startTime": 32,
+            "duration": 102
+          },
+          {
+            "name": "unknown",
+            "startTime": 1192,
+            "duration": 60
+          }
+        ]
+      }
+    },
+    {
+      "name": "first-play-minimal-audio-graph",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 726.7,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 162,
+                  "duration": 512,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 755.8,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 755.8,
+                "phase": "flushMixToEngine:skipped-minimal-graph"
+              },
+              {
+                "t": 884.3,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 998,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1005.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1117.2,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 760,
+                  "duration": 311,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1258.4,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 1194,
+                  "duration": 55,
+                  "currentPhase": "longtask",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1419.2,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1419.3,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1419.5,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1451,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1480.5,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1480.8,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 726.7,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 162,
+                  "duration": 512,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 755.8,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 755.8,
+                "phase": "flushMixToEngine:skipped-minimal-graph"
+              },
+              {
+                "t": 884.3,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 998,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1005.8,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1117.2,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 760,
+                  "duration": 311,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1258.4,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 1194,
+                  "duration": 55,
+                  "currentPhase": "longtask",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1419.2,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1419.3,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1419.5,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1451,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1480.5,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1480.8,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2578.8,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2579,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2579.1,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2579.3,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": false,
+                    "disableTransportCallbacks": false,
+                    "disableGraphBuildOnPlay": false,
+                    "useMinimalAudioGraph": true,
+                    "disableWorldAudio": false,
+                    "disableAnalyzers": false
+                  }
+                }
+              },
+              {
+                "t": 2579.5,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2579.9,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.4
+              },
+              {
+                "t": 2579.9,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.6
+              },
+              {
+                "t": 2579.9,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2580,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2580.3,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1.5
+              },
+              {
+                "t": 2600.7,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2600.9,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2614.3,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2617,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 4159,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 17.6,
+        "jsHeapTotalMB": 32.02,
+        "nodes": 3605,
+        "jsEventListeners": 3866,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.778,
+        "layoutCount": 65,
+        "recalcStyleCount": 132,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1&snUseMinimalAudioGraph=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 34,
+              "duration": 99
+            },
+            {
+              "name": "self",
+              "startTime": 162,
+              "duration": 512
+            },
+            {
+              "name": "self",
+              "startTime": 760,
+              "duration": 311
+            },
+            {
+              "name": "unknown",
+              "startTime": 1194,
+              "duration": 55
+            }
+          ],
+          "controllerChanges": 0,
+          "firstPlayTrace": [
+            {
+              "t": 726.7,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 162,
+                "duration": 512,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 755.8,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 755.8,
+              "phase": "flushMixToEngine:skipped-minimal-graph"
+            },
+            {
+              "t": 884.3,
+              "phase": "master-analyser:ensure",
+              "detail": {
+                "size": 256
+              }
+            },
+            {
+              "t": 998,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1005.8,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1117.2,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 760,
+                "duration": 311,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1258.4,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 1194,
+                "duration": 55,
+                "currentPhase": "longtask",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1419.2,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1419.3,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1419.5,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.2
+            },
+            {
+              "t": 1451,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1480.5,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1480.8,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2578.8,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2579,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2579.1,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2579.3,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": false,
+                  "disableTransportCallbacks": false,
+                  "disableGraphBuildOnPlay": false,
+                  "useMinimalAudioGraph": true,
+                  "disableWorldAudio": false,
+                  "disableAnalyzers": false
+                }
+              }
+            },
+            {
+              "t": 2579.5,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2579.9,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.4
+            },
+            {
+              "t": 2579.9,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.6
+            },
+            {
+              "t": 2579.9,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2580,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2580.3,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1.5
+            },
+            {
+              "t": 2600.7,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2600.9,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2614.3,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2617,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": false,
+            "disableTransportCallbacks": false,
+            "disableGraphBuildOnPlay": false,
+            "useMinimalAudioGraph": true,
+            "disableWorldAudio": false,
+            "disableAnalyzers": false
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.09,
+        "nodes": 3597,
+        "jsEventListeners": 3866,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.778
+      },
+      "longTasks": {
+        "count": 4,
+        "maxMs": 512,
+        "totalMs": 977,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 162,
+            "duration": 512
+          },
+          {
+            "name": "self",
+            "startTime": 760,
+            "duration": 311
+          },
+          {
+            "name": "unknown",
+            "startTime": 34,
+            "duration": 99
+          },
+          {
+            "name": "unknown",
+            "startTime": 1194,
+            "duration": 55
+          }
+        ]
+      }
+    },
+    {
+      "name": "first-play-no-world-audio",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 779.7,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 184,
+                  "duration": 526,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 811.3,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 959.3,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 1119.7,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1127.1,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1232.3,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 817,
+                  "duration": 374,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1411.8,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1412,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1412.3,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.3
+              },
+              {
+                "t": 1428.9,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1451.3,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1451.5,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 779.7,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 184,
+                  "duration": 526,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 811.3,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 959.3,
+                "phase": "master-analyser:ensure",
+                "detail": {
+                  "size": 256
+                }
+              },
+              {
+                "t": 1119.7,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1127.1,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1232.3,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 817,
+                  "duration": 374,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1411.8,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1412,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1412.3,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.3
+              },
+              {
+                "t": 1428.9,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1451.3,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1451.5,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2558.8,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2559.1,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2559.2,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2559.3,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": false,
+                    "disableTransportCallbacks": false,
+                    "disableGraphBuildOnPlay": false,
+                    "useMinimalAudioGraph": false,
+                    "disableWorldAudio": true,
+                    "disableAnalyzers": false
+                  }
+                }
+              },
+              {
+                "t": 2559.5,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2559.9,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.4
+              },
+              {
+                "t": 2560,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.6
+              },
+              {
+                "t": 2560.1,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2560.1,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2560.4,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1.5
+              },
+              {
+                "t": 2581.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2581.5,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2596.6,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2599.6,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 4147,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 17.65,
+        "jsHeapTotalMB": 31.02,
+        "nodes": 3601,
+        "jsEventListeners": 3836,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.825,
+        "layoutCount": 60,
+        "recalcStyleCount": 129,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1&snDisableWorldAudio=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 27,
+              "duration": 113
+            },
+            {
+              "name": "self",
+              "startTime": 184,
+              "duration": 526
+            },
+            {
+              "name": "self",
+              "startTime": 817,
+              "duration": 374
+            }
+          ],
+          "controllerChanges": 0,
+          "firstPlayTrace": [
+            {
+              "t": 779.7,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 184,
+                "duration": 526,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 811.3,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 959.3,
+              "phase": "master-analyser:ensure",
+              "detail": {
+                "size": 256
+              }
+            },
+            {
+              "t": 1119.7,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1127.1,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1232.3,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 817,
+                "duration": 374,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1411.8,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1412,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1412.3,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.3
+            },
+            {
+              "t": 1428.9,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1451.3,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1451.5,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2558.8,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2559.1,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2559.2,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2559.3,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": false,
+                  "disableTransportCallbacks": false,
+                  "disableGraphBuildOnPlay": false,
+                  "useMinimalAudioGraph": false,
+                  "disableWorldAudio": true,
+                  "disableAnalyzers": false
+                }
+              }
+            },
+            {
+              "t": 2559.5,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2559.9,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.4
+            },
+            {
+              "t": 2560,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.6
+            },
+            {
+              "t": 2560.1,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2560.1,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2560.4,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1.5
+            },
+            {
+              "t": 2581.4,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2581.5,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2596.6,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2599.6,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": false,
+            "disableTransportCallbacks": false,
+            "disableGraphBuildOnPlay": false,
+            "useMinimalAudioGraph": false,
+            "disableWorldAudio": true,
+            "disableAnalyzers": false
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.14,
+        "nodes": 3593,
+        "jsEventListeners": 3836,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.825
+      },
+      "longTasks": {
+        "count": 3,
+        "maxMs": 526,
+        "totalMs": 1013,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 184,
+            "duration": 526
+          },
+          {
+            "name": "self",
+            "startTime": 817,
+            "duration": 374
+          },
+          {
+            "name": "unknown",
+            "startTime": 27,
+            "duration": 113
+          }
+        ]
+      }
+    },
+    {
+      "name": "first-play-no-analyzers",
+      "status": "pass",
+      "error": null,
+      "notes": [
+        {
+          "enableAudio": {
+            "audioButtonVisible": true,
+            "trace": [
+              {
+                "t": 766.3,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 171,
+                  "duration": 539,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 799.2,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 948.7,
+                "phase": "master-scope:analyser-skipped"
+              },
+              {
+                "t": 1084.5,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1093.2,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1197,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 807,
+                  "duration": 351,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1369.3,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1369.4,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1369.6,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1390.5,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1413.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1413.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              }
+            ]
+          }
+        },
+        {
+          "playClickReturned": true,
+          "pauseAppears": true,
+          "domState": {
+            "pauseAppears": true,
+            "playAppears": false,
+            "trace": [
+              {
+                "t": 766.3,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 171,
+                  "duration": 539,
+                  "currentPhase": "idle",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 799.2,
+                "phase": "flushMixToEngine:enter",
+                "detail": {
+                  "tracks": 5
+                }
+              },
+              {
+                "t": 948.7,
+                "phase": "master-scope:analyser-skipped"
+              },
+              {
+                "t": 1084.5,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1093.2,
+                "phase": "project-schedule:deferred-until-audio-unlocked"
+              },
+              {
+                "t": 1197,
+                "phase": "longtask",
+                "detail": {
+                  "startTime": 807,
+                  "duration": 351,
+                  "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                  "attribution": [
+                    {
+                      "name": "unknown",
+                      "entryType": "taskattribution",
+                      "startTime": 0,
+                      "duration": 0,
+                      "containerType": "window",
+                      "containerSrc": "",
+                      "containerId": "",
+                      "containerName": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "t": 1369.3,
+                "phase": "audio-context-start:scheduled",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1369.4,
+                "phase": "tone-start:before",
+                "detail": {
+                  "contextState": "running"
+                }
+              },
+              {
+                "t": 1369.6,
+                "phase": "tone-start",
+                "detail": {
+                  "contextState": "running"
+                },
+                "durationMs": 0.2
+              },
+              {
+                "t": 1390.5,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "audioUnlocked"
+                  ],
+                  "audioUnlocked": true
+                }
+              },
+              {
+                "t": 1413.4,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 1413.6,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2465.7,
+                "phase": "ui.play-button:onClick",
+                "detail": {
+                  "isPlaying": false
+                }
+              },
+              {
+                "t": 2466,
+                "phase": "useTransport.play:start",
+                "detail": {
+                  "audioUnlocked": true,
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2466.1,
+                "phase": "useTransport.play:before-engine-play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "stopped"
+                }
+              },
+              {
+                "t": 2466.3,
+                "phase": "AudioEngine.play:first-attempt",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped",
+                  "playbackState": "stopped",
+                  "flags": {
+                    "trace": true,
+                    "disableProjectSchedules": false,
+                    "disableTransportCallbacks": false,
+                    "disableGraphBuildOnPlay": false,
+                    "useMinimalAudioGraph": false,
+                    "disableWorldAudio": false,
+                    "disableAnalyzers": true
+                  }
+                }
+              },
+              {
+                "t": 2466.4,
+                "phase": "Tone.Transport.start:before",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                }
+              },
+              {
+                "t": 2466.7,
+                "phase": "Tone.Transport.start",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.3
+              },
+              {
+                "t": 2466.7,
+                "phase": "AudioEngine.play",
+                "detail": {
+                  "contextState": "running",
+                  "transportState": "stopped"
+                },
+                "durationMs": 0.4
+              },
+              {
+                "t": 2466.8,
+                "phase": "useTransport.play:after-engine-play",
+                "detail": {
+                  "started": true,
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                }
+              },
+              {
+                "t": 2466.9,
+                "phase": "store.set",
+                "detail": {
+                  "keys": [
+                    "isPlaying"
+                  ],
+                  "isPlaying": true
+                }
+              },
+              {
+                "t": 2467.1,
+                "phase": "useTransport.play",
+                "detail": {
+                  "transportState": "stopped",
+                  "playbackState": "playing"
+                },
+                "durationMs": 1.2
+              },
+              {
+                "t": 2486,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2486.2,
+                "phase": "project-schedule:deferred-until-first-play"
+              },
+              {
+                "t": 2534.8,
+                "phase": "project-schedule:armed-after-first-play"
+              },
+              {
+                "t": 2538,
+                "phase": "project-schedule:deferred-while-playing",
+                "detail": {
+                  "isPlaying": true,
+                  "playbackState": "playing"
+                }
+              }
+            ]
+          },
+          "ensureTrackDuringPlay": [],
+          "buildVoiceDuringPlay": []
+        }
+      ],
+      "durationMs": 4027,
+      "before": {
+        "jsHeapUsedMB": 0.51,
+        "jsHeapTotalMB": 1,
+        "nodes": 8,
+        "jsEventListeners": 0,
+        "documents": 2,
+        "frames": 1,
+        "taskDurationSec": 0,
+        "layoutCount": 0,
+        "recalcStyleCount": 0,
+        "dom": {
+          "title": "",
+          "url": "about:blank",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 3,
+          "canvases": 0,
+          "dialogs": 0,
+          "serviceWorkerController": false,
+          "serviceWorkerScript": null,
+          "cacheNames": {},
+          "longTasks": [],
+          "controllerChanges": 0,
+          "firstPlayTrace": [],
+          "firstPlayFlags": null,
+          "listenerTrace": null
+        }
+      },
+      "after": {
+        "jsHeapUsedMB": 17.63,
+        "jsHeapTotalMB": 31.77,
+        "nodes": 3594,
+        "jsEventListeners": 3866,
+        "documents": 1,
+        "frames": 1,
+        "taskDurationSec": 1.737,
+        "layoutCount": 53,
+        "recalcStyleCount": 139,
+        "dom": {
+          "title": "Shotgun Ninjas Virtual Studio — Make Beats in Your Browser",
+          "url": "http://127.0.0.1:5173/studio?snFirstPlayTrace=1&snDisableAnalyzers=1",
+          "bodyPerf": "",
+          "hidden": false,
+          "elements": 2345,
+          "canvases": 8,
+          "dialogs": 0,
+          "serviceWorkerController": true,
+          "serviceWorkerScript": "http://127.0.0.1:5173/sw.js",
+          "cacheNames": {},
+          "longTasks": [
+            {
+              "name": "unknown",
+              "startTime": 34,
+              "duration": 108
+            },
+            {
+              "name": "self",
+              "startTime": 171,
+              "duration": 539
+            },
+            {
+              "name": "self",
+              "startTime": 807,
+              "duration": 351
+            }
+          ],
+          "controllerChanges": 0,
+          "firstPlayTrace": [
+            {
+              "t": 766.3,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 171,
+                "duration": 539,
+                "currentPhase": "idle",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 799.2,
+              "phase": "flushMixToEngine:enter",
+              "detail": {
+                "tracks": 5
+              }
+            },
+            {
+              "t": 948.7,
+              "phase": "master-scope:analyser-skipped"
+            },
+            {
+              "t": 1084.5,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1093.2,
+              "phase": "project-schedule:deferred-until-audio-unlocked"
+            },
+            {
+              "t": 1197,
+              "phase": "longtask",
+              "detail": {
+                "startTime": 807,
+                "duration": 351,
+                "currentPhase": "project-schedule:deferred-until-audio-unlocked",
+                "attribution": [
+                  {
+                    "name": "unknown",
+                    "entryType": "taskattribution",
+                    "startTime": 0,
+                    "duration": 0,
+                    "containerType": "window",
+                    "containerSrc": "",
+                    "containerId": "",
+                    "containerName": ""
+                  }
+                ]
+              }
+            },
+            {
+              "t": 1369.3,
+              "phase": "audio-context-start:scheduled",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1369.4,
+              "phase": "tone-start:before",
+              "detail": {
+                "contextState": "running"
+              }
+            },
+            {
+              "t": 1369.6,
+              "phase": "tone-start",
+              "detail": {
+                "contextState": "running"
+              },
+              "durationMs": 0.2
+            },
+            {
+              "t": 1390.5,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "audioUnlocked"
+                ],
+                "audioUnlocked": true
+              }
+            },
+            {
+              "t": 1413.4,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 1413.6,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2465.7,
+              "phase": "ui.play-button:onClick",
+              "detail": {
+                "isPlaying": false
+              }
+            },
+            {
+              "t": 2466,
+              "phase": "useTransport.play:start",
+              "detail": {
+                "audioUnlocked": true,
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2466.1,
+              "phase": "useTransport.play:before-engine-play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "stopped"
+              }
+            },
+            {
+              "t": 2466.3,
+              "phase": "AudioEngine.play:first-attempt",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped",
+                "playbackState": "stopped",
+                "flags": {
+                  "trace": true,
+                  "disableProjectSchedules": false,
+                  "disableTransportCallbacks": false,
+                  "disableGraphBuildOnPlay": false,
+                  "useMinimalAudioGraph": false,
+                  "disableWorldAudio": false,
+                  "disableAnalyzers": true
+                }
+              }
+            },
+            {
+              "t": 2466.4,
+              "phase": "Tone.Transport.start:before",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              }
+            },
+            {
+              "t": 2466.7,
+              "phase": "Tone.Transport.start",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.3
+            },
+            {
+              "t": 2466.7,
+              "phase": "AudioEngine.play",
+              "detail": {
+                "contextState": "running",
+                "transportState": "stopped"
+              },
+              "durationMs": 0.4
+            },
+            {
+              "t": 2466.8,
+              "phase": "useTransport.play:after-engine-play",
+              "detail": {
+                "started": true,
+                "transportState": "stopped",
+                "playbackState": "playing"
+              }
+            },
+            {
+              "t": 2466.9,
+              "phase": "store.set",
+              "detail": {
+                "keys": [
+                  "isPlaying"
+                ],
+                "isPlaying": true
+              }
+            },
+            {
+              "t": 2467.1,
+              "phase": "useTransport.play",
+              "detail": {
+                "transportState": "stopped",
+                "playbackState": "playing"
+              },
+              "durationMs": 1.2
+            },
+            {
+              "t": 2486,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2486.2,
+              "phase": "project-schedule:deferred-until-first-play"
+            },
+            {
+              "t": 2534.8,
+              "phase": "project-schedule:armed-after-first-play"
+            },
+            {
+              "t": 2538,
+              "phase": "project-schedule:deferred-while-playing",
+              "detail": {
+                "isPlaying": true,
+                "playbackState": "playing"
+              }
+            }
+          ],
+          "firstPlayFlags": {
+            "trace": true,
+            "disableProjectSchedules": false,
+            "disableTransportCallbacks": false,
+            "disableGraphBuildOnPlay": false,
+            "useMinimalAudioGraph": false,
+            "disableWorldAudio": false,
+            "disableAnalyzers": true
+          },
+          "listenerTrace": {
+            "enabled": false,
+            "activeTotal": 0,
+            "activeEventListeners": 0,
+            "activeSubscriptions": 0,
+            "activeIntervals": 0,
+            "activeTimeouts": 0,
+            "activeRafs": 0,
+            "activeTransportEvents": 0,
+            "byType": {},
+            "byTarget": {},
+            "byLabel": {},
+            "duplicateStacks": [],
+            "topStacks": [],
+            "records": []
+          }
+        }
+      },
+      "delta": {
+        "jsHeapUsedMB": 17.12,
+        "nodes": 3586,
+        "jsEventListeners": 3866,
+        "visualTickerSubscribers": 0,
+        "storeSubscriptions": 0,
+        "transportEvents": 0,
+        "traceActiveTotal": 0,
+        "taskDurationSec": 1.737
+      },
+      "longTasks": {
+        "count": 3,
+        "maxMs": 539,
+        "totalMs": 998,
+        "top": [
+          {
+            "name": "self",
+            "startTime": 171,
+            "duration": 539
+          },
+          {
+            "name": "self",
+            "startTime": 807,
+            "duration": 351
+          },
+          {
+            "name": "unknown",
+            "startTime": 34,
+            "duration": 108
+          }
+        ]
+      }
+    }
+  ]
+}

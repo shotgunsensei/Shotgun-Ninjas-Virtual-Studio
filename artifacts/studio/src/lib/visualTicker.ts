@@ -16,6 +16,7 @@
  *   unsub();
  */
 import { trackRafLoop } from "../utils/performanceDiagnostics";
+import { trackListenerSubscription } from "./performance/listenerTrace";
 
 type TickCallback = (timestamp: number) => void;
 
@@ -59,10 +60,16 @@ class VisualTicker {
    */
   subscribe(cb: TickCallback): () => void {
     this.subs.add(cb);
+    const untrack = trackListenerSubscription("visualTicker", {
+      subscribers: this.subs.size,
+    });
     if (this.subs.size === 1 && !this.paused) {
       this._start();
     }
-    return () => this.unsubscribe(cb);
+    return () => {
+      untrack();
+      this.unsubscribe(cb);
+    };
   }
 
   unsubscribe(cb: TickCallback): void {
