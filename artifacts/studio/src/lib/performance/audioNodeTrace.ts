@@ -29,6 +29,13 @@ interface AudioNodeTraceSnapshot {
   activeTrackVoices: number;
   activeScheduledPlayers: number;
   activeTransportEvents: number;
+  leanDrumVoicesActive: number;
+  leanDrumHitsScheduled: number;
+  leanDrumHitsTriggered: number;
+  leanOneShotSourcesCreated: number;
+  leanOneShotSourcesEnded: number;
+  leanOneShotSourcesDisconnected: number;
+  leanOneShotSourcesActive: number;
   violations: Array<{ message: string; detail?: Record<string, unknown>; stack: string }>;
   suspectedLeaks: Array<{ label: string; count: number; stack: string }>;
   topStacks: Array<{ label: string; count: number; stack: string }>;
@@ -77,6 +84,7 @@ const workletModules: AudioTraceMap = {};
 const toneCreates: AudioTraceMap = {};
 const toneDisposes: AudioTraceMap = {};
 const toneActive: AudioTraceMap = {};
+const leanCounters: AudioTraceMap = {};
 const records = new Map<number, AudioTraceRecord>();
 const nodeIds = new WeakMap<object, number>();
 const nodeTypes = new WeakMap<object, string>();
@@ -237,6 +245,13 @@ export function getAudioNodeTraceSnapshot(): AudioNodeTraceSnapshot {
     activeTrackVoices: activeTone("trackVoice"),
     activeScheduledPlayers: activeTone("scheduledPlayer"),
     activeTransportEvents: activeTone("transportEvent"),
+    leanDrumVoicesActive: leanCounters.leanDrumVoicesActive ?? 0,
+    leanDrumHitsScheduled: leanCounters.leanDrumHitsScheduled ?? 0,
+    leanDrumHitsTriggered: leanCounters.leanDrumHitsTriggered ?? 0,
+    leanOneShotSourcesCreated: leanCounters.leanOneShotSourcesCreated ?? 0,
+    leanOneShotSourcesEnded: leanCounters.leanOneShotSourcesEnded ?? 0,
+    leanOneShotSourcesDisconnected: leanCounters.leanOneShotSourcesDisconnected ?? 0,
+    leanOneShotSourcesActive: leanCounters.leanOneShotSourcesActive ?? 0,
     violations: violations.slice(-50),
     suspectedLeaks: topStacks.filter((entry) => entry.count > 5),
     topStacks,
@@ -257,6 +272,50 @@ export function trackToneDispose(kind: string, label?: string): void {
   inc(toneDisposes, key);
   inc(toneActive, kind, -1);
   record("tone-dispose", key);
+}
+
+export function recordLeanDrumTrace(
+  event:
+    | "voice-created"
+    | "voice-disposed"
+    | "hit-scheduled"
+    | "hit-triggered"
+    | "source-created"
+    | "source-ended"
+    | "source-disconnected"
+    | "reused-track-nodes",
+  detail?: Record<string, unknown>,
+): void {
+  if (!isEnabled()) return;
+  switch (event) {
+    case "voice-created":
+      inc(leanCounters, "leanDrumVoicesActive");
+      break;
+    case "voice-disposed":
+      inc(leanCounters, "leanDrumVoicesActive", -1);
+      break;
+    case "hit-scheduled":
+      inc(leanCounters, "leanDrumHitsScheduled");
+      break;
+    case "hit-triggered":
+      inc(leanCounters, "leanDrumHitsTriggered");
+      break;
+    case "source-created":
+      inc(leanCounters, "leanOneShotSourcesCreated");
+      inc(leanCounters, "leanOneShotSourcesActive");
+      break;
+    case "source-ended":
+      inc(leanCounters, "leanOneShotSourcesEnded");
+      break;
+    case "source-disconnected":
+      inc(leanCounters, "leanOneShotSourcesDisconnected");
+      inc(leanCounters, "leanOneShotSourcesActive", -1);
+      break;
+    case "reused-track-nodes":
+      inc(leanCounters, "leanDrumTrackNodeReuse");
+      break;
+  }
+  record("lean-drum", event, detail);
 }
 
 export function trackAudioTraceTransportEvent(id: number, label: string): void {
@@ -293,6 +352,7 @@ function clearAudioNodeTrace(): void {
     toneCreates,
     toneDisposes,
     toneActive,
+    leanCounters,
   ]) {
     for (const key of Object.keys(map)) delete map[key];
   }

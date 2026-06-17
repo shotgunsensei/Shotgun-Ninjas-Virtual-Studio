@@ -154,3 +154,90 @@ Not applied in this pass:
 The next safe patch should reduce Tone graph churn by deferring or reusing
 track voice source/signal creation, especially for inactive/muted/empty tracks
 and optional effect defaults.
+
+---
+
+## 2026-06-16 Lean Drum Voice Update
+
+Latest profile artifacts:
+
+- First-play matrix: `runtime-profile/runtime-profile-1781624302737.json`
+- Short full profile: `runtime-profile/runtime-profile-1781624432573.json`
+
+### Patch Summary
+
+- Added a native Web Audio lean drum voice path in
+  `src/lib/audio/leanDrumVoice.ts`.
+- Added `shell`, `lean`, `tone`, and `disposed` voice mode tracking in
+  `AudioEngine`.
+- Extended `ensureTrack(track, options)` with `mode`, `reason`, `allowHeavy`,
+  and `deadlineMs`.
+- Changed project scheduling so drum tracks request `mode: "lean"` with
+  `allowHeavy: false`.
+- Added runtime-profile capture for voice mode counts, voice promotions,
+  ConstantSourceNode creates, GainNode creates, BufferSource creates, and
+  Oscillator creates.
+
+### Measured Result
+
+| Scenario | Previous largest long task | Latest largest long task | Previous ConstantSource evidence | Latest ConstantSource delta | Latest GainNode delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Audio startup / panic / replay | 2,542 ms | 322 ms | ~1,006 dominant ConstantSource stack | 42 | 317 |
+| Trap Starter short playback | 7,417 ms | 205 ms | ~1,996 dominant ConstantSource stack | 0 | 49 |
+
+Default AudioWorkletNode creation remained zero.
+
+### Caveat
+
+The Trap Starter profile did not capture an active lean voice in the voice mode
+snapshot. It captured two existing Tone promotions from the prior/default
+scheduler state and then disposed them after the Trap run. The reduction is
+still strong evidence that the current run avoided the prior Tone graph churn,
+but a focused fresh-session Trap Starter profile is required to prove that the
+new lean drum path is the active playback path for the demo.
+
+### Remaining Audio Node Risks
+
+- Full Tone melodic voice creation is still synchronous.
+- Drum advanced controls need explicit lean-to-Tone promotion rather than
+  silent no-op behavior.
+- Sample clip, preview, and metronome lean paths remain future work.
+- Later runtime stress scenarios still fail and do not yet prove bounded node
+  growth over a long session.
+
+---
+
+## 2026-06-16 Fresh Lean Audio Node Proof
+
+Latest focused profile:
+
+- `runtime-profile/runtime-profile-1781640194382.json`
+
+The focused fresh-session Trap Starter validation now proves active lean drums:
+
+| Counter | During/after Trap validation |
+| --- | ---: |
+| `voiceModes.lean` | 1 |
+| `voiceModes.tone` | 0 |
+| `activeAudioWorkletNodes` | 0 |
+| `ConstantSourceNode` creates | 0 |
+| `GainNode` creates | 119 |
+| `leanDrumHitsScheduled` | 39 |
+| `leanDrumHitsTriggered` | 39 |
+| `leanOneShotSourcesCreated` | 39 |
+| `leanOneShotSourcesEnded` after idle | 39 |
+| `leanOneShotSourcesDisconnected` after idle | 39 |
+| `leanOneShotSourcesActive` after stop/idle | 0 |
+
+The earlier scheduling bug was that `scheduleClip()` required a full Tone voice
+before registering note events. Drum tracks owned by a lean voice now schedule
+normally, and `triggerDrumAt()` routes those callbacks to the lean voice.
+
+Latest short profile:
+
+- `runtime-profile/runtime-profile-1781658843928.json`
+
+All later scenarios except WAV export completed. WAV export is now the confirmed
+audio-node blocker: it timed out after 180 s with `ConstantSourceNode` creates
+up by 2,150, `GainNode` creates up by 16,287, heap up by 136.05 MB, and a
+1,732 ms largest long task.

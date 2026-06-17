@@ -428,3 +428,109 @@ Not release-safe.
 Default AudioWorklet node creation is now verified as zero, but the short
 profile still fails multiple stress scenarios and captures multi-second
 long tasks. The 10-minute playback acceptance test was not run.
+
+---
+
+## 2026-06-16 Lean Voice Runtime Profile
+
+Latest profile artifacts:
+
+- First-play matrix: `runtime-profile/runtime-profile-1781624302737.json`
+- Short full profile: `runtime-profile/runtime-profile-1781624432573.json`
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly after lean voice changes. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Production build completed; existing sourcemap/import-overlap/large chunk warnings remain. |
+| Production preview + `STUDIO_PROFILE_MATRIX_ONLY=1 node scripts/runtime-profile.mjs` | Pass | All seven first-play matrix scenarios passed. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Fail overall | Audio startup, Trap Starter short playback, mixer stress, sample import, and service-worker update passed; later stress/export/import scenarios still failed. |
+
+### Short Profile Results
+
+| Scenario | Status | Largest long task | ConstantSource creates | GainNode creates | Voice modes at end | Key finding |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| Audio startup / panic / replay | Pass | 322 ms | 42 | 317 | `tone: 2` | Startup is under 500 ms in this run, but two Tone voices are still created. |
+| Trap Starter short playback | Pass with caveat | 205 ms | 0 | 49 | `disposed: 2` | Long task is under 1 s, but active lean drums were not captured in the snapshot. |
+| Mixer stress | Pass with warning | 0 ms | 0 | 302 | `disposed: 2` | UI stayed responsive, but Chrome listener counts still need long-session proof. |
+| Sample import small/large | Pass with blocker | 852 ms | 0 | 92 | `disposed: 2` | Import/waveform work still has a near-1-second long task. |
+| Service worker cache update | Pass | 0 ms | 0 | 0 | `disposed: 2` | Cache update simulation completed. |
+
+Failing later scenarios:
+
+- Visualizer Performance Mode stress.
+- Repeated preset switching.
+- Repeated project load/unload.
+- Save/load/autosave.
+- JSON export/import.
+- WAV export.
+
+These failures were primarily locator/modal-state timeouts after prior scenario
+state, but they still block release-safety claims.
+
+### Acceptance Status
+
+| Criterion | Result |
+| --- | --- |
+| Typecheck passes | Pass |
+| Build passes | Pass with existing warnings |
+| First-play matrix passes | Pass |
+| AudioWorkletNode creation remains zero by default | Pass |
+| Audio startup largest long task under 500 ms | Pass in latest short profile |
+| Trap Starter largest long task under 1 s | Pass in latest short profile |
+| ConstantSourceNode churn reduced by 70 percent | Pass in latest short profile |
+| Pressing Play does not promote lean/shell tracks to full Tone unless required | Partially verified by code path; not fully proven by fresh-session profile |
+| Mixer does not promote every track to Tone | Partially verified; mixer stress did not create new Tone voices in latest run |
+| Visualizer does not promote every track to Tone | Not verified in latest run because scenario failed |
+| Repeated stress proves bounded growth | Fail / not proven |
+| 10-minute production playback acceptance | Not run |
+
+### Release Safety
+
+Not release-safe. The short profile improved the known Tone graph churn
+blocker, but full 10-minute production playback and later stress scenarios have
+not passed.
+
+---
+
+## 2026-06-16 Lean Validation And Harness Unblocking
+
+Latest profile artifacts:
+
+- Fresh Trap lean validation: `runtime-profile/runtime-profile-1781640194382.json`
+- First-play matrix: `runtime-profile/runtime-profile-1781657036318.json`
+- Latest short profile: `runtime-profile/runtime-profile-1781658843928.json`
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `node --check artifacts/studio/scripts/runtime-profile.mjs` | Pass | Runtime harness syntax is valid. |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Existing sourcemap/import-overlap/large chunk warnings remain. |
+| Production preview + `STUDIO_PROFILE_FRESH_TRAP_ONLY=1 node scripts/runtime-profile.mjs` | Pass | Fresh Trap Starter proved one active lean voice and active lean hit/source counters. |
+| Production preview + `STUDIO_PROFILE_MATRIX_ONLY=1 node scripts/runtime-profile.mjs` | Pass | All seven first-play matrix scenarios passed. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Fail overall | All scenarios passed except WAV export. |
+
+### Latest Short Profile Results
+
+| Scenario | Status | Largest long task | Key result |
+| --- | --- | ---: | --- |
+| First-play baseline | Pass | 489 ms | Lean drum shell/lean startup remains under 500 ms in this run. |
+| Audio startup / panic / replay | Pass | 326 ms | Startup remains under 500 ms; no default worklets. |
+| Trap Starter short playback | Pass | 730 ms | Short playback passes, but this broad scenario still builds four Tone melodic voices. |
+| Mixer stress | Pass | 0 ms | Harness completed. |
+| Visualizer Performance Mode stress | Pass | 0 ms | Clean-state reset and Performance Mode click fallback removed prior harness blocker. |
+| Repeated preset switching | Pass | 0 ms | Harness completed. |
+| Repeated project load/unload | Pass | 145 ms | Completed 20 demo loads, but DOM/listener growth remains a risk to investigate. |
+| Sample import small/large | Pass | 877 ms | Import path still has a sub-second long task. |
+| Save/load/autosave | Pass | 0 ms | Harness completed. |
+| JSON export/import/malformed JSON | Pass | 0 ms | Export dialog cleanup fixed prior harness ambiguity. |
+| WAV export default/demo | Fail | 1,732 ms | Export timed out after 180 s and created 2,150 ConstantSourceNodes / 16,287 GainNodes. |
+| Service worker cache update | Pass | 0 ms | Cache update simulation completed. |
+
+### Release Safety
+
+Not release-safe. The short profile still fails on WAV export, so the 10-minute
+production playback acceptance run was not started in this pass.

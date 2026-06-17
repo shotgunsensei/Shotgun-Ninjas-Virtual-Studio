@@ -43,6 +43,7 @@ import { buildPresetVoice, findPreset } from "./sounds/presets";
 import { tryLoadMelodicSampler } from "./sounds/samples";
 import { applyGroove, getGroove, shouldFlam, shouldGhost } from "./sounds/groove";
 import { getChopEngine } from "./chopEngine";
+import { createLeanDrumVoice, type LeanDrumVoice } from "./leanDrumVoice";
 import {
   startPerfTimer,
   trackAudioResource,
@@ -55,7 +56,7 @@ import {
   getFirstPlayFlags,
   isFirstPlayTraceEnabled,
 } from "../performance/firstPlayTrace";
-import { trackToneCreate, trackToneDispose } from "../performance/audioNodeTrace";
+import { recordLeanDrumTrace, trackToneCreate, trackToneDispose } from "../performance/audioNodeTrace";
 
 const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 const AUDIO_START_TIMEOUT_MS = 5_000;
@@ -121,6 +122,15 @@ interface TrackVoice {
   dispose: () => void;
 }
 
+type VoiceMode = "shell" | "lean" | "tone" | "disposed";
+
+interface EnsureTrackOptions {
+  mode?: Exclude<VoiceMode, "disposed">;
+  reason?: string;
+  allowHeavy?: boolean;
+  deadlineMs?: number;
+}
+
 type PlaybackState =
   | "stopped"
   | "starting"
@@ -138,6 +148,14 @@ interface AudioClipResource {
   url: string;
   trackId: string;
   eventId: number;
+}
+
+declare global {
+  interface Window {
+    __SN_AUDIO_ENGINE_STATUS__?: {
+      voiceModes: () => ReturnType<AudioEngine["getVoiceModeSnapshot"]>;
+    };
+  }
 }
 
 class AudioEngine {
@@ -161,6 +179,16 @@ class AudioEngine {
   private metronomeWorkletNode: AudioWorkletNode | null = null;
 
   private voices = new Map<string, TrackVoice>();
+  private leanDrumVoices = new Map<string, LeanDrumVoice>();
+  private leanTrackSnapshots = new Map<string, Track>();
+  private voiceModes = new Map<string, VoiceMode>();
+  private voicePromotions: Array<{
+    trackId: string;
+    from: VoiceMode;
+    to: VoiceMode;
+    reason: string;
+    durationMs: number;
+  }> = [];
 
   // ---- Phase 11: Automation & Modulation ----
   private automationSchedulerId: number | null = null;
@@ -212,6 +240,11 @@ class AudioEngine {
       console.warn("[AudioEngine] Duplicate AudioEngine construction detected; retaining singleton export.");
     }
     scope[globalKey] = true;
+    if (typeof window !== "undefined") {
+      window.__SN_AUDIO_ENGINE_STATUS__ = {
+        voiceModes: () => this.getVoiceModeSnapshot(),
+      };
+    }
 
     Tone.getTransport().bpm.value = 100;
     Tone.getTransport().timeSignature = [4, 4];
@@ -521,9 +554,11 @@ class AudioEngine {
     moduleId: FxModuleId,
     settings: Partial<FxModuleSettings>,
   ) {
-    const v = this.voices.get(trackId);
-    if (!v) return;
+    const hasLean = this.leanDrumVoices.has(trackId);
     const enabled = settings.enabled !== false;
+    if (hasLean && !enabled) return;
+    const v = this.voices.get(trackId) ?? (hasLean ? this.promoteLeanDrumTrackToTone(trackId, `effect:${moduleId}`) : null);
+    if (!v) return;
     const amount = Math.max(0, Math.min(1, settings.amount ?? 0.5));
     const params = settings.params ?? {};
     switch (moduleId) {
@@ -815,6 +850,9 @@ class AudioEngine {
           v.micOn = false;
         }
       }
+      for (const lean of this.leanDrumVoices.values()) {
+        lean.stopAll();
+      }
 
       // Phase 6: clear any queued worklet metronome clicks and lookahead events.
       if (this.metronomeWorkletNode) {
@@ -926,16 +964,25 @@ class AudioEngine {
   }
 
   // ---- tracks ----
-  ensureTrack(track: Track) {
+  ensureTrack(track: Track, options: EnsureTrackOptions = {}) {
     if (this.noAudio) return;
+    const requestedMode = options.mode ?? "tone";
+    const reason = options.reason ?? "unspecified";
+    const allowHeavy = options.allowHeavy ?? requestedMode === "tone";
     const flags = getFirstPlayFlags();
     const duringPlay = this.playbackState === "starting" || this.playbackState === "playing";
     const hadVoice = this.voices.has(track.id);
+    const currentMode = this.getVoiceMode(track.id);
+    this.leanTrackSnapshots.set(track.id, track);
     firstPlayMark("ensureTrack:enter", {
       trackId: track.id,
       kind: track.kind,
       duringPlay,
       hadVoice,
+      mode: requestedMode,
+      currentMode,
+      reason,
+      allowHeavy,
     });
     if (duringPlay && flags.disableGraphBuildOnPlay) {
       firstPlayMark("ensureTrack:blocked-during-play", { trackId: track.id });
@@ -945,11 +992,40 @@ class AudioEngine {
       firstPlayMark("ensureTrack:skipped-minimal-graph", { trackId: track.id });
       return;
     }
+    if (requestedMode === "shell") {
+      if (!this.voiceModes.has(track.id)) this.voiceModes.set(track.id, "shell");
+      firstPlayMark("ensureTrack:shell", { trackId: track.id, reason });
+      return;
+    }
     const started = performance.now();
+    if (requestedMode === "lean" && track.kind === "drums") {
+      this.ensureLeanDrumTrack(track, reason, started);
+      return;
+    }
+    if (!allowHeavy) {
+      firstPlayMark("ensureTrack:heavy-blocked", {
+        trackId: track.id,
+        requestedMode,
+        reason,
+      });
+      if (!this.voiceModes.has(track.id)) this.voiceModes.set(track.id, "shell");
+      return;
+    }
+    if (options.deadlineMs && performance.now() - started > options.deadlineMs) {
+      firstPlayMark("ensureTrack:deadline-exceeded-before-tone", {
+        trackId: track.id,
+        deadlineMs: options.deadlineMs,
+        reason,
+      });
+      if (!this.voiceModes.has(track.id)) this.voiceModes.set(track.id, "shell");
+      return;
+    }
+    this.disposeLeanDrumTrack(track.id);
     let v = this.voices.get(track.id);
     if (!v) {
       v = this.buildVoice(track);
       this.voices.set(track.id, v);
+      this.recordVoicePromotion(track.id, currentMode, "tone", reason, started);
     } else {
       // Rebuild instrument when v2 sound-model selectors change.
       const wantKit = track.kitId;
@@ -989,24 +1065,134 @@ class AudioEngine {
       trackId: track.id,
       kind: track.kind,
       created: !hadVoice,
+      mode: "tone",
+      reason,
     });
+  }
+
+  private ensureLeanDrumTrack(track: Track, reason: string, started: number): void {
+    const existingTone = this.voices.get(track.id);
+    if (existingTone) {
+      this.applyTrackSettings(track);
+      return;
+    }
+    this.leanTrackSnapshots.set(track.id, track);
+    let lean = this.leanDrumVoices.get(track.id);
+    const from = this.getVoiceMode(track.id);
+    if (!lean) {
+      lean = createLeanDrumVoice(track, this.masterChain.input);
+      this.leanDrumVoices.set(track.id, lean);
+      this.recordVoicePromotion(track.id, from, "lean", reason, started);
+    } else {
+      lean.applyTrack(track);
+    }
+    firstPlayMeasure("ensureTrack", started, performance.now(), {
+      trackId: track.id,
+      kind: track.kind,
+      created: from !== "lean",
+      mode: "lean",
+      reason,
+    });
+  }
+
+  private disposeLeanDrumTrack(trackId: string): void {
+    const lean = this.leanDrumVoices.get(trackId);
+    if (!lean) return;
+    try {
+      lean.dispose();
+    } catch {
+      // ignore
+    }
+    this.leanDrumVoices.delete(trackId);
+    this.leanTrackSnapshots.delete(trackId);
+    if (!this.voices.has(trackId)) this.voiceModes.set(trackId, "disposed");
+  }
+
+  private promoteLeanDrumTrackToTone(trackId: string, reason: string): TrackVoice | null {
+    const existing = this.voices.get(trackId);
+    if (existing) return existing;
+    const track = this.leanTrackSnapshots.get(trackId);
+    if (!track) {
+      firstPlayMark("voice-promotion:missing-track", { trackId, reason });
+      return null;
+    }
+    const started = performance.now();
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean) {
+      try {
+        lean.dispose();
+      } catch {
+        // ignore promotion cleanup races
+      }
+      this.leanDrumVoices.delete(trackId);
+    }
+    const v = this.buildVoice(track);
+    this.voices.set(trackId, v);
+    this.recordVoicePromotion(trackId, "lean", "tone", reason, started);
+    this.applyTrackSettings(track);
+    firstPlayMeasure("voice-promotion:lean-to-tone", started, performance.now(), {
+      trackId,
+      reason,
+    });
+    return v;
+  }
+
+  private getVoiceMode(trackId: string): VoiceMode {
+    if (this.voices.has(trackId)) return "tone";
+    if (this.leanDrumVoices.has(trackId)) return "lean";
+    return this.voiceModes.get(trackId) ?? "shell";
+  }
+
+  private recordVoicePromotion(
+    trackId: string,
+    from: VoiceMode,
+    to: VoiceMode,
+    reason: string,
+    started: number,
+  ): void {
+    const durationMs = Number((performance.now() - started).toFixed(1));
+    this.voiceModes.set(trackId, to);
+    this.voicePromotions.push({ trackId, from, to, reason, durationMs });
+    if (this.voicePromotions.length > 100) this.voicePromotions.shift();
+    firstPlayMark("voice-promotion", { trackId, from, to, reason, durationMs });
+  }
+
+  getVoiceModeSnapshot() {
+    const counts: Record<VoiceMode, number> = { shell: 0, lean: 0, tone: 0, disposed: 0 };
+    for (const mode of this.voiceModes.values()) counts[mode] += 1;
+    for (const id of this.voices.keys()) {
+      if (!this.voiceModes.has(id)) counts.tone += 1;
+    }
+    for (const id of this.leanDrumVoices.keys()) {
+      if (!this.voiceModes.has(id)) counts.lean += 1;
+    }
+    return {
+      counts,
+      promotions: this.voicePromotions.slice(-50),
+      activeToneTrackIds: Array.from(this.voices.keys()),
+      activeLeanTrackIds: Array.from(this.leanDrumVoices.keys()),
+    };
   }
 
   removeTrack(trackId: string) {
     this.cancelScheduledForTrack(trackId);
     this.removeTrackAutomation(trackId);
+    this.leanTrackSnapshots.delete(trackId);
     for (const key of Array.from(this.paramOverrides)) {
       if (key.startsWith(`${trackId}:`)) this.paramOverrides.delete(key);
     }
     const v = this.voices.get(trackId);
-    if (!v) return;
-    v.dispose();
-    this.voices.delete(trackId);
+    if (v) {
+      v.dispose();
+      this.voices.delete(trackId);
+    }
+    this.disposeLeanDrumTrack(trackId);
+    this.voiceModes.set(trackId, "disposed");
     this.soloSet.delete(trackId);
   }
 
   getActiveTrackIds(): string[] {
-    return Array.from(this.voices.keys());
+    return Array.from(new Set([...this.voices.keys(), ...this.leanDrumVoices.keys()]));
   }
 
   /** Tear down every voice — used when swapping in a fresh project
@@ -1015,7 +1201,7 @@ class AudioEngine {
   disposeAllTracks() {
     if (this.noAudio) return;
     this.cancelAllProjectSchedules();
-    for (const id of Array.from(this.voices.keys())) {
+    for (const id of this.getActiveTrackIds()) {
       this.removeTrack(id);
     }
     this.soloSet.clear();
@@ -1024,14 +1210,18 @@ class AudioEngine {
   removeAllTracksExcept(trackIds: readonly string[]) {
     if (this.noAudio) return;
     const keep = new Set(trackIds);
-    for (const id of Array.from(this.voices.keys())) {
+    for (const id of this.getActiveTrackIds()) {
       if (!keep.has(id)) this.removeTrack(id);
     }
   }
 
   applyTrackSettings(track: Track) {
     const v = this.voices.get(track.id);
-    if (!v) return;
+    if (!v) {
+      const lean = this.leanDrumVoices.get(track.id);
+      if (lean) lean.applyTrack(track);
+      return;
+    }
     if (track.solo) this.soloSet.add(track.id);
     else this.soloSet.delete(track.id);
 
@@ -1057,7 +1247,11 @@ class AudioEngine {
 
   changePreset(track: Track) {
     const v = this.voices.get(track.id);
-    if (!v) return;
+    if (!v) {
+      const lean = this.leanDrumVoices.get(track.id);
+      if (lean) lean.applyTrack(track);
+      return;
+    }
     const endTiming = startPerfTimer("instrument-replacement", {
       trackId: track.id,
       kind: track.kind,
@@ -1071,7 +1265,7 @@ class AudioEngine {
 
   /** Switch this track to a named v2 drum kit, rebuilding pieces. */
   setKit(trackId: string, kitId: DrumKitId) {
-    const v = this.voices.get(trackId);
+    const v = this.voices.get(trackId) ?? this.promoteLeanDrumTrackToTone(trackId, "kit-switch");
     if (!v) return;
     if (v.kitId === kitId && v.kit) return;
     const endTiming = startPerfTimer("kit-switch", { trackId, kitId });
@@ -1159,7 +1353,7 @@ class AudioEngine {
     partial: Partial<DrumPieceSettings>,
     allSettings?: Partial<Record<string, Partial<DrumPieceSettings>>>,
   ) {
-    const v = this.voices.get(trackId);
+    const v = this.voices.get(trackId) ?? this.promoteLeanDrumTrackToTone(trackId, `piece-setting:${piece}`);
     if (!v?.kit) return;
     const pv = v.kit.pieces.get(piece);
     if (!pv) return;
@@ -1215,7 +1409,18 @@ class AudioEngine {
 
   /** Apply per-track sound parameters (ADSR + cutoff + sends + glide). */
   setSoundParams(trackId: string, partial: Partial<SoundParams>) {
-    const v = this.voices.get(trackId);
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean) {
+      const unsupported =
+        partial.reverbSend !== undefined ||
+        partial.delaySend !== undefined ||
+        (partial.drive !== undefined && partial.drive > 0);
+      if (!unsupported) {
+        lean.applySoundParams(partial);
+        return;
+      }
+    }
+    const v = this.voices.get(trackId) ?? (lean ? this.promoteLeanDrumTrackToTone(trackId, "sound-params:advanced") : null);
     if (!v) return;
     if (partial.cutoff !== undefined) {
       v.filter.frequency.rampTo(cutoffNormToHz(partial.cutoff), 0.05);
@@ -1649,9 +1854,16 @@ class AudioEngine {
       return;
     }
 
-    const v = this.voices.get(trackId);
-    if (!v) return;
     const t = time ?? Tone.now();
+    const v = this.voices.get(trackId);
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean && !v) {
+      recordLeanDrumTrace("hit-scheduled", { trackId, piece });
+      lean.trigger(piece, t, velocity);
+      this.noteEverPlayed = true;
+      return;
+    }
+    if (!v) return;
     try {
       // v2 kit wins when present (the new sound model).
       if (v.kit) {
@@ -1732,7 +1944,8 @@ class AudioEngine {
       noteCount: clip.notes.length,
     });
     const v = this.voices.get(track.id);
-    if (!v) return ids;
+    const hasLeanDrumVoice = track.kind === "drums" && this.leanDrumVoices.has(track.id);
+    if (!v && !hasLeanDrumVoice) return ids;
     const startBeats = clip.start;
     // Merge project-wide groove (global defaults) under track overrides.
     const groove = getGroove(track.groove, this.globalGroove);
@@ -1814,7 +2027,7 @@ class AudioEngine {
           } else {
             this.triggerDrumAt(track.id, piece, baseVel, fireAt);
           }
-        } else if (v.poly) {
+        } else if (v?.poly) {
           const dur = Math.max(0.05, (ev.duration * 60) / bpm);
           if (retrigger > 1) {
             const spacing = stepSec / retrigger;

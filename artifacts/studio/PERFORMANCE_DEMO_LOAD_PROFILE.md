@@ -115,3 +115,83 @@ Conclusion: the Trap Starter blocker is not default AudioWorklet creation. The
 remaining blocker is Tone/Web Audio source and gain churn during playback and
 schedule preparation, with ConstantSourceNode/GainNode creation dominating the
 captured stacks.
+
+---
+
+## 2026-06-16 Lean Voice Trap Starter Update
+
+Latest short profile:
+
+- `runtime-profile/runtime-profile-1781624432573.json`
+
+Result for `load-trap-and-10-minute-playback-mixer-scope`:
+
+- Status: pass for the short run.
+- Largest long task: `205 ms`.
+- Total long-task time: `589 ms`.
+- `constantSourceCreatesDelta`: `0`.
+- `gainNodeCreatesDelta`: `49`.
+- `audioWorkletNodesDelta`: `0`.
+
+This is a major improvement from the prior traced profile:
+
+- Prior largest long task: `7,417 ms`.
+- Prior total long-task time: `12,061 ms`.
+- Prior dominant stack: `node-connect:ConstantSourceNode=1996`.
+
+Trap Starter track inventory is now documented in
+`PERFORMANCE_VOICE_COST_PROFILE.md`.
+
+### Caveat
+
+The latest Trap Starter voice-mode snapshots do not show an active lean drum
+voice during the scenario. They show two Tone voices from the prior/default
+schedule state, followed by those voices being disposed. Therefore the measured
+Trap Starter improvement is valid for this short profile, but it does not yet
+prove that a fresh Trap Starter session schedules the drum track through the
+lean path. A focused fresh-session Trap Starter profile is still required.
+
+### Release Safety
+
+Still not release-safe. The short profile still fails later visualizer,
+repeated preset/project-load, save/load, JSON, and WAV scenarios, and the
+10-minute production playback acceptance test was not run.
+
+---
+
+## 2026-06-16 Fresh Trap Starter Lean Validation
+
+Latest focused profile:
+
+- `runtime-profile/runtime-profile-1781640194382.json`
+
+Fresh-session flow:
+
+1. Browser/service worker/cache/session state cleared.
+2. Production preview loaded `/studio`.
+3. Audio enabled.
+4. Trap Starter loaded.
+5. Playback armed and started.
+6. Voice modes, audio-node trace, long tasks, and cleanup snapshot captured.
+
+Result:
+
+| Metric | Result |
+| --- | ---: |
+| `voiceModes.lean` | 1 |
+| `voiceModes.tone` | 0 |
+| `leanDrumHitsTriggered` | 39 |
+| `leanOneShotSourcesCreated` | 39 |
+| `leanOneShotSourcesActive` after stop/idle | 0 |
+| `ConstantSourceNode` creates | 0 |
+| `AudioWorkletNode` creation | 0 |
+| Largest long task | 328 ms |
+
+Latest short profile:
+
+- `runtime-profile/runtime-profile-1781658843928.json`
+
+The short runtime profile now passes visualizer, repeated preset switching,
+repeated project load/unload, save/load/autosave, JSON export/import, sample
+import, mixer stress, and service-worker simulation. WAV export remains the
+confirmed blocker and timed out after 180 s with heavy Tone node churn.

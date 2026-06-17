@@ -6,6 +6,7 @@ import { join } from "node:path";
 const BASE_URL = process.env.STUDIO_PROFILE_URL ?? "http://127.0.0.1:5173";
 const PLAYBACK_MINUTES = Number(process.env.STUDIO_PROFILE_MINUTES ?? "10");
 const MATRIX_ONLY = process.env.STUDIO_PROFILE_MATRIX_ONLY === "1";
+const FRESH_TRAP_ONLY = process.env.STUDIO_PROFILE_FRESH_TRAP_ONLY === "1";
 const OUT_DIR = join(process.cwd(), "runtime-profile");
 const RUN_ID = Date.now();
 const OUT_PATH = join(OUT_DIR, `runtime-profile-${RUN_ID}.json`);
@@ -97,6 +98,21 @@ async function browserMetrics(page, cdp) {
     firstPlayFlags: window.__SN_FIRST_PLAY_TRACE__?.flags?.() ?? null,
     listenerTrace: window.__SN_LISTENER_TRACE__?.snapshot?.() ?? null,
     audioNodeTrace: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
+    audioEngineStatus: window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null,
+    overlays: Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog, [data-radix-portal], .modal, .overlay'))
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      })
+      .map((el) => ({
+        tag: el.tagName,
+        role: el.getAttribute("role"),
+        testId: el.getAttribute("data-testid"),
+        ariaLabel: el.getAttribute("aria-label"),
+        text: (el.textContent ?? "").replace(/\s+/g, " ").slice(0, 160),
+      }))
+      .slice(0, 10),
   }));
   return {
     jsHeapUsedMB: Number(((metric.JSHeapUsedSize ?? 0) / 1024 / 1024).toFixed(2)),
@@ -159,6 +175,8 @@ function emptyMetrics(error) {
       firstPlayFlags: null,
       listenerTrace: null,
       audioNodeTrace: null,
+      audioEngineStatus: null,
+      overlays: [],
       metricsError: error?.message || String(error),
     },
   };
@@ -166,6 +184,14 @@ function emptyMetrics(error) {
 
 function audioNodeDelta(before, after, field) {
   return (after.dom.audioNodeTrace?.[field] ?? 0) - (before.dom.audioNodeTrace?.[field] ?? 0);
+}
+
+function audioNodeMapDelta(before, after, mapName, key) {
+  return (after.dom.audioNodeTrace?.[mapName]?.[key] ?? 0) - (before.dom.audioNodeTrace?.[mapName]?.[key] ?? 0);
+}
+
+function audioNodeCounterDelta(before, after, key) {
+  return (after.dom.audioNodeTrace?.[key] ?? 0) - (before.dom.audioNodeTrace?.[key] ?? 0);
 }
 
 async function scenario(name, page, cdp, fn) {
@@ -189,6 +215,7 @@ async function scenario(name, page, cdp, fn) {
   }
   try {
     const timeoutMs = scenarioTimeoutMs(name);
+    await prepareScenarioUi(page, result, `${name}:before`);
     await Promise.race([
       fn(result),
       new Promise((_, reject) =>
@@ -198,6 +225,7 @@ async function scenario(name, page, cdp, fn) {
   } catch (err) {
     result.status = "fail";
     result.error = err?.stack || err?.message || String(err);
+    await captureFailureState(page, result, name).catch(() => {});
   }
   let after;
   try {
@@ -236,6 +264,17 @@ async function scenario(name, page, cdp, fn) {
     audioTrackVoices: audioNodeDelta(before, after, "activeTrackVoices"),
     audioScheduledPlayers: audioNodeDelta(before, after, "activeScheduledPlayers"),
     audioTransportEvents: audioNodeDelta(before, after, "activeTransportEvents"),
+    constantSourceCreates: audioNodeMapDelta(before, after, "nodeCreates", "ConstantSourceNode"),
+    gainNodeCreates: audioNodeMapDelta(before, after, "nodeCreates", "GainNode"),
+    bufferSourceCreates: audioNodeMapDelta(before, after, "nodeCreates", "AudioBufferSourceNode"),
+    oscillatorCreates: audioNodeMapDelta(before, after, "nodeCreates", "OscillatorNode"),
+    leanDrumHitsScheduled: audioNodeCounterDelta(before, after, "leanDrumHitsScheduled"),
+    leanDrumHitsTriggered: audioNodeCounterDelta(before, after, "leanDrumHitsTriggered"),
+    leanOneShotSourcesCreated: audioNodeCounterDelta(before, after, "leanOneShotSourcesCreated"),
+    leanOneShotSourcesEnded: audioNodeCounterDelta(before, after, "leanOneShotSourcesEnded"),
+    leanOneShotSourcesDisconnected: audioNodeCounterDelta(before, after, "leanOneShotSourcesDisconnected"),
+    leanOneShotSourcesActive: after.dom.audioNodeTrace?.leanOneShotSourcesActive ?? null,
+    voiceModes: after.dom.audioEngineStatus?.counts ?? null,
     taskDurationSec: Number((after.taskDurationSec - before.taskDurationSec).toFixed(3)),
   };
   result.longTasks = summarizeLongTasks(before, after);
@@ -261,6 +300,94 @@ async function clickMaybe(page, locator, timeout = 2_000) {
   }
 }
 
+async function togglePerformanceMode(page) {
+  const locator = page.getByRole("button", { name: /toggle performance mode/i });
+  if (await clickMaybe(page, locator, 5_000)) return true;
+  return page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll("button")).find((el) =>
+      /toggle performance mode/i.test(el.getAttribute("aria-label") ?? ""),
+    );
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    button.click();
+    return true;
+  }).catch(() => false);
+}
+
+async function dismissBlockingOverlays(page) {
+  await clickMaybe(page, page.getByRole("button", { name: /^skip$/i }), 2_000);
+  await clickMaybe(page, page.getByRole("button", { name: /^close$/i }), 2_000);
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+async function visibleOverlaySummary(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog, [data-radix-portal], .modal, .overlay'))
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      })
+      .map((el) => ({
+        tag: el.tagName,
+        role: el.getAttribute("role"),
+        testId: el.getAttribute("data-testid"),
+        ariaLabel: el.getAttribute("aria-label"),
+        text: (el.textContent ?? "").replace(/\s+/g, " ").slice(0, 180),
+      }))
+      .slice(0, 12),
+  );
+}
+
+async function prepareScenarioUi(page, result, label) {
+  if (page.isClosed()) return;
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(150).catch(() => {});
+  const overlays = await visibleOverlaySummary(page).catch(() => []);
+  if (overlays.length) {
+    result.notes.push({ uiState: { label, overlays } });
+  }
+}
+
+async function captureFailureState(page, result, name) {
+  const safeName = name.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+  const screenshotPath = join(OUT_DIR, `${safeName}-${RUN_ID}-failure.png`);
+  const domSummary = await page.evaluate(() => ({
+    url: location.href,
+    title: document.title,
+    activeElement: {
+      tag: document.activeElement?.tagName ?? null,
+      text: (document.activeElement?.textContent ?? "").replace(/\s+/g, " ").slice(0, 160),
+      ariaLabel: document.activeElement?.getAttribute("aria-label") ?? null,
+      testId: document.activeElement?.getAttribute("data-testid") ?? null,
+    },
+    overlays: Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog, [data-radix-portal], .modal, .overlay'))
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      })
+      .map((el) => ({
+        tag: el.tagName,
+        role: el.getAttribute("role"),
+        testId: el.getAttribute("data-testid"),
+        ariaLabel: el.getAttribute("aria-label"),
+        text: (el.textContent ?? "").replace(/\s+/g, " ").slice(0, 260),
+      }))
+      .slice(0, 12),
+    buttons: Array.from(document.querySelectorAll("button"))
+      .map((button) => ({
+        text: (button.textContent ?? "").replace(/\s+/g, " ").slice(0, 80),
+        ariaLabel: button.getAttribute("aria-label"),
+        testId: button.getAttribute("data-testid"),
+        disabled: button.hasAttribute("disabled"),
+      }))
+      .slice(0, 80),
+  }));
+  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+  result.notes.push({ failureState: { screenshotPath, domSummary } });
+}
+
 async function captureListenerTrace(page, result, label) {
   const snapshot = await page.evaluate((snapLabel) => ({
     label: snapLabel,
@@ -276,6 +403,7 @@ async function captureAudioNodeTrace(page, result, label) {
     label: snapLabel,
     at: Math.round(performance.now()),
     snapshot: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
+    voiceModes: window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null,
     topStacks: window.__SN_AUDIO_NODE_TRACE__?.dumpTopStacks?.(10) ?? [],
   }), label);
   result.notes.push({ audioNodeTrace: snapshot });
@@ -287,6 +415,93 @@ async function openStudio(page, query = "") {
   await page.waitForSelector("header", { timeout: 30_000 });
   await page.evaluate(() => window.__SN_LISTENER_TRACE__?.start?.()).catch(() => undefined);
   await page.evaluate(() => window.__SN_AUDIO_NODE_TRACE__?.start?.()).catch(() => undefined);
+}
+
+async function clearBrowserState(page) {
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+  await page.evaluate(async () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      localStorage.setItem("studio.onboardingShown", "1");
+    } catch {
+      // ignore
+    }
+    try {
+      if ("caches" in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map((name) => caches.delete(name)));
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      const regs = await navigator.serviceWorker?.getRegistrations?.();
+      await Promise.all((regs ?? []).map((reg) => reg.unregister()));
+    } catch {
+      // ignore
+    }
+  }).catch(() => {});
+}
+
+async function freshTrapStarterLeanValidation(page, cdp, result) {
+  await clearBrowserState(page);
+  await openStudio(
+    page,
+    "?snListenerTrace=1&snAudioNodeTrace=1&snFirstPlayTrace=1&snLeanDrumValidation=1",
+  );
+  await captureAudioNodeTrace(page, result, "fresh-trap:loaded");
+  await enableAudio(page);
+  await captureAudioNodeTrace(page, result, "fresh-trap:after-enable");
+  await loadDemo(page, "trap-starter");
+  await captureAudioNodeTrace(page, result, "fresh-trap:after-load");
+  await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
+  await page.waitForTimeout(750);
+  await clickMaybe(page, page.getByRole("button", { name: /^stop$/i }), 5_000);
+  await page.waitForTimeout(1_250);
+  await captureAudioNodeTrace(page, result, "fresh-trap:after-arm-and-schedule");
+  await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
+  await page.waitForTimeout(2_000);
+  const duringPlay = await captureAudioNodeTrace(page, result, "fresh-trap:during-play");
+  const metricsDuringPlay = await browserMetrics(page, cdp);
+  result.notes.push({
+    freshTrapDuringPlayMetrics: {
+      heapMB: metricsDuringPlay.jsHeapUsedMB,
+      nodes: metricsDuringPlay.nodes,
+      listeners: metricsDuringPlay.jsEventListeners,
+      longTasks: metricsDuringPlay.dom.longTasks.length,
+      overlays: metricsDuringPlay.dom.overlays,
+    },
+  });
+  await clickMaybe(page, page.getByRole("button", { name: /^stop$/i }), 5_000);
+  await page.waitForTimeout(1_500);
+  const afterStop = await captureAudioNodeTrace(page, result, "fresh-trap:after-stop-idle");
+  const counts = duringPlay.voiceModes?.counts ?? {};
+  const trace = duringPlay.snapshot ?? {};
+  const cleanupTrace = afterStop.snapshot ?? {};
+  const failures = [];
+  if ((counts.lean ?? 0) <= 0) failures.push("voiceModes.lean was not > 0 during Trap Starter playback");
+  if ((trace.leanDrumHitsTriggered ?? 0) <= 0) failures.push("leanDrumHitsTriggered did not increase");
+  if ((trace.leanOneShotSourcesCreated ?? 0) <= 0) failures.push("leanOneShotSourcesCreated did not increase");
+  if ((trace.nodeCreates?.ConstantSourceNode ?? 0) > 5) failures.push("ConstantSourceNode creates exceeded near-zero target");
+  if ((trace.activeAudioWorkletNodes ?? 0) !== 0) failures.push("AudioWorkletNode was created by default");
+  if ((cleanupTrace.leanOneShotSourcesActive ?? 0) !== 0) failures.push("lean one-shot sources remained active after stop/idle");
+  result.notes.push({
+    freshTrapAssertions: {
+      counts,
+      leanDrumHitsScheduled: trace.leanDrumHitsScheduled ?? 0,
+      leanDrumHitsTriggered: trace.leanDrumHitsTriggered ?? 0,
+      leanOneShotSourcesCreated: trace.leanOneShotSourcesCreated ?? 0,
+      leanOneShotSourcesEnded: trace.leanOneShotSourcesEnded ?? 0,
+      leanOneShotSourcesDisconnected: trace.leanOneShotSourcesDisconnected ?? 0,
+      leanOneShotSourcesActiveAfterStop: cleanupTrace.leanOneShotSourcesActive ?? null,
+      activeAudioWorkletNodes: trace.activeAudioWorkletNodes ?? null,
+      constantSourceCreates: trace.nodeCreates?.ConstantSourceNode ?? 0,
+      gainNodeCreates: trace.nodeCreates?.GainNode ?? 0,
+      failures,
+    },
+  });
+  if (failures.length) throw new Error(`Fresh Trap Starter lean validation failed: ${failures.join("; ")}`);
 }
 
 async function firstPlayProbe(page, result) {
@@ -321,6 +536,13 @@ async function loadDemo(page, id) {
   await page.getByTestId("demo-list").waitFor({ timeout: 10_000 });
   await page.getByTestId(`demo-load-${id}`).click({ noWaitAfter: true });
   await page.getByTestId("demo-list").waitFor({ state: "hidden", timeout: 20_000 });
+}
+
+async function resetStudioScenario(page, demoId = "trap-starter") {
+  await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1");
+  await prepareScenarioUi(page, { notes: [] }, "scenario-reset");
+  if (demoId) await loadDemo(page, demoId);
+  await enableAudio(page);
 }
 
 async function enableAudio(page) {
@@ -409,6 +631,7 @@ async function exportProjectJson(page) {
     page.getByTestId("export-project-only").click(),
   ]);
   const path = await download.path();
+  await dismissBlockingOverlays(page);
   return path;
 }
 
@@ -419,7 +642,9 @@ async function exportWav(page) {
     page.waitForEvent("download", { timeout: 120_000 }),
     page.getByTestId("export-wav").click(),
   ]);
-  return download.path();
+  const path = await download.path();
+  await dismissBlockingOverlays(page);
+  return path;
 }
 
 async function importProjectJson(page, filePath) {
@@ -512,6 +737,17 @@ async function main() {
     ["first-play-no-analyzers", "?snFirstPlayTrace=1&snDisableAnalyzers=1"],
   ];
 
+  if (FRESH_TRAP_ONLY) {
+    results.push(await scenario("fresh-trap-starter-lean-validation", page, cdp, async (r) => {
+      await freshTrapStarterLeanValidation(page, cdp, r);
+    }));
+    writeSummary();
+    console.log(OUT_PATH);
+    await browser.close();
+    if (results.some((r) => r.status !== "pass")) process.exitCode = 1;
+    return;
+  }
+
   for (const [name, query] of firstPlayMatrix) {
     const matrixPage = await context.newPage();
     const matrixCdp = await context.newCDPSession(matrixPage);
@@ -581,6 +817,9 @@ async function main() {
               activeScheduledPlayers: snap.dom.audioNodeTrace.activeScheduledPlayers,
               activeTransportEvents: snap.dom.audioNodeTrace.activeTransportEvents,
               activeAudioWorkletNodes: snap.dom.audioNodeTrace.activeAudioWorkletNodes,
+              constantSourceCreates: snap.dom.audioNodeTrace.nodeCreates?.ConstantSourceNode ?? 0,
+              gainNodeCreates: snap.dom.audioNodeTrace.nodeCreates?.GainNode ?? 0,
+              voiceModes: snap.dom.audioEngineStatus?.counts ?? null,
             }
           : null,
       });
@@ -603,6 +842,7 @@ async function main() {
   writeSummary();
 
   results.push(await scenario("visualizer-performance-mode-stress", page, cdp, async (r) => {
+    await resetStudioScenario(page, "trap-starter");
     await captureListenerTrace(page, r, "visualizer:before-stress");
     await captureAudioNodeTrace(page, r, "visualizer:before-stress");
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
@@ -612,16 +852,21 @@ async function main() {
     await page.waitForTimeout(1_000);
     await captureListenerTrace(page, r, "visualizer:after-close");
     await captureAudioNodeTrace(page, r, "visualizer:after-close");
-    await page.getByRole("button", { name: /toggle performance mode/i }).click();
+    if (!(await togglePerformanceMode(page))) {
+      throw new Error("Performance Mode toggle unavailable after visualizer close");
+    }
     await page.waitForTimeout(1_000);
     await captureListenerTrace(page, r, "visualizer:perf-on");
-    await page.getByRole("button", { name: /toggle performance mode/i }).click();
+    if (!(await togglePerformanceMode(page))) {
+      throw new Error("Performance Mode toggle unavailable for reset");
+    }
     await page.waitForTimeout(1_000);
     await captureListenerTrace(page, r, "visualizer:perf-off");
   }));
   writeSummary();
 
   results.push(await scenario("repeated-preset-switching", page, cdp, async (r) => {
+    await resetStudioScenario(page, "trap-starter");
     await captureAudioNodeTrace(page, r, "preset-switch:before");
     await switchPresets(page, 20);
     await captureAudioNodeTrace(page, r, "preset-switch:after");
@@ -629,6 +874,7 @@ async function main() {
   writeSummary();
 
   results.push(await scenario("repeated-project-load-unload", page, cdp, async (r) => {
+    await resetStudioScenario(page, null);
     const ids = ["trap-starter", "boom-bap-dojo", "cyber-ninja", "lofi-smoke-loop"];
     for (let i = 0; i < 20; i++) {
       await loadDemo(page, ids[i % ids.length]);
@@ -654,6 +900,7 @@ async function main() {
   writeSummary();
 
   results.push(await scenario("save-load-autosave", page, cdp, async (r) => {
+    await resetStudioScenario(page, "trap-starter");
     await page.keyboard.press("s");
     await page.waitForTimeout(9_500);
     await page.getByTestId("project-name-input").fill(`Runtime Profile ${Date.now()}`);
@@ -667,6 +914,7 @@ async function main() {
 
   let exportedJsonPath = null;
   results.push(await scenario("json-export-import-and-malformed-json", page, cdp, async () => {
+    await resetStudioScenario(page, "trap-starter");
     exportedJsonPath = await exportProjectJson(page);
     await importProjectJson(page, exportedJsonPath);
     await malformedJsonImport(page);
@@ -674,6 +922,7 @@ async function main() {
   writeSummary();
 
   results.push(await scenario("wav-export-default-and-demo", page, cdp, async (r) => {
+    await resetStudioScenario(page, "trap-starter");
     const defaultPath = await exportWav(page);
     r.notes.push({ defaultPath });
     await loadDemo(page, "trap-starter");
@@ -713,6 +962,15 @@ async function main() {
     activeTrackVoicesDelta: r.delta?.audioTrackVoices ?? null,
     scheduledPlayersDelta: r.delta?.audioScheduledPlayers ?? null,
     audioTransportDelta: r.delta?.audioTransportEvents ?? null,
+    constantSourceCreatesDelta: r.delta?.constantSourceCreates ?? null,
+    gainNodeCreatesDelta: r.delta?.gainNodeCreates ?? null,
+    leanHitsScheduledDelta: r.delta?.leanDrumHitsScheduled ?? null,
+    leanHitsTriggeredDelta: r.delta?.leanDrumHitsTriggered ?? null,
+    leanSourcesCreatedDelta: r.delta?.leanOneShotSourcesCreated ?? null,
+    leanSourcesEndedDelta: r.delta?.leanOneShotSourcesEnded ?? null,
+    leanSourcesDisconnectedDelta: r.delta?.leanOneShotSourcesDisconnected ?? null,
+    leanSourcesActive: r.delta?.leanOneShotSourcesActive ?? null,
+    voiceModes: r.delta?.voiceModes ? JSON.stringify(r.delta.voiceModes) : null,
   })));
   console.log(OUT_PATH);
 

@@ -47,6 +47,15 @@ export function useTransport() {
     s.project.tracks.map((t) => `${t.id}:${t.muted ? 1 : 0}:${t.solo ? 1 : 0}`).join('|'),
   );
 
+  // Schedule existing clips on play. Re-schedule only when clip structure
+  // or BPM actually changes (scheduleKey), not on every fader/mute move.
+  const scheduledRef = useRef<{ noteIds: number[]; audioPlayers: Array<Tone.Player>; audioIds: number[] }>({
+    noteIds: [],
+    audioPlayers: [],
+    audioIds: [],
+  });
+  const leanPreflightKeyRef = useRef<string | null>(null);
+
   const ensureUnlocked = useCallback(async () => {
     if (!audioUnlocked) {
       firstPlayMark("useTransport.ensureUnlocked:before");
@@ -57,6 +66,36 @@ export function useTransport() {
       });
     }
   }, [audioUnlocked]);
+
+  const prepareLeanDrumPreflight = useCallback(() => {
+    if (projectSchedulesArmed || isPlaying) return;
+    if (leanPreflightKeyRef.current === scheduleKey) return;
+    const tracks = getStore().state.project.tracks;
+    const drumTracks = tracks.filter((t) => t.kind === "drums" && t.noteClips.length > 0);
+    if (drumTracks.length === 0) return;
+    firstPlayMark("project-schedule:lean-preflight:start", {
+      tracks: drumTracks.length,
+    });
+    audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
+    audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
+    const noteIds: number[] = [];
+    for (const t of drumTracks) {
+      audio.ensureTrack(t, {
+        mode: "lean",
+        reason: "lean-preflight",
+        allowHeavy: false,
+        deadlineMs: 50,
+      });
+      for (const c of t.noteClips) {
+        noteIds.push(...audio.scheduleClip(t, c));
+      }
+    }
+    scheduledRef.current = { noteIds, audioPlayers: [], audioIds: [] };
+    leanPreflightKeyRef.current = scheduleKey;
+    firstPlayMark("project-schedule:lean-preflight:complete", {
+      noteIds: noteIds.length,
+    });
+  }, [isPlaying, projectSchedulesArmed, scheduleKey]);
 
   const play = useCallback(async () => {
     const endTiming = startPerfTimer("transport-play");
@@ -72,6 +111,7 @@ export function useTransport() {
         transportState: audio.state,
         playbackState: audio.getPlaybackState(),
       });
+      prepareLeanDrumPreflight();
       const started = audio.play();
       firstPlayMark("useTransport.play:after-engine-play", {
         started,
@@ -80,10 +120,14 @@ export function useTransport() {
       });
       if (started) {
         getStore().set({ isPlaying: true });
-        window.setTimeout(() => {
-          firstPlayMark("project-schedule:armed-after-first-play");
-          setProjectSchedulesArmed(true);
-        }, 0);
+        if (getFirstPlayFlags().leanDrumValidation) {
+          firstPlayMark("project-schedule:lean-validation-skip-full-arm");
+        } else {
+          window.setTimeout(() => {
+            firstPlayMark("project-schedule:armed-after-first-play");
+            setProjectSchedulesArmed(true);
+          }, 0);
+        }
       } else {
         getStore().setStatus("Audio is still starting. Try Play again in a moment.", "warn");
       }
@@ -94,7 +138,7 @@ export function useTransport() {
       });
       endTiming();
     }
-  }, [audioUnlocked, ensureUnlocked]);
+  }, [audioUnlocked, ensureUnlocked, prepareLeanDrumPreflight]);
 
   const pause = useCallback(() => {
     audio.pause();
@@ -237,13 +281,6 @@ export function useTransport() {
     }
   }, [ensureUnlocked]);
 
-  // Schedule existing clips on play. Re-schedule only when clip structure
-  // or BPM actually changes (scheduleKey), not on every fader/mute move.
-  const scheduledRef = useRef<{ noteIds: number[]; audioPlayers: Array<Tone.Player>; audioIds: number[] }>({
-    noteIds: [],
-    audioPlayers: [],
-    audioIds: [],
-  });
   useEffect(() => {
     if (!audioUnlocked) {
       firstPlayMark("project-schedule:deferred-until-audio-unlocked");
@@ -301,7 +338,12 @@ export function useTransport() {
           audioClips: t.audioClips.length,
         });
         try {
-          audio.ensureTrack(t);
+          audio.ensureTrack(t, {
+            mode: t.kind === "drums" ? "lean" : "tone",
+            reason: "project-schedule",
+            allowHeavy: t.kind !== "drums",
+            deadlineMs: t.kind === "drums" ? 50 : undefined,
+          });
         } catch (err) {
           firstPlayMark("project-schedule:ensureTrack-error", {
             trackId: t.id,

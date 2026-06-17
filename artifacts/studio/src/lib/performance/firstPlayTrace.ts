@@ -28,6 +28,7 @@ export interface FirstPlayFlags {
   useMinimalAudioGraph: boolean;
   disableWorldAudio: boolean;
   disableAnalyzers: boolean;
+  leanDrumValidation: boolean;
 }
 
 declare global {
@@ -65,6 +66,7 @@ export function getFirstPlayFlags(): FirstPlayFlags {
     useMinimalAudioGraph: has("snUseMinimalAudioGraph"),
     disableWorldAudio: has("snDisableWorldAudio"),
     disableAnalyzers: has("snDisableAnalyzers"),
+    leanDrumValidation: has("snLeanDrumValidation"),
   };
 }
 
