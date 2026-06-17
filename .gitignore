@@ -7,6 +7,8 @@ out-tsc
 *.tsbuildinfo
 .expo
 .expo-shared
+build
+*.map
 
 # dependencies
 node_modules
@@ -31,6 +33,16 @@ node_modules
 /.sass-cache
 /connect.lock
 /coverage
+/playwright-report
+/test-results
+artifacts/studio/runtime-profile/
+artifacts/studio/playwright-report/
+artifacts/studio/test-results/
+artifacts/studio/.playwright/
+artifacts/studio/debug.log
+artifacts/studio/*.trace.zip
+artifacts/studio/*profile*.json
+artifacts/studio/*profiler*.json
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
