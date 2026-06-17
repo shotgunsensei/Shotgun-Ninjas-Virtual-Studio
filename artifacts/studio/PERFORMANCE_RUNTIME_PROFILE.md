@@ -534,3 +534,64 @@ Latest profile artifacts:
 
 Not release-safe. The short profile still fails on WAV export, so the 10-minute
 production playback acceptance run was not started in this pass.
+
+---
+
+## 2026-06-17 WAV Export Stabilization Verification
+
+Latest generated profiles:
+
+- Short full profile: `runtime-profile/runtime-profile-1781706542117.json`
+- 10-minute production playback profile: `runtime-profile/runtime-profile-1781704150661.json`
+
+These generated profile JSON files are intentionally ignored and should not be
+committed.
+
+### Commands Run
+
+| Command | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly after the native WAV export patch. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Existing sourcemap/import-overlap/large chunk warnings remain. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Pass | All scenarios passed, including WAV export. |
+| Production preview + `STUDIO_PROFILE_MINUTES=10 node scripts/runtime-profile.mjs` | Pass | 10-minute playback scenario and later stress/export scenarios passed. |
+| `corepack pnpm --dir artifacts/studio exec playwright test --reporter=line --workers=1` | Fail to start | Windows did not resolve `playwright` as a command through this `pnpm exec` form. |
+| `corepack pnpm --dir artifacts/studio run test --reporter=line --workers=1` | Timeout / inconclusive | The four welcome-flow tests started, but the command did not exit within 10 minutes and emitted Playwright pattern warnings. |
+
+### Latest Short Profile Results
+
+| Scenario | Status | Largest long task | Key result |
+| --- | --- | ---: | --- |
+| First-play matrix | Pass | 369-545 ms | All seven first-play scenarios passed. |
+| Audio startup / panic / replay | Pass | 323 ms | Startup remains under 500 ms; no default worklets. |
+| Trap Starter short playback | Pass | 548 ms | Short playback completed; still slightly above preferred 500 ms in this run. |
+| Mixer stress | Pass | 0 ms | Completed, but listener growth remains a risk. |
+| Visualizer Performance Mode stress | Pass | 0 ms | Completed. |
+| Repeated preset switching | Pass | 70 ms | Completed. |
+| Repeated project load/unload | Pass | 230 ms | Completed, but DOM/listener growth remains significant. |
+| Sample import small/large | Pass | 835 ms | Import path still has a sub-second long task. |
+| Save/load/autosave | Pass | 0 ms | Completed. |
+| JSON export/import/malformed JSON | Pass | 0 ms | Completed. |
+| WAV export default/demo | Pass | 96 ms | Native WAV route completed in 13.1 s. |
+| Service worker cache update | Pass | 0 ms | Completed. |
+
+### WAV Export Result
+
+The prior WAV scenario timed out after 180 seconds. The current short profile
+completed the default+demo WAV scenario in 13,126 ms with `native-wav` routing,
+0 `ConstantSourceNode` creates, 534 `GainNode` creates, and a 96 ms largest
+long task.
+
+### 10-Minute Playback Result
+
+The 10-minute production profile passed. The 10-minute playback/mixer scope
+scenario completed in 608,172 ms. It still had a 975 ms largest long task and
+`GainNode` delta of 3,764, so release safety is improved but remaining
+long-session audio/UI growth still needs investigation.
+
+### Release Safety
+
+Conditionally closer, but not release-safe. WAV export is no longer the short
+profile blocker and the 10-minute production profile passed. Remaining risks
+are repeated project-load DOM/listener growth, mixer listener growth,
+sub-second sample import stalls, and the Playwright test runner timeout.

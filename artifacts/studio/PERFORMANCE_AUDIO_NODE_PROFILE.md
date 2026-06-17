@@ -241,3 +241,56 @@ All later scenarios except WAV export completed. WAV export is now the confirmed
 audio-node blocker: it timed out after 180 s with `ConstantSourceNode` creates
 up by 2,150, `GainNode` creates up by 16,287, heap up by 136.05 MB, and a
 1,732 ms largest long task.
+
+---
+
+## 2026-06-17 WAV Export Audio Node Result
+
+Latest short profile:
+
+- `runtime-profile/runtime-profile-1781706542117.json`
+
+Generated profile artifacts remain ignored and should not be committed.
+
+### Fix Summary
+
+WAV export now routes through a native `OfflineAudioContext` renderer instead
+of constructing full Tone kit/preset graphs. MP3 keeps the legacy Tone offline
+route.
+
+### Audio Node Comparison
+
+| Metric | Prior WAV export | Latest WAV export |
+| --- | ---: | ---: |
+| Status | Failed / timeout | Pass |
+| Scenario duration | 180 s timeout | 13.1 s |
+| Largest long task | 1,732 ms | 96 ms |
+| Heap delta | +136.05 MB | +33.2 MB |
+| `AudioWorkletNode` delta | 0 | 0 |
+| `ConstantSourceNode` creates | 2,150 | 0 |
+| `GainNode` creates | 16,287 | 534 |
+| `AudioBufferSourceNode` creates | Not isolated | 336 |
+| `OscillatorNode` creates | Not isolated | 154 |
+
+### Export Trace Counters
+
+| Counter | Latest value |
+| --- | ---: |
+| Export route | `native-wav` |
+| Audible native tracks | 5 |
+| Native notes scheduled | 229 |
+| Native drum hits scheduled | 185 |
+| Native sources created | 229 |
+| Tone-required fidelity tracks | 5 |
+
+The `Tone-required fidelity tracks` count means the stabilized native WAV
+renderer approximated tracks that would need Tone for exact fidelity. It does
+not mean those tracks were promoted to Tone during WAV export.
+
+### Remaining Audio Node Risks
+
+- MP3 export can still hit the Tone offline renderer.
+- Native WAV export still creates per-hit/per-note one-shot source nodes, but
+  the count is bounded by project events instead of Tone internals.
+- Repeated project-load stress still grows DOM/listener counters and should be
+  separated from audio-node creation in the next pass.

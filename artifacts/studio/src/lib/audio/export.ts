@@ -4,6 +4,7 @@ import type {
   BassPreset,
   DrumsPreset,
   GuitarPreset,
+  NoteEvent,
   PianoPreset,
   Project,
   Track,
@@ -24,6 +25,7 @@ import {
   startPerfTimer,
   trackAudioResource,
 } from "../../utils/performanceDiagnostics";
+import { recordExportTrace } from "../performance/exportTrace";
 
 const SAMPLE_RATE = 44100;
 const CHANNELS = 2;
@@ -53,6 +55,8 @@ export interface ExportResult {
   extension: string;
   mimeType: string;
   clipping?: { clipped: boolean; peakDb: number };
+  route?: "native-wav" | "tone-offline";
+  warnings?: string[];
 }
 
 interface RenderVoice {
@@ -109,12 +113,172 @@ export async function renderProject(
   }
 }
 
+interface ExportRange {
+  startBeat: number;
+  endBeat: number;
+  projectSec: number;
+  renderSec: number;
+}
+
+interface ExportPlan extends ExportRange {
+  audibleTracks: Track[];
+  noteEvents: number;
+  drumEvents: number;
+  melodicEvents: number;
+  audioClips: number;
+  toneRequiredTracks: number;
+  estimatedPcmBytes: number;
+  estimatedWavBytes: number;
+  route: "native-wav" | "tone-offline";
+  warnings: string[];
+}
+
 async function _renderProjectInner(
   project: Project,
   format: ExportFormat,
   onProgress?: (p: RenderProgress) => void,
   options: RenderOptions = {},
 ): Promise<ExportResult> {
+  const plan = createExportPlan(project, format, options);
+  recordExportTrace("preflight", {
+    format,
+    route: plan.route,
+    audibleTracks: plan.audibleTracks.length,
+    noteEvents: plan.noteEvents,
+    drumEvents: plan.drumEvents,
+    melodicEvents: plan.melodicEvents,
+    audioClips: plan.audioClips,
+    toneRequiredTracks: plan.toneRequiredTracks,
+    durationSec: Math.round(plan.renderSec * 100) / 100,
+    estimatedPcmMB: Math.round((plan.estimatedPcmBytes / (1024 * 1024)) * 10) / 10,
+    estimatedWavMB: Math.round((plan.estimatedWavBytes / (1024 * 1024)) * 10) / 10,
+    warnings: plan.warnings,
+  });
+
+  if (plan.renderSec > 20 * 60 || plan.estimatedPcmBytes > 512 * 1024 * 1024) {
+    const message =
+      "WAV export range is too large for the in-browser renderer. Export a shorter range or split the project first.";
+    recordExportTrace("error", { format, route: plan.route, message });
+    throw new Error(message);
+  }
+
+  onProgress?.({ phase: "decoding", progress: 0 });
+  const decoded = await decodeAudioClips(project, (p) =>
+    onProgress?.({ phase: "decoding", progress: p }),
+  );
+  onProgress?.({ phase: "decoding", progress: 1 });
+
+  recordExportTrace("route", { format, route: plan.route });
+  const buffer =
+    format === "wav"
+      ? await renderNativeWav(project, decoded, plan, (p) =>
+          onProgress?.({ phase: "rendering", progress: p }),
+        )
+      : await renderOffline(project, decoded, plan.renderSec, plan.startBeat, plan.endBeat, (p) =>
+          onProgress?.({ phase: "rendering", progress: p }),
+        );
+  const clipping = detectClipping(buffer);
+
+  onProgress?.({ phase: "encoding", progress: 0 });
+  if (format === "mp3") {
+    const mp3 = encodeMp3(buffer, (p) =>
+      onProgress?.({ phase: "encoding", progress: p }),
+    );
+    onProgress?.({ phase: "encoding", progress: 1 });
+    return {
+      blob: new Blob([mp3.buffer as ArrayBuffer], { type: "audio/mpeg" }),
+      extension: "mp3",
+      mimeType: "audio/mpeg",
+      clipping,
+      route: "tone-offline",
+      warnings: plan.warnings,
+    };
+  }
+  const wav = await encodeWav(buffer, (p) =>
+    onProgress?.({ phase: "encoding", progress: p }),
+  );
+  onProgress?.({ phase: "encoding", progress: 1 });
+  recordExportTrace("result", {
+    format,
+    route: plan.route,
+    wavBytes: wav.byteLength,
+    warnings: plan.warnings,
+  });
+  return {
+    blob: new Blob([wav], { type: "audio/wav" }),
+    extension: "wav",
+    mimeType: "audio/wav",
+    clipping,
+    route: plan.route,
+    warnings: plan.warnings,
+  };
+}
+
+function createExportPlan(
+  project: Project,
+  format: ExportFormat,
+  options: RenderOptions,
+): ExportPlan {
+  const range = resolveExportRange(project, options);
+  const anySolo = project.tracks.some((t) => t.solo);
+  const audibleTracks = project.tracks.filter((t) => !t.muted && (!anySolo || t.solo));
+  let noteEvents = 0;
+  let drumEvents = 0;
+  let melodicEvents = 0;
+  let audioClips = 0;
+  let toneRequiredTracks = 0;
+  const warnings: string[] = [];
+
+  for (const track of audibleTracks) {
+    let trackNeedsToneFidelity = false;
+    if (format === "wav" && track.kind !== "drums" && track.noteClips.some((clip) => clip.notes.length > 0)) {
+      trackNeedsToneFidelity = true;
+    }
+    if (track.fxRack && Object.values(track.fxRack).some((fx) => fx?.enabled)) {
+      trackNeedsToneFidelity = true;
+    }
+    if (trackNeedsToneFidelity) toneRequiredTracks += 1;
+    for (const clip of track.noteClips) {
+      for (const ev of clip.notes) {
+        const absT = clip.start + ev.time + (ev.microTiming ?? 0);
+        if (absT < range.startBeat || absT >= range.endBeat) continue;
+        noteEvents += 1;
+        if (track.kind === "drums") drumEvents += 1;
+        else melodicEvents += 1;
+      }
+    }
+    for (const clip of track.audioClips) {
+      if (clip.start >= range.endBeat) continue;
+      const clipEndBeat = clip.start + clip.durationSec * (project.bpm / 60);
+      if (clipEndBeat <= range.startBeat) continue;
+      audioClips += 1;
+      if (clip.reversed) warnings.push(`Reversed audio clip "${clip.name ?? clip.id}" renders forward in the stabilized WAV path.`);
+    }
+  }
+
+  if (format === "wav" && toneRequiredTracks > 0) {
+    warnings.push(
+      "WAV export used the stabilized native renderer; Tone-only melodic and advanced FX tracks are approximated to avoid browser stalls.",
+    );
+  }
+
+  const frames = Math.ceil(range.renderSec * SAMPLE_RATE);
+  return {
+    ...range,
+    audibleTracks,
+    noteEvents,
+    drumEvents,
+    melodicEvents,
+    audioClips,
+    toneRequiredTracks,
+    estimatedPcmBytes: frames * CHANNELS * 4,
+    estimatedWavBytes: 44 + frames * CHANNELS * 2,
+    route: format === "wav" ? "native-wav" : "tone-offline",
+    warnings,
+  };
+}
+
+function resolveExportRange(project: Project, options: RenderOptions): ExportRange {
   const beatsPerSec = project.bpm / 60;
   let startBeat: number;
   let endBeat: number;
@@ -137,41 +301,11 @@ async function _renderProjectInner(
     endBeat = project.bars * 4;
   }
   const projectSec = Math.max(0, (endBeat - startBeat) / beatsPerSec);
-  const renderSec = Math.max(0.5, projectSec + TAIL_SEC);
-
-  onProgress?.({ phase: "decoding", progress: 0 });
-  const decoded = await decodeAudioClips(project, (p) =>
-    onProgress?.({ phase: "decoding", progress: p }),
-  );
-  onProgress?.({ phase: "decoding", progress: 1 });
-
-  const buffer = await renderOffline(project, decoded, renderSec, startBeat, endBeat, (p) =>
-    onProgress?.({ phase: "rendering", progress: p }),
-  );
-  const clipping = detectClipping(buffer);
-
-  onProgress?.({ phase: "encoding", progress: 0 });
-  if (format === "mp3") {
-    const mp3 = encodeMp3(buffer, (p) =>
-      onProgress?.({ phase: "encoding", progress: p }),
-    );
-    onProgress?.({ phase: "encoding", progress: 1 });
-    return {
-      blob: new Blob([mp3.buffer as ArrayBuffer], { type: "audio/mpeg" }),
-      extension: "mp3",
-      mimeType: "audio/mpeg",
-      clipping,
-    };
-  }
-  const wav = await encodeWav(buffer, (p) =>
-    onProgress?.({ phase: "encoding", progress: p }),
-  );
-  onProgress?.({ phase: "encoding", progress: 1 });
   return {
-    blob: new Blob([wav], { type: "audio/wav" }),
-    extension: "wav",
-    mimeType: "audio/wav",
-    clipping,
+    startBeat,
+    endBeat,
+    projectSec,
+    renderSec: Math.max(0.5, projectSec + TAIL_SEC),
   };
 }
 
@@ -220,6 +354,315 @@ async function decodeAudioClips(
     await ac.close();
   }
   return out;
+}
+
+interface NativeTrackGraph {
+  input: GainNode;
+  pan: StereoPannerNode;
+  filter: BiquadFilterNode;
+}
+
+const DRUM_FREQ: Record<string, number> = {
+  kick: 55,
+  snare: 190,
+  hat: 7600,
+  ohat: 6200,
+  clap: 1300,
+  tomLow: 110,
+  tomHigh: 210,
+  crash: 4200,
+  fx: 900,
+};
+
+const DRUM_DECAY: Record<string, number> = {
+  kick: 0.36,
+  snare: 0.16,
+  hat: 0.045,
+  ohat: 0.32,
+  clap: 0.11,
+  tomLow: 0.24,
+  tomHigh: 0.18,
+  crash: 0.8,
+  fx: 0.48,
+};
+
+async function renderNativeWav(
+  project: Project,
+  audioBuffers: Map<string, AudioBuffer>,
+  plan: ExportPlan,
+  onProgress: (p: number) => void,
+): Promise<AudioBuffer> {
+  const untrackOfflineRender = trackAudioResource("native-wav-render");
+  const frames = Math.max(1, Math.ceil(plan.renderSec * SAMPLE_RATE));
+  const ctx = new OfflineAudioContext(CHANNELS, frames, SAMPLE_RATE);
+  const master = ctx.createGain();
+  const noiseBuffer = makeNativeNoiseBuffer(ctx);
+  const cleanupNodes: AudioNode[] = [master];
+  let scheduled = 0;
+
+  master.gain.value = clamp01(project.masterVolume);
+  master.connect(ctx.destination);
+  onProgress(0);
+
+  try {
+    for (const track of plan.audibleTracks) {
+      const graph = createNativeTrackGraph(ctx, track, master);
+      cleanupNodes.push(graph.input, graph.pan, graph.filter);
+      recordExportTrace("native-track", { trackId: track.id, kind: track.kind });
+
+      for (const clip of track.noteClips) {
+        for (const ev of clip.notes) {
+          if (!shouldRenderNote(clip.start, ev, plan)) continue;
+          const time = beatToSeconds(clip.start + ev.time + (ev.microTiming ?? 0), project.bpm, plan.startBeat);
+          const velocity = Math.max(0, Math.min(1, ev.velocity * (ev.accent ? 1.18 : 1)));
+          if (track.kind === "drums") {
+            scheduleNativeDrumHit(ctx, graph.input, noiseBuffer, ev.note, time, velocity);
+          } else {
+            scheduleNativeMelodicNote(ctx, graph.input, track, ev, time, project.bpm, velocity);
+          }
+          scheduled += 1;
+          recordExportTrace("native-note", { trackId: track.id, kind: track.kind });
+          if (scheduled % 256 === 0) {
+            recordExportTrace("native-yield", { scheduled });
+            onProgress(Math.min(0.15, scheduled / Math.max(1, plan.noteEvents) * 0.15));
+            await yieldToMain();
+          }
+        }
+      }
+
+      for (const clip of track.audioClips) {
+        scheduleNativeAudioClip(ctx, graph.input, audioBuffers.get(clip.id), clip, project.bpm, plan);
+      }
+    }
+
+    const estimatedMs = Math.max(500, plan.renderSec * 120);
+    const startedAt = performance.now();
+    let progressError: unknown = null;
+    const tick = window.setInterval(() => {
+      if (progressError) return;
+      try {
+        const elapsed = performance.now() - startedAt;
+        onProgress(Math.min(0.95, 0.15 + (elapsed / estimatedMs) * 0.8));
+      } catch (err) {
+        progressError = err;
+      }
+    }, 100);
+    try {
+      const buffer = await ctx.startRendering();
+      if (progressError) throw progressError;
+      onProgress(1);
+      return buffer;
+    } finally {
+      window.clearInterval(tick);
+    }
+  } finally {
+    for (const node of cleanupNodes) {
+      try {
+        node.disconnect();
+      } catch {
+        // ignore offline cleanup races
+      }
+    }
+    untrackOfflineRender();
+  }
+}
+
+function createNativeTrackGraph(
+  ctx: OfflineAudioContext,
+  track: Track,
+  destination: AudioNode,
+): NativeTrackGraph {
+  const input = ctx.createGain();
+  const pan = ctx.createStereoPanner();
+  const filter = ctx.createBiquadFilter();
+  input.gain.value = clamp01(track.volume);
+  pan.pan.value = clampPan(track.pan);
+  filter.type = "lowpass";
+  filter.frequency.value = 200 + clamp01(track.fx.filter) ** 2 * 17800;
+  filter.Q.value = 0.7;
+  input.connect(pan);
+  pan.connect(filter);
+  filter.connect(destination);
+  return { input, pan, filter };
+}
+
+function shouldRenderNote(
+  clipStart: number,
+  ev: NoteEvent,
+  plan: ExportPlan,
+): boolean {
+  const absT = clipStart + ev.time + (ev.microTiming ?? 0);
+  return absT >= plan.startBeat && absT < plan.endBeat && ev.velocity > 0.001;
+}
+
+function beatToSeconds(beat: number, bpm: number, startBeat: number): number {
+  return Math.max(0, ((beat - startBeat) * 60) / bpm);
+}
+
+function makeNativeNoiseBuffer(ctx: OfflineAudioContext): AudioBuffer {
+  const length = Math.max(1, Math.floor(ctx.sampleRate * 0.35));
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
+function scheduleNativeDrumHit(
+  ctx: OfflineAudioContext,
+  destination: AudioNode,
+  noiseBuffer: AudioBuffer,
+  piece: string,
+  time: number,
+  velocity: number,
+): void {
+  const decay = DRUM_DECAY[piece] ?? 0.12;
+  const sourceGain = ctx.createGain();
+  const pieceFilter = ctx.createBiquadFilter();
+  sourceGain.gain.setValueAtTime(Math.max(0.0001, velocity), time);
+  sourceGain.gain.exponentialRampToValueAtTime(0.0001, time + decay);
+  pieceFilter.type = nativeDrumFilterType(piece);
+  pieceFilter.frequency.setValueAtTime(DRUM_FREQ[piece] ?? 800, time);
+  pieceFilter.Q.value = piece === "kick" ? 0.7 : 1.2;
+  pieceFilter.connect(sourceGain);
+  sourceGain.connect(destination);
+  recordExportTrace("native-drum-hit", { piece });
+
+  if (nativeDrumUsesNoise(piece)) {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer;
+    src.connect(pieceFilter);
+    src.start(time);
+    src.stop(time + decay);
+    recordExportTrace("native-source", { kind: "AudioBufferSourceNode", piece });
+    return;
+  }
+
+  const osc = ctx.createOscillator();
+  const startFreq = DRUM_FREQ[piece] ?? 90;
+  osc.type = piece === "kick" ? "sine" : "triangle";
+  osc.frequency.setValueAtTime(startFreq, time);
+  if (piece === "kick") {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, startFreq * 0.45), time + 0.08);
+  }
+  osc.connect(pieceFilter);
+  osc.start(time);
+  osc.stop(time + decay);
+  recordExportTrace("native-source", { kind: "OscillatorNode", piece });
+}
+
+function scheduleNativeMelodicNote(
+  ctx: OfflineAudioContext,
+  destination: AudioNode,
+  track: Track,
+  ev: NoteEvent,
+  time: number,
+  bpm: number,
+  velocity: number,
+): void {
+  const dur = Math.max(0.05, (ev.duration * 60) / bpm);
+  const freq = noteToFrequency(ev.note);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = nativeOscillatorType(track);
+  osc.frequency.setValueAtTime(freq, time);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(Math.max(0.0001, velocity * nativeTrackGainScale(track)), time + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + dur + nativeReleaseSeconds(track));
+  osc.connect(gain);
+  gain.connect(destination);
+  osc.start(time);
+  osc.stop(time + dur + nativeReleaseSeconds(track));
+  recordExportTrace("native-source", { kind: "OscillatorNode", trackKind: track.kind });
+}
+
+function scheduleNativeAudioClip(
+  ctx: OfflineAudioContext,
+  destination: AudioNode,
+  buffer: AudioBuffer | undefined,
+  clip: { id: string; start: number; durationSec: number; offsetSec?: number; reversed?: boolean },
+  bpm: number,
+  plan: ExportPlan,
+): void {
+  if (!buffer) return;
+  const beatStart = clip.start - plan.startBeat;
+  const offset = Math.max(0, clip.offsetSec ?? 0);
+  const duration = Math.max(0, clip.durationSec);
+  let when = Math.max(0, (beatStart * 60) / bpm);
+  let sourceOffset = offset;
+  let sourceDuration = duration;
+  if (beatStart < 0) {
+    const skipSec = (-beatStart * 60) / bpm;
+    if (skipSec >= duration) return;
+    sourceOffset += skipSec;
+    sourceDuration -= skipSec;
+    when = 0;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(destination);
+  src.start(when, sourceOffset, sourceDuration);
+  recordExportTrace("native-audio-clip", { clipId: clip.id, reversed: !!clip.reversed });
+  recordExportTrace("native-source", { kind: "AudioBufferSourceNode", clipId: clip.id });
+}
+
+function nativeDrumUsesNoise(piece: string): boolean {
+  return piece === "snare" || piece === "hat" || piece === "ohat" || piece === "clap" || piece === "crash" || piece === "fx";
+}
+
+function nativeDrumFilterType(piece: string): BiquadFilterType {
+  if (piece === "kick" || piece === "tomLow" || piece === "tomHigh") return "lowpass";
+  if (piece === "snare" || piece === "clap" || piece === "fx") return "bandpass";
+  return "highpass";
+}
+
+function nativeOscillatorType(track: Track): OscillatorType {
+  if (track.kind === "bass") return track.preset === "sub" ? "sine" : "sawtooth";
+  if (track.kind === "guitar") return "triangle";
+  return "sine";
+}
+
+function nativeTrackGainScale(track: Track): number {
+  if (track.kind === "bass") return 0.8;
+  if (track.kind === "guitar") return 0.45;
+  return 0.55;
+}
+
+function nativeReleaseSeconds(track: Track): number {
+  if (track.kind === "bass") return 0.04;
+  if (track.kind === "guitar") return 0.08;
+  return 0.12;
+}
+
+function noteToFrequency(note: string): number {
+  const match = note.match(/^([A-Ga-g][#b]?)(-?\d+)$/);
+  if (!match) return 440;
+  const semitones: Record<string, number> = {
+    C: 0,
+    "C#": 1,
+    Db: 1,
+    D: 2,
+    "D#": 3,
+    Eb: 3,
+    E: 4,
+    F: 5,
+    "F#": 6,
+    Gb: 6,
+    G: 7,
+    "G#": 8,
+    Ab: 8,
+    A: 9,
+    "A#": 10,
+    Bb: 10,
+    B: 11,
+  };
+  const pitch = match[1][0].toUpperCase() + match[1].slice(1);
+  const octave = Number.parseInt(match[2], 10);
+  const midi = (octave + 1) * 12 + (semitones[pitch] ?? 0);
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
 }
 
 async function renderOffline(

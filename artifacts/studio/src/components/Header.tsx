@@ -372,6 +372,9 @@ export function Header() {
         downloadBlob(result.blob, filename);
         getStore().setStatus(`Exported ${format.toUpperCase()}`, "info");
       }
+      if (result.warnings?.length) {
+        getStore().setStatus(result.warnings[0], "warn");
+      }
       if (format === "wav") setLastWav({ blob: result.blob, filename });
       // Offer the share card after any successful export
       setShareCardData({
@@ -380,11 +383,15 @@ export function Header() {
         genre: (proj as any).genre as string | undefined,
         exportDate: new Date(),
       });
+      setExportModalOpen(false);
+      setExportError(null);
       setShareCardOpen(true);
     } catch (err) {
       const msg = (err as Error).message || "Export failed";
       if (msg === "Export cancelled") {
         getStore().setStatus("Export cancelled", "warn");
+        setExportModalOpen(false);
+        setExportError(null);
       } else {
         setExportError(msg);
         getStore().setStatus(`Export failed: ${msg}`, "error");

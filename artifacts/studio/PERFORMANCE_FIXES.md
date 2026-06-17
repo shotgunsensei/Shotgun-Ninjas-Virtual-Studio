@@ -979,6 +979,99 @@ acceptance test has not passed.
 
 ---
 
+## 2026-06-17 WAV Export Stabilization
+
+### Root Causes Confirmed
+
+- WAV export was still using the full Tone offline renderer.
+- Trap Starter WAV export created Tone kit/preset graphs during export,
+  producing the prior `ConstantSourceNode +2,150` and `GainNode +16,287`
+  churn.
+- The prior WAV scenario timed out after 180 seconds, so it was the remaining
+  short-profile blocker.
+
+### Fixes Applied
+
+- Added `src/lib/performance/exportTrace.ts`.
+  - Opt-in via `?snExportTrace=1` or `localStorage["sn:exportTrace"] = "1"`.
+  - Exposes `window.__SN_EXPORT_TRACE__.snapshot()` and `.clear()`.
+  - Records export preflight, route, result/error, native tracks, notes, drum
+    hits, source creation, audio clips, and scheduling yields.
+- Installed export trace from `src/main.tsx`.
+- Added an explicit WAV export plan in `src/lib/audio/export.ts`.
+  - Computes render range, event counts, audio clip counts, estimated PCM/WAV
+    bytes, and Tone-required fidelity tracks.
+  - Rejects very large export ranges before allocating an offline render.
+- Added native WAV rendering with `OfflineAudioContext`.
+  - One offline context per export.
+  - Per-track gain/pan/filter nodes.
+  - Bounded one-shot drum source scheduling.
+  - Simple native oscillator fallback for melodic Tone-only tracks.
+  - Existing audio clip decoding stays batched.
+  - Scheduling yields every 256 note events.
+- Kept MP3 on the existing Tone offline route.
+- Closed the export modal after successful or cancelled audio export so later
+  profile steps start from a clean UI state.
+- Updated `scripts/runtime-profile.mjs`.
+  - Adds export trace to browser metrics.
+  - Enables `snExportTrace=1` for studio profile runs.
+  - Captures export trace and audio-node trace before/after WAV exports.
+
+### Verification
+
+| Command / profile | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Existing sourcemap/import-overlap/large chunk warnings remain. |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Pass | All scenarios passed. Latest profile: `runtime-profile/runtime-profile-1781706542117.json`. |
+| Production preview + `STUDIO_PROFILE_MINUTES=10 node scripts/runtime-profile.mjs` | Pass | 10-minute playback and later scenarios passed. Profile: `runtime-profile/runtime-profile-1781704150661.json`. |
+| `corepack pnpm --dir artifacts/studio exec playwright test --reporter=line --workers=1` | Failed to start | Windows did not resolve `playwright` through this `pnpm exec` form. |
+| `corepack pnpm --dir artifacts/studio run test --reporter=line --workers=1` | Timeout / inconclusive | The four welcome-flow tests started, but the command did not exit within 10 minutes and emitted Playwright pattern warnings. |
+
+### WAV Export Before / After
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Status | Failed / 180 s timeout | Pass |
+| Scenario duration | 180 s timeout | 13,126 ms |
+| Largest long task | 1,732 ms | 96 ms |
+| Total long task time | Not useful due timeout | 499 ms |
+| Heap delta | +136.05 MB | +33.2 MB |
+| `AudioWorkletNode` delta | 0 | 0 |
+| `ConstantSourceNode` creates | 2,150 | 0 |
+| `GainNode` creates | 16,287 | 534 |
+| Export route | Tone offline | `native-wav` |
+
+Latest export trace for Trap Starter WAV:
+
+- Audible native tracks: 5.
+- Native notes scheduled: 229.
+- Native drum hits scheduled: 185.
+- Native sources created: 229.
+- WAV output size: 10,029,644 bytes.
+
+### Known Limitations
+
+- WAV export for Tone-only melodic presets and advanced FX is a stabilized
+  native approximation, not exact Tone fidelity.
+- MP3 still uses the legacy Tone offline renderer and may need the same native
+  or hybrid path later.
+- The 10-minute profile passed, but a 975 ms long task remained in the
+  10-minute playback/mixer scope scenario.
+- Repeated project-load stress still grows DOM/listener counters
+  significantly.
+- Playwright welcome-flow tests did not produce a clean pass because the test
+  command hung on Windows after starting all four tests.
+
+### Release Safety
+
+Not release-safe. The critical WAV export blocker is fixed and the 10-minute
+production profile passed, but remaining DOM/listener growth, sample-import
+long tasks, and the Playwright test-runner hang still block a release-safe
+claim.
+
+---
+
 ## 2026-06-16 Lean Voice Validation And Stress Harness Patch
 
 ### Root Causes Confirmed

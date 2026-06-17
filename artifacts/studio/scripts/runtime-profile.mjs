@@ -98,6 +98,7 @@ async function browserMetrics(page, cdp) {
     firstPlayFlags: window.__SN_FIRST_PLAY_TRACE__?.flags?.() ?? null,
     listenerTrace: window.__SN_LISTENER_TRACE__?.snapshot?.() ?? null,
     audioNodeTrace: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
+    exportTrace: window.__SN_EXPORT_TRACE__?.snapshot?.() ?? null,
     audioEngineStatus: window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null,
     overlays: Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog, [data-radix-portal], .modal, .overlay'))
       .filter((el) => {
@@ -175,6 +176,7 @@ function emptyMetrics(error) {
       firstPlayFlags: null,
       listenerTrace: null,
       audioNodeTrace: null,
+      exportTrace: null,
       audioEngineStatus: null,
       overlays: [],
       metricsError: error?.message || String(error),
@@ -410,8 +412,20 @@ async function captureAudioNodeTrace(page, result, label) {
   return snapshot;
 }
 
+async function captureExportTrace(page, result, label) {
+  const snapshot = await page.evaluate((snapLabel) => ({
+    label: snapLabel,
+    at: Math.round(performance.now()),
+    snapshot: window.__SN_EXPORT_TRACE__?.snapshot?.() ?? null,
+  }), label);
+  result.notes.push({ exportTrace: snapshot });
+  return snapshot;
+}
+
 async function openStudio(page, query = "") {
-  await page.goto(`${BASE_URL}/studio${query}`, { waitUntil: "domcontentloaded" });
+  const separator = query.includes("?") ? "&" : "?";
+  const exportTraceQuery = query.includes("snExportTrace=1") ? "" : `${separator}snExportTrace=1`;
+  await page.goto(`${BASE_URL}/studio${query}${exportTraceQuery}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("header", { timeout: 30_000 });
   await page.evaluate(() => window.__SN_LISTENER_TRACE__?.start?.()).catch(() => undefined);
   await page.evaluate(() => window.__SN_AUDIO_NODE_TRACE__?.start?.()).catch(() => undefined);
@@ -638,8 +652,9 @@ async function exportProjectJson(page) {
 async function exportWav(page) {
   await page.getByRole("button", { name: /export/i }).click();
   await page.getByTestId("export-wav").waitFor({ timeout: 10_000 });
+  await page.evaluate(() => window.__SN_EXPORT_TRACE__?.clear?.()).catch(() => undefined);
   const [download] = await Promise.all([
-    page.waitForEvent("download", { timeout: 120_000 }),
+    page.waitForEvent("download", { timeout: 180_000 }),
     page.getByTestId("export-wav").click(),
   ]);
   const path = await download.path();
@@ -923,10 +938,18 @@ async function main() {
 
   results.push(await scenario("wav-export-default-and-demo", page, cdp, async (r) => {
     await resetStudioScenario(page, "trap-starter");
+    await captureAudioNodeTrace(page, r, "wav-export:before-default");
+    await captureExportTrace(page, r, "wav-export:before-default");
     const defaultPath = await exportWav(page);
+    await captureExportTrace(page, r, "wav-export:after-default");
+    await captureAudioNodeTrace(page, r, "wav-export:after-default");
     r.notes.push({ defaultPath });
     await loadDemo(page, "trap-starter");
+    await captureAudioNodeTrace(page, r, "wav-export:before-demo");
+    await captureExportTrace(page, r, "wav-export:before-demo");
     const demoPath = await exportWav(page);
+    await captureExportTrace(page, r, "wav-export:after-demo");
+    await captureAudioNodeTrace(page, r, "wav-export:after-demo");
     r.notes.push({ demoPath });
   }));
   writeSummary();

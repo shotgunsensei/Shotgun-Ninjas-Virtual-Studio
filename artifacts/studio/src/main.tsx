@@ -1,4 +1,5 @@
 import "./lib/performance/audioNodeTrace";
+import "./lib/performance/exportTrace";
 import "./lib/performance/listenerTrace";
 import { createRoot } from "react-dom/client";
 import { Suspense } from "react";
