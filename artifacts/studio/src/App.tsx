@@ -89,6 +89,7 @@ import {
   startPerfTimer,
   trackInterval,
 } from "./utils/performanceDiagnostics";
+import { markSampleImport } from "./lib/performance/sampleImportTrace";
 import {
   assertSampleImportAllowed,
   formatBytes,
@@ -333,6 +334,7 @@ export default function App() {
             audio.panicStopAll();
             getStore().set((s) => ({
               transportScheduleRevision: s.transportScheduleRevision + 1,
+              panicRevision: s.panicRevision + 1,
             }));
           }}
         >
@@ -498,6 +500,7 @@ function Studio() {
         audio.panicStopAll();
         getStore().set((s) => ({
           transportScheduleRevision: s.transportScheduleRevision + 1,
+          panicRevision: s.panicRevision + 1,
         }));
         stop();
         return;
@@ -976,8 +979,15 @@ function Studio() {
   const handleDroppedAudioFiles = (files: File[]) => {
     const f = files[0];
     if (!f) return;
+    markSampleImport("file-drop", {
+      bytes: f.size,
+      type: f.type,
+      name: f.name,
+    });
     try {
+      markSampleImport("metadata-validation:start", { bytes: f.size, type: f.type });
       assertSampleImportAllowed(f);
+      markSampleImport("metadata-validation:ok", { bytes: f.size, type: f.type });
       if (isLargeSample(f)) {
         getStore().setStatus(
           `Large sample (${formatBytes(f.size)}). Import may take a moment.`,
@@ -991,7 +1001,13 @@ function Studio() {
           defaultName: f.name.replace(/\.[^.]+$/, "") || "Imported",
         },
       });
+      markSampleImport("ui-state:pending-sample", { bytes: f.size, type: f.type });
     } catch (err) {
+      markSampleImport("metadata-validation:error", {
+        bytes: f.size,
+        type: f.type,
+        error: (err as Error).message,
+      });
       getStore().setStatus((err as Error).message, "error");
     }
   };

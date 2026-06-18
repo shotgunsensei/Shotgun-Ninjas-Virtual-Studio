@@ -4,6 +4,7 @@ import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
 import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
 import { countPerf, timePerfAsync } from "../../utils/performanceDiagnostics";
 import { blobContentFingerprint } from "./performanceGuards";
+import { markSampleImport, timeSampleImport } from "../performance/sampleImportTrace";
 
 const DB_NAME = "shotgun-ninjas-studio";
 /** v1 — initial projects/blobs/meta stores.
@@ -115,10 +116,20 @@ async function serializeAndFlushBlobs(
   const serializedSamples = await Promise.all(
     (project.samples ?? []).map(async (s) => {
       if (s.blob) {
-        const fp = await blobContentFingerprint(s.blob);
+        const sampleBlob = s.blob;
+        const fp = await timeSampleImport(
+          "blob-fingerprint",
+          () => blobContentFingerprint(sampleBlob),
+          { kind: "sample", bytes: sampleBlob.size },
+        );
         if (blobFpCache.get(s.blobKey) !== fp) {
-          countPerf("sampleBlobWrites", 1, { kind: "sample", bytes: s.blob.size });
-          await blobs.put(s.blob, s.blobKey);
+          countPerf("sampleBlobWrites", 1, { kind: "sample", bytes: sampleBlob.size });
+          await timeSampleImport(
+            "indexeddb-blob-write",
+            () => blobs.put(sampleBlob, s.blobKey),
+            { kind: "sample", bytes: sampleBlob.size },
+          );
+          markSampleImport("sample-blob-written", { kind: "sample", bytes: sampleBlob.size });
           blobFpCache.set(s.blobKey, fp);
         }
       }
@@ -136,11 +147,22 @@ async function serializeAndFlushBlobs(
   if (project.chopLab) {
     const cl = project.chopLab;
     if (cl.sampleBlob && cl.sampleBlobKey) {
-      const fp = await blobContentFingerprint(cl.sampleBlob);
+      const sampleBlob = cl.sampleBlob;
+      const sampleBlobKey = cl.sampleBlobKey;
+      const fp = await timeSampleImport(
+        "blob-fingerprint",
+        () => blobContentFingerprint(sampleBlob),
+        { kind: "choplab", bytes: sampleBlob.size },
+      );
       if (blobFpCache.get(cl.sampleBlobKey) !== fp) {
-        countPerf("sampleBlobWrites", 1, { kind: "choplab", bytes: cl.sampleBlob.size });
-        await blobs.put(cl.sampleBlob, cl.sampleBlobKey);
-        blobFpCache.set(cl.sampleBlobKey, fp);
+        countPerf("sampleBlobWrites", 1, { kind: "choplab", bytes: sampleBlob.size });
+        await timeSampleImport(
+          "indexeddb-blob-write",
+          () => blobs.put(sampleBlob, sampleBlobKey),
+          { kind: "choplab", bytes: sampleBlob.size },
+        );
+        markSampleImport("sample-blob-written", { kind: "choplab", bytes: sampleBlob.size });
+        blobFpCache.set(sampleBlobKey, fp);
       }
     }
     // Strip the in-memory blob from the serialized form.
@@ -165,10 +187,20 @@ async function serializeAndFlushBlobs(
               blobKey = `${project.id}:${t.id}:${c.id}`;
             }
             if (c.blob && blobKey) {
-              const fp = await blobContentFingerprint(c.blob);
+              const clipBlob = c.blob;
+              const fp = await timeSampleImport(
+                "blob-fingerprint",
+                () => blobContentFingerprint(clipBlob),
+                { kind: "audio-clip", bytes: clipBlob.size },
+              );
               if (blobFpCache.get(blobKey) !== fp) {
-                countPerf("sampleBlobWrites", 1, { kind: "audio-clip", bytes: c.blob.size });
-                await blobs.put(c.blob, blobKey);
+                countPerf("sampleBlobWrites", 1, { kind: "audio-clip", bytes: clipBlob.size });
+                await timeSampleImport(
+                  "indexeddb-blob-write",
+                  () => blobs.put(clipBlob, blobKey),
+                  { kind: "audio-clip", bytes: clipBlob.size },
+                );
+                markSampleImport("sample-blob-written", { kind: "audio-clip", bytes: clipBlob.size });
                 blobFpCache.set(blobKey, fp);
               }
             }

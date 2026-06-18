@@ -595,3 +595,99 @@ Conditionally closer, but not release-safe. WAV export is no longer the short
 profile blocker and the 10-minute production profile passed. Remaining risks
 are repeated project-load DOM/listener growth, mixer listener growth,
 sub-second sample import stalls, and the Playwright test runner timeout.
+
+---
+
+## 2026-06-18 Release Hardening Profile
+
+Latest short profile: `runtime-profile/runtime-profile-1781749794054.json`
+(generated/ignored).
+
+### Short Runtime Result
+
+All short runtime scenarios passed and the command exited cleanly.
+
+| Scenario | Result | Largest long task |
+| --- | --- | ---: |
+| First-play matrix | Pass | 325-487 ms |
+| Cold load | Pass | 241 ms |
+| Audio startup / panic / replay | Pass | 62 ms |
+| Trap playback / mixer scope | Pass | 225 ms |
+| Mixer stress | Pass | 0 ms |
+| Visualizer Performance Mode stress | Pass | 0 ms |
+| Repeated preset switching | Pass | 0 ms |
+| Repeated project load/unload | Pass | 132 ms |
+| Sample import small/large | Pass | 826 ms |
+| Save/load/autosave | Pass | 0 ms |
+| JSON export/import/malformed JSON | Pass | 0 ms |
+| WAV export default/demo | Pass | 112 ms |
+| Service worker cache update | Pass | 0 ms |
+
+### 10-Minute Playback Review
+
+The long production command timed out later in the suite, but the required
+10-minute playback scenario itself passed:
+
+- `load-trap-and-10-minute-playback-mixer-scope`: pass, `604,229 ms`.
+- Later timeout occurred after `sample-import-small-and-large` while entering
+  `save-load-autosave`, so the full long-suite command is not a clean pass.
+
+Release safety is improved, but the full 10-minute suite should be rerun with a
+larger timeout or a 10-minute-playback-only harness mode before final release.
+
+---
+
+## 2026-06-18 Final Release-Gate Split Profile
+
+Latest short profile: `runtime-profile/runtime-profile-1781790626992.json`
+(generated/ignored).
+
+Latest playback10 profile:
+`runtime-profile/runtime-profile-1781789863592.json` (generated/ignored).
+
+### Gate Definitions
+
+| Gate | Command | Release status |
+| --- | --- | --- |
+| First-play matrix | `STUDIO_PROFILE_MATRIX_ONLY=1 node scripts/runtime-profile.mjs` | Release-blocking |
+| Short runtime profile | `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` | Release-blocking smoke/stress |
+| Playback10 | `STUDIO_PROFILE_MODE=playback10 STUDIO_PROFILE_MINUTES=10 node scripts/runtime-profile.mjs` | Release-blocking playback gate |
+| Long suite | Full 10-minute broad suite | Soak/nightly follow-up |
+
+### Latest Short Runtime Result
+
+All 19 scenarios passed and the command exited cleanly.
+
+| Scenario | Status | Largest long task |
+| --- | --- | ---: |
+| First-play matrix | Pass | 315-617 ms |
+| Cold load | Pass | 224 ms |
+| Audio startup / panic / replay | Pass | 0 ms |
+| Trap playback / mixer scope | Pass | 161 ms |
+| Mixer stress | Pass | 0 ms |
+| Visualizer Performance Mode stress | Pass | 0 ms |
+| Repeated preset switching | Pass | 0 ms |
+| Repeated project load/unload | Pass | 171 ms |
+| Sample import small/large | Pass | 0 ms |
+| Save/load/autosave | Pass | 136 ms |
+| JSON export/import/malformed JSON | Pass | 0 ms |
+| WAV export default/demo | Pass | 125 ms |
+| Service worker cache update | Pass | 0 ms |
+
+### Playback10 Result
+
+Focused playback10 passed in 617,058 ms. Playback reached the 10-minute
+checkpoint at 601,356 ms. Largest long task was 237 ms. Default
+AudioWorkletNode creation remained 0. Panic cleanup left 0 active Transport
+events, 0 active lean one-shot sources, and 0 active scheduled players after
+10 seconds idle.
+
+### Remaining Runtime Risks
+
+- Some first-play matrix variants still exceed the preferred 250 ms long-task
+  ceiling, with a latest max of 617 ms.
+- The short profile still shows high trace/listener deltas in repeated-load and
+  JSON scenarios. They are bounded in the current run but should be investigated
+  before broad public traffic.
+- The full long-suite was not rerun as a single command after the gate split;
+  it remains a soak/nightly follow-up.

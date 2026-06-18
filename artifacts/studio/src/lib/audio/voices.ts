@@ -45,20 +45,29 @@ export interface DrumVoice {
 export type DrumKit = Record<DrumPiece, DrumVoice>;
 
 /**
- * Polyphonic wrapper around `Tone.PluckSynth` (Karplus–Strong).
- * `PluckSynth` is monophonic and not compatible with `Tone.PolySynth`'s
- * `Monophonic` constraint, so we maintain a small voice pool ourselves
- * and round-robin notes across it.
+ * Lightweight pluck-style poly voice.
+ *
+ * Tone.PluckSynth uses ToneAudioWorklet/FeedbackCombFilter in Tone v15. Those
+ * worklet blob URLs are not revoked by Tone on dispose, so repeated project
+ * load/play cycles leak URL-backed worklet modules. This approximation keeps
+ * the same small trigger surface without using Tone's worklet pluck path.
  */
 export class PolyPluck {
-  private voices: Tone.PluckSynth[];
-  private next = 0;
+  private voice: Tone.PolySynth<Tone.Synth>;
 
   constructor(opts: Partial<Tone.PluckSynthOptions> = {}, voiceCount = 8) {
-    this.voices = Array.from(
-      { length: voiceCount },
-      () => new Tone.PluckSynth(opts),
-    );
+    const release = typeof opts.release === "number" ? opts.release : 0.35;
+    this.voice = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "triangle" },
+      envelope: {
+        attack: 0.002,
+        decay: Math.max(0.08, Math.min(0.5, release * 0.6)),
+        sustain: 0.08,
+        release: Math.max(0.08, Math.min(1.2, release)),
+      },
+      volume: opts.volume ?? -8,
+    });
+    this.voice.maxPolyphony = voiceCount;
   }
 
   triggerAttack(
@@ -66,14 +75,12 @@ export class PolyPluck {
     time?: Tone.Unit.Time,
     _velocity = 0.9,
   ) {
-    const v = this.voices[this.next];
-    this.next = (this.next + 1) % this.voices.length;
-    v.triggerAttack(note, time);
+    this.voice.triggerAttack(note, time, _velocity);
     return this;
   }
 
-  triggerRelease(_note?: Tone.Unit.Frequency, _time?: Tone.Unit.Time) {
-    // Karplus–Strong decays naturally — no explicit release stage.
+  triggerRelease(note?: Tone.Unit.Frequency, time?: Tone.Unit.Time) {
+    if (note) this.voice.triggerRelease(note, time);
     return this;
   }
 
@@ -83,25 +90,22 @@ export class PolyPluck {
     time?: Tone.Unit.Time,
     velocity = 0.9,
   ) {
-    const v = this.voices[this.next];
-    this.next = (this.next + 1) % this.voices.length;
-    v.triggerAttackRelease(note, duration, time, velocity);
+    this.voice.triggerAttackRelease(note, duration, time, velocity);
     return this;
   }
 
   connect(dest: Tone.InputNode) {
-    for (const v of this.voices) v.connect(dest);
+    this.voice.connect(dest);
     return this;
   }
 
   releaseAll() {
-    // PluckSynth has no explicit release; this is a no-op for parity
-    // with PolySynth's releaseAll() surface used by panicStopAll().
+    this.voice.releaseAll();
     return this;
   }
 
   dispose() {
-    for (const v of this.voices) v.dispose();
+    this.voice.dispose();
     return this;
   }
 }

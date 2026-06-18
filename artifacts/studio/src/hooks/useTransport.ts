@@ -15,6 +15,7 @@ import { firstPlayMark, firstPlayMeasure, getFirstPlayFlags } from "../lib/perfo
 export function useTransport() {
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const isPlaying = useStore((s) => s.isPlaying);
+  const panicRevision = useStore((s) => s.panicRevision);
   const [projectSchedulesArmed, setProjectSchedulesArmed] = useState(false);
 
   // Fingerprint that changes only when clip structure or BPM changes —
@@ -55,6 +56,7 @@ export function useTransport() {
     audioIds: [],
   });
   const leanPreflightKeyRef = useRef<string | null>(null);
+  const handledPanicRevisionRef = useRef(panicRevision);
 
   const ensureUnlocked = useCallback(async () => {
     if (!audioUnlocked) {
@@ -282,6 +284,16 @@ export function useTransport() {
   }, [ensureUnlocked]);
 
   useEffect(() => {
+    if (panicRevision !== handledPanicRevisionRef.current) {
+      handledPanicRevisionRef.current = panicRevision;
+      setProjectSchedulesArmed(false);
+      leanPreflightKeyRef.current = null;
+      audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
+      audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
+      scheduledRef.current = { noteIds: [], audioPlayers: [], audioIds: [] };
+      firstPlayMark("project-schedule:panic-reset");
+      return;
+    }
     if (!audioUnlocked) {
       firstPlayMark("project-schedule:deferred-until-audio-unlocked");
       return;
@@ -396,7 +408,7 @@ export function useTransport() {
       audio.cancelScheduled([...noteIds, ...audioIds]);
       audio.disposeScheduledAudioPlayers(audioPlayers);
     };
-  }, [audioUnlocked, isPlaying, projectSchedulesArmed, scheduleKey]);
+  }, [audioUnlocked, isPlaying, panicRevision, projectSchedulesArmed, scheduleKey]);
 
   // Apply mute/solo to engine only when those flags actually change.
   useEffect(() => {

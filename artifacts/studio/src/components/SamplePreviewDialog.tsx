@@ -31,6 +31,11 @@ import { useStore, getStore, makeId, makeTrack } from "../store";
 import { saveProject } from "../lib/storage/db";
 import { startPerfTimer } from "../utils/performanceDiagnostics";
 import {
+  markSampleImport,
+  measureSampleImport,
+  timeSampleImport,
+} from "../lib/performance/sampleImportTrace";
+import {
   assertSampleImportAllowed,
   formatBytes,
   isLargeSample,
@@ -41,6 +46,8 @@ type Assign =
   | { kind: "track"; trackId: string }
   | { kind: "new-track" }
   | { kind: "pad"; trackId: string; pad: string };
+
+const LIGHTWEIGHT_WAVEFORM_BYTES = 2 * 1024 * 1024;
 
 export interface SamplePreviewProps {
   open: boolean;
@@ -60,7 +67,7 @@ export function SamplePreviewDialog({
 }: SamplePreviewProps) {
   void _recordedTrackId;
   const project = useStore((s) => s.project);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [waveformHost, setWaveformHost] = useState<HTMLDivElement | null>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const regionRef = useRef<Region | null>(null);
   const [wsFailed, setWsFailed] = useState(false);
@@ -83,11 +90,13 @@ export function SamplePreviewDialog({
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [fallbackCanvas, setFallbackCanvas] = useState<HTMLCanvasElement | null>(null);
   const importTokenRef = useRef(0);
 
   // (Re)mount wavesurfer when the dialog opens with a new blob.
   useEffect(() => {
-    if (!open || !blob || !containerRef.current) return;
+    if (!open || !blob) return;
+    markSampleImport("preview-open", { bytes: blob.size, type: blob.type });
     setName(defaultName);
     setNormalize(false);
     setReverse(false);
@@ -109,13 +118,19 @@ export function SamplePreviewDialog({
     setWsFailed(false);
     setPreviewBlob(null);
     setAssign({ kind: "none" });
+    if (blob.size >= LIGHTWEIGHT_WAVEFORM_BYTES) {
+      markSampleImport("wavesurfer-skip-large", { bytes: blob.size, type: blob.type });
+      setWsFailed(true);
+      return;
+    }
+    if (!waveformHost) return;
     let ws: WaveSurfer | null = null;
     let regionsPlugin: ReturnType<typeof RegionsPlugin.create> | null = null;
     const token = ++importTokenRef.current;
     try {
       regionsPlugin = RegionsPlugin.create();
       ws = WaveSurfer.create({
-        container: containerRef.current,
+        container: waveformHost,
         height: 96,
         waveColor: "rgba(0, 200, 255, 0.6)",
         progressColor: "rgba(0, 200, 255, 0.9)",
@@ -124,6 +139,7 @@ export function SamplePreviewDialog({
         plugins: [regionsPlugin],
       });
       wsRef.current = ws;
+      markSampleImport("object-url:create", { bytes: blob.size, type: blob.type });
       const url = URL.createObjectURL(blob);
       const endWaveformTiming = startPerfTimer("waveform-generation", {
         source: "WaveSurfer",
@@ -139,6 +155,7 @@ export function SamplePreviewDialog({
       ws.on("ready", () => {
         if (token !== importTokenRef.current) return;
         endWaveformOnce();
+        markSampleImport("wavesurfer-ready", { bytes: blob.size, type: blob.type });
         const d = ws!.getDuration();
         setDuration(d);
         setRegion({ start: 0, end: d });
@@ -157,16 +174,19 @@ export function SamplePreviewDialog({
       ws.on("error", () => {
         if (token !== importTokenRef.current) return;
         endWaveformOnce();
+        markSampleImport("wavesurfer-error", { bytes: blob.size, type: blob.type });
         setWsFailed(true);
       });
       ws.load(url).catch(() => {
         if (token !== importTokenRef.current) return;
         endWaveformOnce();
+        markSampleImport("wavesurfer-load-error", { bytes: blob.size, type: blob.type });
         setWsFailed(true);
       });
       return () => {
         importTokenRef.current++;
         endWaveformOnce();
+        markSampleImport("object-url:revoke", { bytes: blob.size, type: blob.type });
         URL.revokeObjectURL(url);
         try {
           ws?.destroy();
@@ -187,13 +207,13 @@ export function SamplePreviewDialog({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, blob]);
+  }, [open, blob, waveformHost]);
 
   // Canvas fallback when wavesurfer fails: render a basic waveform from the
   // decoded AudioBuffer so the user can still see + assign the import.
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    if (!wsFailed || !blob || !canvasRef.current) return;
+    if (!wsFailed || !blob || !fallbackCanvas) return;
+    markSampleImport("fallback-waveform:start", { bytes: blob.size, type: blob.type });
     let cancelled = false;
     const token = ++importTokenRef.current;
     (async () => {
@@ -203,16 +223,26 @@ export function SamplePreviewDialog({
         type: blob.type,
       });
       try {
-        const buf = await decodeBlob(blob);
-        if (cancelled || token !== importTokenRef.current || !canvasRef.current) return;
+        const buf = await timeSampleImport(
+          "audio-decode",
+          () => decodeBlob(blob),
+          { bytes: blob.size, type: blob.type },
+        );
+        if (cancelled || token !== importTokenRef.current) return;
+        markSampleImport("audio-decode:accepted", {
+          bytes: blob.size,
+          durationSec: Math.round(buf.duration * 100) / 100,
+        });
         setDuration(buf.duration);
         setRegion({ start: 0, end: buf.duration });
-        const cv = canvasRef.current;
+        const cv = fallbackCanvas;
         const ctx = cv.getContext("2d");
         if (!ctx) return;
         const data = buf.getChannelData(0);
         const w = cv.width;
         const h = cv.height;
+        await yieldToBrowser();
+        const peaksStart = performance.now();
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = "rgba(0, 200, 255, 0.6)";
         const step = Math.max(1, Math.floor(data.length / w));
@@ -227,18 +257,29 @@ export function SamplePreviewDialog({
           const y1 = ((1 - max) / 2) * h;
           const y2 = ((1 - min) / 2) * h;
           ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+          if (x > 0 && x % 64 === 0) await yieldToBrowser();
         }
+        measureSampleImport("waveform-peak-generation", peaksStart, {
+          bytes: blob.size,
+          columns: w,
+          step,
+        });
       } catch (err) {
+        markSampleImport("fallback-waveform:error", {
+          bytes: blob.size,
+          error: (err as Error).message,
+        });
         setError((err as Error).message);
       } finally {
         endTiming();
+        markSampleImport("fallback-waveform:end", { bytes: blob.size, type: blob.type });
       }
     })();
     return () => {
       cancelled = true;
       importTokenRef.current++;
     };
-  }, [wsFailed, blob]);
+  }, [wsFailed, blob, fallbackCanvas]);
 
   const onTrimSilence = async () => {
     if (!blob) return;
@@ -267,17 +308,38 @@ export function SamplePreviewDialog({
   const commit = async () => {
     const source = previewBlob ?? blob;
     if (!source) return;
+    markSampleImport("commit:start", {
+      bytes: source.size,
+      edited: source !== blob,
+      assign: assign.kind,
+    });
     setBusy(true);
     setError(null);
     try {
-      const { blob: edited, buffer } = await applyEditsToBlob(source, {
-        trimStartSec: region.start,
-        trimEndSec: region.end,
-        normalize,
-        reverse,
-        fadeInSec: fadeIn,
-        fadeOutSec: fadeOut,
-      });
+      const hasEdits =
+        normalize ||
+        reverse ||
+        fadeIn > 0 ||
+        fadeOut > 0 ||
+        region.start > 0.001 ||
+        (duration > 0 && Math.abs(region.end - duration) > 0.001);
+      const editedResult = hasEdits
+        ? await timeSampleImport(
+            "apply-edits",
+            () =>
+              applyEditsToBlob(source, {
+                trimStartSec: region.start,
+                trimEndSec: region.end,
+                normalize,
+                reverse,
+                fadeInSec: fadeIn,
+                fadeOutSec: fadeOut,
+              }),
+            { bytes: source.size },
+          )
+        : null;
+      const edited = editedResult?.blob ?? source;
+      const sampleDuration = editedResult?.buffer.duration ?? duration;
 
       const store = getStore();
       const sampleId = makeId();
@@ -286,19 +348,24 @@ export function SamplePreviewDialog({
         id: sampleId,
         name: name.trim() || defaultName,
         blobKey,
-        durationSec: buffer.duration,
+        durationSec: sampleDuration,
         createdAt: Date.now(),
         blob: edited,
       };
       const samples = [...(store.state.project.samples ?? []), sample];
+      const stateStart = performance.now();
       store.patchProject({ samples });
+      measureSampleImport("ui-state:update-project", stateStart, {
+        samples: samples.length,
+        bytes: edited.size,
+      });
 
       // Apply assignment
       if (assign.kind === "track") {
         store.addAudioClip(assign.trackId, {
           id: makeId(),
           start: 0,
-          durationSec: buffer.duration,
+          durationSec: sampleDuration,
           blob: edited,
         });
       } else if (assign.kind === "new-track") {
@@ -309,7 +376,7 @@ export function SamplePreviewDialog({
         store.addAudioClip(t.id, {
           id: makeId(),
           start: 0,
-          durationSec: buffer.duration,
+          durationSec: sampleDuration,
           blob: edited,
         });
       } else if (assign.kind === "pad") {
@@ -332,13 +399,22 @@ export function SamplePreviewDialog({
 
       // Persist immediately so a reload picks up the new sample/blob.
       try {
-        await saveProject(getStore().state.project);
+        await timeSampleImport(
+          "project-save",
+          () => saveProject(getStore().state.project),
+          { samples: samples.length, bytes: edited.size },
+        );
       } catch {
         // best-effort
       }
       store.setStatus(`Saved sample “${sample.name}”`, "info");
+      markSampleImport("commit:end", { bytes: edited.size, assign: assign.kind });
       onClose();
     } catch (err) {
+      markSampleImport("commit:error", {
+        bytes: source.size,
+        error: (err as Error).message,
+      });
       setError((err as Error).message);
     } finally {
       setBusy(false);
@@ -378,7 +454,7 @@ export function SamplePreviewDialog({
           {wsFailed ? (
             <div className="panel-inset rounded p-2">
               <canvas
-                ref={canvasRef}
+                ref={setFallbackCanvas}
                 width={640}
                 height={96}
                 className="w-full h-24 block"
@@ -390,7 +466,7 @@ export function SamplePreviewDialog({
             </div>
           ) : (
             <div
-              ref={containerRef}
+              ref={setWaveformHost}
               className="panel-inset rounded p-2 min-h-[112px]"
             />
           )}
@@ -544,4 +620,8 @@ export function SamplePreviewDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }

@@ -1,6 +1,7 @@
 import "./lib/performance/audioNodeTrace";
 import "./lib/performance/exportTrace";
 import "./lib/performance/listenerTrace";
+import { installSampleImportTrace } from "./lib/performance/sampleImportTrace";
 import { createRoot } from "react-dom/client";
 import { Suspense } from "react";
 import { Router } from "wouter";
@@ -13,6 +14,7 @@ import { uninstallAudioNodeTrace } from "./lib/performance/audioNodeTrace";
 import { uninstallListenerTrace } from "./lib/performance/listenerTrace";
 
 perfMark("app-startup:main-entry");
+installSampleImportTrace();
 installFirstPlayTrace();
 initPwa();
 

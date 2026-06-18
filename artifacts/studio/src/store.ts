@@ -108,6 +108,7 @@ class Store {
     project: Project;
     projectRevision: number;
     transportScheduleRevision: number;
+    panicRevision: number;
     selectedTrackId: string;
     selectedClipId: string | null;
     audioUnlocked: boolean;
@@ -171,6 +172,7 @@ class Store {
       project,
       projectRevision: 0,
       transportScheduleRevision: 0,
+      panicRevision: 0,
       selectedTrackId: project.tracks[0]?.id ?? "",
       selectedClipId: null,
       audioUnlocked: false,

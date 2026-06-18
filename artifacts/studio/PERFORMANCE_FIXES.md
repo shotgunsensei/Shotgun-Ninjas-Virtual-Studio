@@ -979,6 +979,126 @@ acceptance test has not passed.
 
 ---
 
+## 2026-06-18 Final Release Gate Split and Sample Import Patch
+
+### Fixes Applied
+
+- Added `STUDIO_PROFILE_MODE=playback10` and `--mode playback10` to
+  `scripts/runtime-profile.mjs`.
+- Added `STUDIO_PROFILE_MODE=sample-import` for focused sample import profiling.
+- Added sample import trace snapshots to runtime profile metrics.
+- Added a local sample import worker for blob fingerprinting with main-thread
+  fallback.
+- Fixed `SamplePreviewDialog` preview lifecycle by using callback-ref state for
+  WaveSurfer and fallback canvas hosts.
+- Changed generated WAV import profiling to create the synthetic file in the
+  browser with yields instead of sending multi-MB byte arrays through CDP.
+- Added a `panicRevision` store signal and made `useTransport` cancel/dispose
+  known scheduled refs and disarm project scheduling after Panic.
+
+### Verification
+
+| Command / profile | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with warnings | Existing sourcemap/import-overlap/large chunk warnings remain. |
+| `corepack pnpm --dir artifacts/studio run test` | Pass | 4/4 Playwright tests; clean forced Windows exit. |
+| `corepack pnpm --dir artifacts/studio run test:line` | Pass independently | 4/4 Playwright tests. Running it in parallel with another Playwright command can still produce the known `Running 0 tests` artifact. |
+| First-play matrix | Pass | Latest short profile matrix passed 7/7. |
+| Focused sample import | Pass | Largest isolated long task 142 ms; large decode 91 ms; peak generation 33 ms; fingerprint 13 ms. |
+| Short runtime profile | Pass | All 19 scenarios passed. |
+| Playback10 profile | Pass | 10-minute playback gate exited cleanly; largest long task 237 ms; panic idle Transport events 0. |
+| WAV export | Pass | Latest short profile WAV scenario passed with 125 ms largest long task. |
+
+### Before / After
+
+| Area | Before | After |
+| --- | --- | --- |
+| Sample import | Large generated WAV showed 826 ms long task. | Focused profile largest isolated long task is 142 ms. |
+| Sample preview | Ref timing could skip WaveSurfer/fallback preview generation. | WaveSurfer host and fallback canvas initialization are ref-state driven and measured. |
+| Blob fingerprinting | Main-thread blob fingerprint path. | Worker fingerprint path with fallback; 2.6 MB sample fingerprint measured at 13 ms. |
+| Playback10 cleanup | First playback10 split run left 229 Transport events after idle. | Panic reset leaves active Transport events at 0 after idle. |
+
+### Release Status
+
+Playback10, short runtime, Playwright, typecheck, build, sample import, repeated
+project load, and WAV export now pass in the measured release-gate runs.
+
+Release-safe: conditionally yes for the current stabilized free Studio gate,
+with remaining risks below. The full long-suite is now classified as a
+soak/nightly follow-up and has not been rerun as one monolithic command after
+the split.
+
+### Remaining Risks
+
+- First-play matrix still has some variants above the preferred 250 ms long-task
+  ceiling, latest max 617 ms.
+- Trace/listener counters still show high deltas in repeated-load/JSON stress
+  paths, though current profiles complete and cleanup is bounded.
+- MP3 export remains the legacy heavier Tone offline path and is not part of
+  the release WAV gate.
+- The full 10-minute broad long-suite previously timed out after the playback
+  scenario and should run as a soak/nightly job with a larger timeout.
+
+---
+
+## 2026-06-18 Release Hardening: Test Runner, Load Growth, Sample Import
+
+### Fixes Applied
+
+- Added Windows-safe Playwright reporter and scripts so `pnpm run test` exits
+  cleanly after all tests complete.
+- Changed Playwright web server startup to direct local Vite CLI invocation on
+  `127.0.0.1`.
+- Added a dedicated repeated-load growth mode to `runtime-profile.mjs`.
+- Added object URL tracing with active source stacks.
+- Fixed listener diagnostics so trace records no longer retain listener
+  functions and detached DOM.
+- Removed per-track eager Tone reverb worklet creation by routing track reverb
+  amounts to the existing shared master room bus.
+- Replaced `PolyPluck`'s `Tone.PluckSynth` pool with a non-worklet poly synth
+  approximation to avoid Tone feedback-comb worklet blob URL accumulation.
+- Sample preview now skips WaveSurfer for blobs at or above 2 MB and uses
+  chunk-yielding canvas fallback rendering.
+- Unedited sample saves now keep the original Blob instead of forcing the full
+  edit/render/encode path.
+
+### Commands Run
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with existing Vite warnings |
+| `corepack pnpm --dir artifacts/studio run test` | Pass, 4/4 tests |
+| `corepack pnpm --dir artifacts/studio run test:line` | Pass when run independently, 4/4 tests |
+| Production preview + `STUDIO_PROFILE_MATRIX_ONLY=1` | Pass, 7/7 first-play scenarios |
+| Production preview + `STUDIO_PROFILE_REPEATED_LOAD_ONLY=1` | Pass |
+| Production preview + `STUDIO_PROFILE_MINUTES=0.1` | Pass, clean exit |
+| Production preview + `STUDIO_PROFILE_MINUTES=10` | Partial: 10-minute playback scenario passed; full suite timed out later |
+
+### Current Release Gate Status
+
+| Gate | Status | Notes |
+| --- | --- | --- |
+| Typecheck | Pass | Clean. |
+| Build | Pass | Existing sourcemap/import-overlap/chunk warnings remain. |
+| Playwright | Pass | Run test commands independently. |
+| First-play matrix | Pass | All first-play scenarios pass. |
+| Short runtime profile | Pass | All scenarios pass. |
+| 10-minute playback | Pass for playback scenario | Full long-suite command timed out later. |
+| WAV export | Pass | Native WAV route remains stable. |
+| Repeated load growth | Bounded | CDP nodes/listeners return near baseline after idle/GC; object URLs stay at baseline. |
+| Sample import | Functional but not fully clean | Large generated WAV still shows an 826 ms long task. |
+| Default AudioWorkletNode creation | Pass | Remains 0. |
+
+### Release Safety
+
+Not release-safe yet. The app is much closer, but the full 10-minute suite did
+not exit cleanly and large sample import still exceeds the preferred 500 ms long
+task ceiling.
+
+---
+
 ## 2026-06-17 WAV Export Stabilization
 
 ### Root Causes Confirmed

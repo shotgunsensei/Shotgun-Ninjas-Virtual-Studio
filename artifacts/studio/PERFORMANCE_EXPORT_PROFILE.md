@@ -89,3 +89,13 @@ Comparison against the prior failing profile:
 - Export trace currently counts created native sources but does not prove
   rendered audio content beyond successful WAV generation.
 - Large projects with many audio clips still need more memory profiling.
+
+### MP3 Risk Status
+
+MP3 export was not rewritten in the release-hardening pass. It remains on the
+legacy Tone offline path and may be slower or heavier than WAV for complex
+projects. WAV is the stable recommended export path for reliability.
+
+Future work: add a native/off-main-thread MP3 pipeline or show a clear
+Performance Mode warning before MP3 export: `MP3 export is experimental; WAV
+export is recommended for reliability.`

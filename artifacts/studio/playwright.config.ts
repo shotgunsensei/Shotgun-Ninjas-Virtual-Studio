@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { execSync } from "child_process";
+import { fileURLToPath } from "url";
 import { platform } from "os";
 
 const chromiumExecutablePath = (() => {
@@ -7,14 +8,21 @@ const chromiumExecutablePath = (() => {
   if (envPath) return envPath;
   try {
     const command = platform() === "win32" ? "where chromium" : "which chromium";
-    return execSync(command, { encoding: "utf8" }).split(/\r?\n/)[0]?.trim() ?? "";
+    return execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      .split(/\r?\n/)[0]
+      ?.trim() ?? "";
   } catch {
     return "";
   }
 })();
 
 const TEST_PORT = 5174;
-const BASE_URL = `http://localhost:${TEST_PORT}`;
+const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
+const viteCli = fileURLToPath(new URL("./node_modules/vite/bin/vite.js", import.meta.url));
+
+function quoteArg(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
 
 export default defineConfig({
   testDir: "./tests",
@@ -51,13 +59,20 @@ export default defineConfig({
   ],
 
   webServer: {
-    command:
-      platform() === "win32"
-        ? "npm run dev"
-        : `PORT=${TEST_PORT} BASE_PATH=/ pnpm --filter @workspace/studio dev`,
+    command: [
+      quoteArg(process.execPath),
+      quoteArg(viteCli),
+      "--config",
+      "vite.config.ts",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(TEST_PORT),
+      "--strictPort",
+    ].join(" "),
     url: BASE_URL,
     timeout: 120_000,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     env: {
       PORT: String(TEST_PORT),
       BASE_PATH: "/",

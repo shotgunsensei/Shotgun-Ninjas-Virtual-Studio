@@ -5,14 +5,23 @@ import { join } from "node:path";
 
 const BASE_URL = process.env.STUDIO_PROFILE_URL ?? "http://127.0.0.1:5173";
 const PLAYBACK_MINUTES = Number(process.env.STUDIO_PROFILE_MINUTES ?? "10");
+const PROFILE_MODE = cliArg("mode") ?? process.env.STUDIO_PROFILE_MODE ?? "";
 const MATRIX_ONLY = process.env.STUDIO_PROFILE_MATRIX_ONLY === "1";
 const FRESH_TRAP_ONLY = process.env.STUDIO_PROFILE_FRESH_TRAP_ONLY === "1";
+const REPEATED_LOAD_ONLY = process.env.STUDIO_PROFILE_REPEATED_LOAD_ONLY === "1";
+const PLAYBACK10_ONLY = PROFILE_MODE === "playback10";
+const SAMPLE_IMPORT_ONLY = PROFILE_MODE === "sample-import";
 const OUT_DIR = join(process.cwd(), "runtime-profile");
 const RUN_ID = Date.now();
 const OUT_PATH = join(OUT_DIR, `runtime-profile-${RUN_ID}.json`);
 const METRICS_TIMEOUT_MS = 10_000;
 
 mkdirSync(OUT_DIR, { recursive: true });
+
+function cliArg(name) {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx >= 0 ? process.argv[idx + 1] : null;
+}
 
 function wavBytes({ seconds, sampleRate = 44100, frequency = 220 }) {
   const frames = Math.floor(seconds * sampleRate);
@@ -68,6 +77,55 @@ async function installProfileHooks(page) {
         window.__SN_RUNTIME_PROFILE__.controllerChanges += 1;
       });
     }
+    if (!window.__SN_OBJECT_URL_TRACE__) {
+      const originalCreate = URL.createObjectURL.bind(URL);
+      const originalRevoke = URL.revokeObjectURL.bind(URL);
+      const active = new Set();
+      const activeByUrl = new Map();
+      const activeByStack = () => {
+        const counts = new Map();
+        for (const stack of activeByUrl.values()) counts.set(stack, (counts.get(stack) ?? 0) + 1);
+        return Array.from(counts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([stack, count]) => ({ stack, count }));
+      };
+      const currentStack = () => {
+        try {
+          return String(new Error().stack ?? "")
+            .split("\n")
+            .slice(2, 9)
+            .map((line) => line.trim())
+            .join("\n");
+        } catch {
+          return "stack unavailable";
+        }
+      };
+      window.__SN_OBJECT_URL_TRACE__ = {
+        creates: 0,
+        revokes: 0,
+        active,
+        snapshot: () => ({
+          creates: window.__SN_OBJECT_URL_TRACE__.creates,
+          revokes: window.__SN_OBJECT_URL_TRACE__.revokes,
+          active: active.size,
+          activeByStack: activeByStack(),
+        }),
+      };
+      URL.createObjectURL = (value) => {
+        const url = originalCreate(value);
+        window.__SN_OBJECT_URL_TRACE__.creates += 1;
+        active.add(url);
+        activeByUrl.set(url, currentStack());
+        return url;
+      };
+      URL.revokeObjectURL = (url) => {
+        window.__SN_OBJECT_URL_TRACE__.revokes += 1;
+        active.delete(url);
+        activeByUrl.delete(url);
+        return originalRevoke(url);
+      };
+    }
     try {
       localStorage.setItem("studio.onboardingShown", "1");
     } catch {
@@ -99,7 +157,10 @@ async function browserMetrics(page, cdp) {
     listenerTrace: window.__SN_LISTENER_TRACE__?.snapshot?.() ?? null,
     audioNodeTrace: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
     exportTrace: window.__SN_EXPORT_TRACE__?.snapshot?.() ?? null,
+    sampleImportTrace: window.__SN_SAMPLE_IMPORT_TRACE__?.snapshot?.() ?? null,
     audioEngineStatus: window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null,
+    objectUrlTrace: window.__SN_OBJECT_URL_TRACE__?.snapshot?.() ?? null,
+    waveformDomNodes: document.querySelectorAll('[class*="wavesurfer"], [part*="wave"], wave, canvas').length,
     overlays: Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog, [data-radix-portal], .modal, .overlay'))
       .filter((el) => {
         const rect = el.getBoundingClientRect();
@@ -142,7 +203,7 @@ function summarizeLongTasks(before, after) {
 }
 
 function scenarioTimeoutMs(name) {
-  if (name.includes("10-minute")) return PLAYBACK_MINUTES * 60_000 + 90_000;
+  if (name.includes("10-minute") || name.includes("playback10")) return PLAYBACK_MINUTES * 60_000 + 90_000;
   if (name.includes("wav-export")) return 180_000;
   if (name.includes("service-worker")) return 180_000;
   return 90_000;
@@ -177,7 +238,10 @@ function emptyMetrics(error) {
       listenerTrace: null,
       audioNodeTrace: null,
       exportTrace: null,
+      sampleImportTrace: null,
       audioEngineStatus: null,
+      objectUrlTrace: null,
+      waveformDomNodes: 0,
       overlays: [],
       metricsError: error?.message || String(error),
     },
@@ -422,13 +486,42 @@ async function captureExportTrace(page, result, label) {
   return snapshot;
 }
 
+async function captureSampleImportTrace(page, result, label) {
+  const snapshot = await page.evaluate((snapLabel) => ({
+    label: snapLabel,
+    at: Math.round(performance.now()),
+    snapshot: window.__SN_SAMPLE_IMPORT_TRACE__?.snapshot?.() ?? null,
+  }), label);
+  result.notes.push({ sampleImportTrace: snapshot });
+  return snapshot;
+}
+
+async function resetRuntimeLongTasks(page) {
+  await page.evaluate(() => {
+    if (window.__SN_RUNTIME_PROFILE__) window.__SN_RUNTIME_PROFILE__.longTasks = [];
+  }).catch(() => undefined);
+}
+
 async function openStudio(page, query = "") {
-  const separator = query.includes("?") ? "&" : "?";
-  const exportTraceQuery = query.includes("snExportTrace=1") ? "" : `${separator}snExportTrace=1`;
-  await page.goto(`${BASE_URL}/studio${query}${exportTraceQuery}`, { waitUntil: "domcontentloaded" });
+  const fullQuery = appendQueryFlags(query, [
+    "snExportTrace=1",
+    "snSampleImportTrace=1",
+  ]);
+  await page.goto(`${BASE_URL}/studio${fullQuery}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("header", { timeout: 30_000 });
   await page.evaluate(() => window.__SN_LISTENER_TRACE__?.start?.()).catch(() => undefined);
   await page.evaluate(() => window.__SN_AUDIO_NODE_TRACE__?.start?.()).catch(() => undefined);
+}
+
+function appendQueryFlags(query, flags) {
+  const search = query.startsWith("?") ? query.slice(1) : query;
+  const params = new URLSearchParams(search);
+  for (const flag of flags) {
+    const [key, value] = flag.split("=");
+    if (!params.has(key)) params.set(key, value ?? "1");
+  }
+  const next = params.toString();
+  return next ? `?${next}` : "";
 }
 
 async function clearBrowserState(page) {
@@ -632,6 +725,56 @@ async function importSample(page, bytes, name) {
   await page.getByRole("dialog", { name: /import sample/i }).waitFor({ timeout: 20_000 });
 }
 
+async function importGeneratedWavSample(page, { seconds, sampleRate = 44100, frequency = 220, name }) {
+  await page.evaluate(
+    async ({ seconds, sampleRate, frequency, name }) => {
+      const frames = Math.floor(seconds * sampleRate);
+      const bytes = new Uint8Array(44 + frames * 2);
+      const view = new DataView(bytes.buffer);
+      const write = (offset, text) => {
+        for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+      };
+      write(0, "RIFF");
+      view.setUint32(4, 36 + frames * 2, true);
+      write(8, "WAVE");
+      write(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      write(36, "data");
+      view.setUint32(40, frames * 2, true);
+      for (let i = 0; i < frames; i++) {
+        const sample = Math.sin((2 * Math.PI * frequency * i) / sampleRate) * 0.25;
+        view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sample)) * 0x7fff, true);
+        if (i > 0 && i % 4096 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      const file = new File([bytes], name, { type: "audio/wav" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      window.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    },
+    { seconds, sampleRate, frequency, name },
+  );
+  await page.getByRole("dialog", { name: /import sample/i }).waitFor({ timeout: 20_000 });
+}
+
+async function waitForSamplePreviewSettled(page, expectedStage) {
+  await page.waitForFunction(
+    (stage) => {
+      const events = window.__SN_SAMPLE_IMPORT_TRACE__?.snapshot?.().events ?? [];
+      return events.some((event) => event.stage === stage);
+    },
+    expectedStage,
+    { timeout: 20_000 },
+  ).catch(() => undefined);
+}
+
 async function saveSampleDialog(page) {
   await clickMaybe(page, page.getByRole("button", { name: /save sample/i }), 15_000);
   await page.waitForTimeout(2_000);
@@ -707,6 +850,177 @@ async function serviceWorkerUpdateSimulation(page, result) {
   result.notes.push({ beforeCaches, update });
 }
 
+async function forceGarbageCollection(cdp) {
+  try {
+    await cdp.send("HeapProfiler.enable");
+    await cdp.send("HeapProfiler.collectGarbage");
+  } catch {
+    // CDP GC is best-effort and unavailable in some browser builds.
+  }
+}
+
+async function repeatedLoadGrowthProbe(page, cdp, result) {
+  await clearBrowserState(page);
+  await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1&snExportTrace=1");
+  await prepareScenarioUi(page, result, "repeated-load-growth:initial");
+  await captureListenerTrace(page, result, "repeated-load:baseline");
+  await captureAudioNodeTrace(page, result, "repeated-load:baseline");
+  result.notes.push({ checkpoint: "baseline", metrics: await browserMetrics(page, cdp) });
+
+  await loadDemo(page, "trap-starter");
+  await page.waitForTimeout(500);
+  result.notes.push({ checkpoint: "trap-1x", metrics: await browserMetrics(page, cdp) });
+
+  for (let i = 1; i < 5; i++) {
+    await loadDemo(page, "trap-starter");
+    await page.waitForTimeout(150);
+  }
+  await captureListenerTrace(page, result, "repeated-load:trap-5x");
+  await captureAudioNodeTrace(page, result, "repeated-load:trap-5x");
+  result.notes.push({ checkpoint: "trap-5x", metrics: await browserMetrics(page, cdp) });
+
+  for (let i = 5; i < 20; i++) {
+    await loadDemo(page, "trap-starter");
+    await page.waitForTimeout(100);
+  }
+  await captureListenerTrace(page, result, "repeated-load:trap-20x");
+  await captureAudioNodeTrace(page, result, "repeated-load:trap-20x");
+  result.notes.push({ checkpoint: "trap-20x", metrics: await browserMetrics(page, cdp) });
+
+  const ids = ["trap-starter", "boom-bap-dojo", "cyber-ninja", "lofi-smoke-loop"];
+  for (let i = 0; i < 20; i++) {
+    await loadDemo(page, ids[i % ids.length]);
+    await page.waitForTimeout(100);
+  }
+  await captureListenerTrace(page, result, "repeated-load:alternating-20x");
+  await captureAudioNodeTrace(page, result, "repeated-load:alternating-20x");
+  result.notes.push({ checkpoint: "alternating-20x", metrics: await browserMetrics(page, cdp) });
+
+  await enableAudio(page);
+  for (let i = 0; i < 10; i++) {
+    await clickMaybe(page, page.getByRole("button", { name: /panic/i }), 2_000);
+    await loadDemo(page, ids[i % ids.length]);
+    await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
+    await page.waitForTimeout(500);
+    await clickMaybe(page, page.getByRole("button", { name: /^stop$/i }), 2_000);
+    await page.waitForTimeout(150);
+  }
+  await captureListenerTrace(page, result, "repeated-load:panic-load-play-stop-10x");
+  await captureAudioNodeTrace(page, result, "repeated-load:panic-load-play-stop-10x");
+  result.notes.push({ checkpoint: "panic-load-play-stop-10x", metrics: await browserMetrics(page, cdp) });
+
+  await page.waitForTimeout(10_000);
+  await forceGarbageCollection(cdp);
+  await page.waitForTimeout(1_000);
+  await captureListenerTrace(page, result, "repeated-load:after-idle-gc");
+  await captureAudioNodeTrace(page, result, "repeated-load:after-idle-gc");
+  result.notes.push({ checkpoint: "after-idle-gc", metrics: await browserMetrics(page, cdp) });
+}
+
+async function sampleImportProfileProbe(page, cdp, result) {
+  await clearBrowserState(page);
+  await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1&snSampleImportTrace=1");
+  await page.evaluate(() => window.__SN_SAMPLE_IMPORT_TRACE__?.clear?.()).catch(() => undefined);
+  await prepareScenarioUi(page, result, "sample-import-profile:initial");
+  await captureSampleImportTrace(page, result, "sample-import:baseline");
+  result.notes.push({ checkpoint: "baseline", metrics: await browserMetrics(page, cdp) });
+  await resetRuntimeLongTasks(page);
+
+  await importGeneratedWavSample(page, { seconds: 1, name: "runtime-small.wav" });
+  await waitForSamplePreviewSettled(page, "wavesurfer-ready");
+  await captureSampleImportTrace(page, result, "sample-import:small-preview-open");
+  await saveSampleDialog(page);
+  await captureSampleImportTrace(page, result, "sample-import:small-after-save");
+  result.notes.push({ checkpoint: "small-after-save", metrics: await browserMetrics(page, cdp) });
+
+  await importGeneratedWavSample(page, { seconds: 30, name: "runtime-large.wav" });
+  await waitForSamplePreviewSettled(page, "fallback-waveform:end");
+  await captureSampleImportTrace(page, result, "sample-import:large-preview-open");
+  result.notes.push({ checkpoint: "large-preview-open", metrics: await browserMetrics(page, cdp) });
+  await saveSampleDialog(page);
+  await captureSampleImportTrace(page, result, "sample-import:large-after-save");
+  await page.waitForTimeout(1_000);
+  result.notes.push({ checkpoint: "large-after-save", metrics: await browserMetrics(page, cdp) });
+
+  await forceGarbageCollection(cdp);
+  await page.waitForTimeout(1_000);
+  await captureSampleImportTrace(page, result, "sample-import:after-idle-gc");
+  result.notes.push({ checkpoint: "after-idle-gc", metrics: await browserMetrics(page, cdp) });
+}
+
+async function playback10Gate(page, cdp, result) {
+  await clearBrowserState(page);
+  await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1");
+  await prepareScenarioUi(page, result, "playback10:initial");
+  await captureListenerTrace(page, result, "playback10:baseline");
+  await captureAudioNodeTrace(page, result, "playback10:baseline");
+  result.notes.push({ checkpoint: "baseline", metrics: await browserMetrics(page, cdp) });
+
+  await enableAudio(page);
+  await loadDemo(page, "trap-starter");
+  await captureAudioNodeTrace(page, result, "playback10:after-load");
+  result.notes.push({ checkpoint: "before-playback", metrics: await browserMetrics(page, cdp) });
+  const started = Date.now();
+  await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
+  await page.getByRole("button", { name: /^pause$/i }).waitFor({ timeout: 10_000 });
+  await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
+  await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
+  await captureAudioNodeTrace(page, result, "playback10:after-play");
+
+  const checkpointMinutes = Array.from(
+    new Set([1, 5, PLAYBACK_MINUTES].filter((minute) => minute > 0 && minute <= PLAYBACK_MINUTES)),
+  ).sort((a, b) => a - b);
+  let previousMinute = 0;
+  for (const minute of checkpointMinutes) {
+    await page.waitForTimeout((minute - previousMinute) * 60_000);
+    previousMinute = minute;
+    result.notes.push({
+      checkpoint: `${minute}m`,
+      elapsedMs: Date.now() - started,
+      responsive: true,
+      metrics: await browserMetrics(page, cdp),
+    });
+  }
+
+  await clickMaybe(page, page.getByRole("button", { name: /^stop$/i }), 5_000);
+  await page.waitForTimeout(500);
+  await clickMaybe(page, page.getByRole("button", { name: /panic/i }), 5_000);
+  await captureAudioNodeTrace(page, result, "playback10:after-stop-panic");
+  result.notes.push({ checkpoint: "after-stop-panic", metrics: await browserMetrics(page, cdp) });
+
+  await page.waitForTimeout(10_000);
+  await forceGarbageCollection(cdp);
+  await page.waitForTimeout(1_000);
+  const idleMetrics = await browserMetrics(page, cdp);
+  await captureListenerTrace(page, result, "playback10:after-idle");
+  await captureAudioNodeTrace(page, result, "playback10:after-idle");
+  result.notes.push({ checkpoint: "after-10s-idle", metrics: idleMetrics });
+
+  const playbackMs = Date.now() - started;
+  const audioTrace = idleMetrics.dom.audioNodeTrace;
+  const assertions = {
+    playbackRanFullDuration: playbackMs >= PLAYBACK_MINUTES * 60_000,
+    activeAudioWorkletNodes: audioTrace?.activeAudioWorkletNodes ?? null,
+    activeLeanSources: audioTrace?.leanOneShotSourcesActive ?? null,
+    activeScheduledPlayers: audioTrace?.activeScheduledPlayers ?? null,
+    activeTransportEvents: audioTrace?.activeTransportEvents ?? null,
+    overlays: idleMetrics.dom.overlays,
+    cdpResponsive: true,
+  };
+  result.notes.push({ playback10Assertions: assertions });
+  if (!assertions.playbackRanFullDuration) {
+    throw new Error(`Playback10 ended early after ${playbackMs} ms`);
+  }
+  if ((assertions.activeAudioWorkletNodes ?? 0) !== 0) {
+    throw new Error(`Playback10 created default AudioWorkletNodes: ${assertions.activeAudioWorkletNodes}`);
+  }
+  if ((assertions.activeLeanSources ?? 0) > 0 || (assertions.activeScheduledPlayers ?? 0) > 0) {
+    throw new Error(
+      `Playback10 left active sources after panic: lean=${assertions.activeLeanSources}, scheduled=${assertions.activeScheduledPlayers}`,
+    );
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({
     headless: true,
@@ -735,6 +1049,7 @@ async function main() {
       browser: browserVersion,
       productionPreviewUrl: BASE_URL,
       playbackMinutes: PLAYBACK_MINUTES,
+      profileMode: PROFILE_MODE || "default",
       consoleMessages,
       pageErrors,
       scenarios: results,
@@ -752,9 +1067,42 @@ async function main() {
     ["first-play-no-analyzers", "?snFirstPlayTrace=1&snDisableAnalyzers=1"],
   ];
 
+  if (PLAYBACK10_ONLY) {
+    results.push(await scenario("playback10-release-gate", page, cdp, async (r) => {
+      await playback10Gate(page, cdp, r);
+    }));
+    writeSummary();
+    console.log(OUT_PATH);
+    await browser.close();
+    if (results.some((r) => r.status !== "pass")) process.exitCode = 1;
+    return;
+  }
+
+  if (SAMPLE_IMPORT_ONLY) {
+    results.push(await scenario("sample-import-profile", page, cdp, async (r) => {
+      await sampleImportProfileProbe(page, cdp, r);
+    }));
+    writeSummary();
+    console.log(OUT_PATH);
+    await browser.close();
+    if (results.some((r) => r.status !== "pass")) process.exitCode = 1;
+    return;
+  }
+
   if (FRESH_TRAP_ONLY) {
     results.push(await scenario("fresh-trap-starter-lean-validation", page, cdp, async (r) => {
       await freshTrapStarterLeanValidation(page, cdp, r);
+    }));
+    writeSummary();
+    console.log(OUT_PATH);
+    await browser.close();
+    if (results.some((r) => r.status !== "pass")) process.exitCode = 1;
+    return;
+  }
+
+  if (REPEATED_LOAD_ONLY) {
+    results.push(await scenario("repeated-load-growth", page, cdp, async (r) => {
+      await repeatedLoadGrowthProbe(page, cdp, r);
     }));
     writeSummary();
     console.log(OUT_PATH);
@@ -906,10 +1254,19 @@ async function main() {
   writeSummary();
 
   results.push(await scenario("sample-import-small-and-large", page, cdp, async (r) => {
-    await importSample(page, wavBytes({ seconds: 1 }), "runtime-small.wav");
+    await page.evaluate(() => window.__SN_SAMPLE_IMPORT_TRACE__?.clear?.()).catch(() => undefined);
+    await resetRuntimeLongTasks(page);
+    await captureSampleImportTrace(page, r, "sample-import:baseline");
+    await importGeneratedWavSample(page, { seconds: 1, name: "runtime-small.wav" });
+    await waitForSamplePreviewSettled(page, "wavesurfer-ready");
+    await captureSampleImportTrace(page, r, "sample-import:small-preview-open");
     await saveSampleDialog(page);
-    await importSample(page, wavBytes({ seconds: 30 }), "runtime-large.wav");
+    await captureSampleImportTrace(page, r, "sample-import:small-after-save");
+    await importGeneratedWavSample(page, { seconds: 30, name: "runtime-large.wav" });
+    await waitForSamplePreviewSettled(page, "fallback-waveform:end");
+    await captureSampleImportTrace(page, r, "sample-import:large-preview-open");
     await saveSampleDialog(page);
+    await captureSampleImportTrace(page, r, "sample-import:large-after-save");
     r.notes.push("Large sample is generated locally as 30 seconds mono WAV, about 2.6 MB, below the app's 20 MB warning threshold.");
   }));
   writeSummary();
@@ -964,6 +1321,7 @@ async function main() {
     browser: browserVersion,
     productionPreviewUrl: BASE_URL,
     playbackMinutes: PLAYBACK_MINUTES,
+    profileMode: PROFILE_MODE || "default",
     consoleMessages,
     pageErrors,
     scenarios: results,

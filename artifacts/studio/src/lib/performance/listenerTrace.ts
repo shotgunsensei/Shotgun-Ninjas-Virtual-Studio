@@ -47,6 +47,8 @@ const STORAGE_KEY = "sn:listenerTrace";
 const records = new Map<number, ListenerRecord>();
 let nextId = 1;
 let installed = false;
+const NULL_LISTENER = {};
+let domRecordIds = new WeakMap<EventTarget, Map<string, WeakMap<object, number[]>>>();
 let originals:
   | {
       addEventListener: typeof EventTarget.prototype.addEventListener;
@@ -89,6 +91,52 @@ function captureOption(options?: boolean | AddEventListenerOptions): boolean {
   return typeof options === "boolean" ? options : !!options?.capture;
 }
 
+function listenerObject(listener: EventListenerOrEventListenerObject | null): object {
+  return listener ?? NULL_LISTENER;
+}
+
+function domKey(type: string, capture: boolean): string {
+  return `${type}:${capture ? 1 : 0}`;
+}
+
+function trackDomRecord(
+  target: EventTarget,
+  type: string,
+  listener: EventListenerOrEventListenerObject | null,
+  capture: boolean,
+  id: number,
+): void {
+  if (!id) return;
+  let byType = domRecordIds.get(target);
+  if (!byType) {
+    byType = new Map();
+    domRecordIds.set(target, byType);
+  }
+  const key = domKey(type, capture);
+  let byListener = byType.get(key);
+  if (!byListener) {
+    byListener = new WeakMap();
+    byType.set(key, byListener);
+  }
+  const listenerRef = listenerObject(listener);
+  const ids = byListener.get(listenerRef) ?? [];
+  ids.push(id);
+  byListener.set(listenerRef, ids);
+}
+
+function takeDomRecord(
+  target: EventTarget,
+  type: string,
+  listener: EventListenerOrEventListenerObject | null,
+  capture: boolean,
+): number | null {
+  const byType = domRecordIds.get(target);
+  const byListener = byType?.get(domKey(type, capture));
+  const ids = byListener?.get(listenerObject(listener));
+  const id = ids?.pop();
+  return id ?? null;
+}
+
 function targetLabel(target: EventTarget): string {
   if (typeof window !== "undefined" && target === window) return "Window";
   if (typeof document !== "undefined" && target === document) return "Document";
@@ -125,19 +173,7 @@ function findDomRecord(
   listener: EventListenerOrEventListenerObject | null,
   capture: boolean,
 ): number | null {
-  const targetName = targetLabel(target);
-  for (const [id, record] of records) {
-    if (
-      record.source === "dom" &&
-      record.target === targetName &&
-      record.type === type &&
-      record.detail?.listener === listener &&
-      record.detail?.capture === capture
-    ) {
-      return id;
-    }
-  }
-  return null;
+  return takeDomRecord(target, type, listener, capture);
 }
 
 function increment(map: Record<string, number>, key: string): void {
@@ -239,7 +275,10 @@ function api(): ListenerTraceApi {
     enabled: isEnabled(),
     snapshot: getListenerTraceSnapshot,
     dumpTopStacks: (limit = 20) => summarizeStacks(limit),
-    clear: () => records.clear(),
+    clear: () => {
+      records.clear();
+      domRecordIds = new WeakMap();
+    },
     start: startListenerTrace,
     stop: uninstallListenerTrace,
   };
@@ -267,13 +306,14 @@ export function startListenerTrace(): void {
     options?: boolean | AddEventListenerOptions,
   ): void {
     const capture = captureOption(options);
-    addRecord({
+    const id = addRecord({
       source: "dom",
       label: `${targetLabel(this)}:${type}`,
       type,
       target: targetLabel(this),
-      detail: { capture, listener },
+      detail: { capture },
     });
+    trackDomRecord(this, type, listener, capture, id);
     return originals!.addEventListener.call(this, type, listener, options);
   };
 
@@ -296,6 +336,7 @@ export function uninstallListenerTrace(): void {
   EventTarget.prototype.addEventListener = originals.addEventListener;
   EventTarget.prototype.removeEventListener = originals.removeEventListener;
   records.clear();
+  domRecordIds = new WeakMap();
   installed = false;
   originals = null;
   window.__SN_LISTENER_TRACE__ = api();

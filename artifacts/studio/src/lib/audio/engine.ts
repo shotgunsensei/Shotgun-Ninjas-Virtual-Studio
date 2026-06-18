@@ -30,7 +30,6 @@ import {
 import { lookaheadScheduler } from "./lookahead-scheduler";
 import {
   announceSamplerLoadIfNeeded,
-  applyVocalPresetTo,
   buildDrumKit,
   buildMelodicVoice,
   releaseAllNotes,
@@ -92,7 +91,6 @@ export type { DrumKit, DrumPiece, DrumVoice, MelodicVoice } from "./voices";
 interface TrackVoice {
   channel: Tone.Channel;
   meter: Tone.Meter;
-  reverb: Tone.Freeverb;
   delay: Tone.FeedbackDelay;
   filter: Tone.Filter;
   /** v2 sound-shaping nodes inserted in the per-track chain after the
@@ -600,7 +598,7 @@ class AudioEngine {
         if (v.delay) v.delay.wet.rampTo(enabled ? amount : 0, 0.05);
         return;
       case "reverb":
-        if (v.reverb) v.reverb.wet.rampTo(enabled ? amount : 0, 0.05);
+        this.setTrackReverbWet(v, enabled ? amount : 0, 0.05);
         return;
       case "chorus":
         if (enabled) this.ensureChorusNode(v);
@@ -1235,7 +1233,7 @@ class AudioEngine {
     v.channel.volume.rampTo(db, 0.05);
     v.channel.pan.rampTo(track.pan, 0.05);
 
-    v.reverb.wet.rampTo(track.fx.reverb, 0.05);
+    this.setTrackReverbWet(v, track.fx.reverb, 0.05);
     v.delay.wet.rampTo(track.fx.delay, 0.05);
     const cutoff = 200 + track.fx.filter ** 2 * 17800;
     v.filter.frequency.rampTo(cutoff, 0.05);
@@ -1243,6 +1241,37 @@ class AudioEngine {
 
   refreshAllMutes(tracks: Track[]) {
     for (const t of tracks) this.applyTrackSettings(t);
+  }
+
+  private setTrackReverbWet(v: TrackVoice, amount: number, rampSec: number): void {
+    const bounded = Math.max(0, Math.min(1, amount));
+    v.sends?.get("roomReverb")?.gain.rampTo(bounded, rampSec);
+  }
+
+  private setTrackReverbWetImmediate(v: TrackVoice, amount: number): void {
+    const bounded = Math.max(0, Math.min(1, amount));
+    const send = v.sends?.get("roomReverb");
+    if (send) send.gain.value = bounded;
+  }
+
+  private applyVocalPresetSettings(v: TrackVoice, preset: VocalsPreset): void {
+    switch (preset) {
+      case "clean":
+        this.setTrackReverbWetImmediate(v, 0.05);
+        v.delay.wet.value = 0;
+        v.filter.frequency.value = 18000;
+        break;
+      case "warm":
+        this.setTrackReverbWetImmediate(v, 0.45);
+        v.delay.wet.value = 0.15;
+        v.filter.frequency.value = 12000;
+        break;
+      case "lofi":
+        this.setTrackReverbWetImmediate(v, 0.2);
+        v.delay.wet.value = 0.1;
+        v.filter.frequency.value = 3500;
+        break;
+    }
   }
 
   changePreset(track: Track) {
@@ -1272,7 +1301,7 @@ class AudioEngine {
     this.disposeInstrument(v);
     v.kitId = kitId;
     const def = findKit(kitId);
-    v.kit = buildKit(def, v.filter, v.reverb, v.delay);
+    v.kit = buildKit(def, v.filter, this.masterChain.getBus("roomReverb")?.input ?? null, v.delay);
     endTiming();
   }
 
@@ -1292,7 +1321,7 @@ class AudioEngine {
     announceSamplerLoadIfNeeded(poly);
     // Apply preset's send defaults as a starting point so the user hears
     // the intended character without further tweaking.
-    v.reverb.wet.rampTo(def.synth.reverbSend, 0.05);
+    this.setTrackReverbWet(v, def.synth.reverbSend, 0.05);
     v.delay.wet.rampTo(def.synth.delaySend, 0.05);
     this.maybeAttachMelodicSampler(v, def, presetId);
     endTiming();
@@ -1426,7 +1455,7 @@ class AudioEngine {
       v.filter.frequency.rampTo(cutoffNormToHz(partial.cutoff), 0.05);
     }
     if (partial.reverbSend !== undefined) {
-      v.reverb.wet.rampTo(Math.max(0, Math.min(1, partial.reverbSend)), 0.05);
+      this.setTrackReverbWet(v, partial.reverbSend, 0.05);
     }
     if (partial.delaySend !== undefined) {
       v.delay.wet.rampTo(Math.max(0, Math.min(1, partial.delaySend)), 0.05);
@@ -1648,7 +1677,7 @@ class AudioEngine {
           v.filter.frequency.linearRampToValueAtTime(200 + Math.pow(value, 2) * 17800, rampEnd);
           break;
         case "reverbSend":
-          v.reverb.wet.linearRampToValueAtTime(value, rampEnd);
+          v.sends?.get("roomReverb")?.gain.linearRampToValueAtTime(value, rampEnd);
           break;
         case "delaySend":
           v.delay.wet.linearRampToValueAtTime(value, rampEnd);
@@ -2265,7 +2294,6 @@ class AudioEngine {
       v.chorus,
       v.comp,
       v.delay,
-      v.reverb,
       v.bitcrusher,
       v.widener,
     ];
@@ -2359,8 +2387,6 @@ class AudioEngine {
     // to create unlike Tone.Reverb which generates a convolution IR buffer
     // via OfflineAudioContext and blocks the main thread for ~6-8 s per
     // instance. With 5+ tracks this was causing a 45-50 s freeze on load.
-    firstPlayMark("effect-node:create", { kind: "reverb", trackId: track.id });
-    const reverb = new Tone.Freeverb({ roomSize: 0.65, dampening: 3000, wet: 0 });
     firstPlayMark("effect-node:create", { kind: "delay", trackId: track.id });
     const delay = new Tone.FeedbackDelay({
       delayTime: "8n",
@@ -2378,9 +2404,8 @@ class AudioEngine {
     // Default chain is intentionally lean. Optional mixer/effect nodes are
     // inserted lazily by the setters above when a real non-default setting
     // needs them; eager creation was the largest runtime click/load stall.
-    delay.connect(reverb);
     filter.connect(delay);
-    reverb.connect(channel);
+    delay.connect(channel);
     channel.connect(this.masterChain.input);
     // post-fader meter tap
     channel.connect(meter);
@@ -2397,7 +2422,6 @@ class AudioEngine {
     const voice: TrackVoice = {
       channel,
       meter,
-      reverb,
       delay,
       filter,
       sends,
@@ -2437,7 +2461,6 @@ class AudioEngine {
           trackToneDispose("effectModule", "widener");
         }
         delay.dispose();
-        reverb.dispose();
         if (voice.hpf) {
           voice.hpf.dispose();
           trackToneDispose("effectModule", "hpf");
@@ -2500,7 +2523,7 @@ class AudioEngine {
           kitId: track.kitId,
         });
         v.kitId = track.kitId;
-        v.kit = buildKit(findKit(track.kitId), target, v.reverb, v.delay);
+        v.kit = buildKit(findKit(track.kitId), target, this.masterChain.getBus("roomReverb")?.input ?? null, v.delay);
       } else {
         firstPlayMark("instrument-factory:buildDrumKit", {
           trackId: track.id,
@@ -2519,10 +2542,7 @@ class AudioEngine {
       return;
     }
     if (kind === "vocals") {
-      applyVocalPresetTo(
-        { reverb: v.reverb, delay: v.delay, filter: v.filter },
-        preset as VocalsPreset,
-      );
+      this.applyVocalPresetSettings(v, preset as VocalsPreset);
       firstPlayMeasure("attachInstrument", started, performance.now(), {
         trackId: track.id,
         kind,
