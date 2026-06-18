@@ -979,6 +979,95 @@ acceptance test has not passed.
 
 ---
 
+## 2026-06-18 4.0.0-launch Select Crash and Startup Sound Fix
+
+### Root Causes Confirmed
+
+- Radix Select forbids `<SelectItem>` values that are an empty string because
+  Radix reserves `""` for clearing the selection. The studio had Radix-backed
+  device selects that could receive browser-provided empty IDs:
+  `MidiPanel` used `midi.selectedId ?? ""` / MIDI input IDs directly, and
+  `VocalsPanel` used `MediaDeviceInfo.deviceId` directly.
+- World ambience/welcome audio defaulted on for each session. After the browser
+  audio context was unlocked, that path could start the world ambient loop
+  without an intentional transport Play action, matching the reported repeating
+  sound every few seconds.
+
+### Fixes Applied
+
+- Added UI-local Select sentinels in `src/lib/ui/selectSentinels.ts`.
+- Updated `MidiPanel` and `VocalsPanel` so Radix item values use non-empty
+  sentinels while app state keeps the existing `null` / empty-string shape.
+- Added `scripts/check-select-values.mjs` and `npm run test:select-values` to
+  fail on empty Radix Select item values or empty `value: ""` option records.
+- Added `tests/release-select-startup.spec.ts` to load a built-in demo, open a
+  track preset Select, choose an option, and assert the Radix empty-value crash
+  does not appear.
+- Added opt-in startup sound tracing via `src/lib/performance/startupSoundTrace.ts`
+  and `window.__SN_STARTUP_SOUND_TRACE__`.
+- Changed world ambience/welcome audio to explicit opt-in. Passive studio load,
+  project recovery, demo load, and audio unlock no longer intentionally start
+  world welcome/ambient playback.
+
+### Project Schema
+
+No project schema change. Sentinel values are UI-only and are not persisted into
+project files.
+
+### Verification
+
+| Command / check | Result | Summary |
+| --- | --- | --- |
+| `corepack pnpm --dir artifacts/studio run test:select-values` | Pass | No empty Radix Select item values or empty `value: ""` option records found. |
+| `corepack pnpm --dir artifacts/studio run typecheck` | Pass | TypeScript completed cleanly. |
+| `corepack pnpm --dir artifacts/studio run build` | Pass with existing warnings | Production build completed; existing sourcemap/import-overlap/large-chunk warnings remain. |
+| `corepack pnpm --dir artifacts/studio exec playwright test --reporter=line --workers=1` | Environment command failed | Direct `pnpm exec playwright` did not resolve `playwright` in this shell. |
+| `corepack pnpm --dir artifacts/studio run test:line` | Pass | 5/5 Playwright tests passed, including the 4.0.0-launch release guard. |
+| Production preview release smoke | Pass | `/studio` loaded, Trap Starter loaded, preset Select changed, Play/Pause/Stop/Panic worked, and startup trace showed no `world-welcome:play` or `world-ambient:start` before Play. |
+| Production preview built-in demo sweep | Pass | Loaded all eight demos: Trap Starter, Boom Bap Dojo, Cyber Ninja Theme, Lo-Fi Smoke Loop, Cinematic Trailer Hit, 808 Bass Test, Sample Chop Template, and Empty Studio. |
+| Production preview first-play matrix | Pass | All seven first-play matrix scenarios passed. |
+
+Short runtime profile and 10-minute playback acceptance were not run in this
+release-bug pass.
+
+---
+
+## 2026-06-18 Final Release Gate
+
+### Gate Results
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Select regression | Pass | `corepack pnpm --dir artifacts/studio run test:select-values` found no empty Radix Select item values. |
+| Typecheck | Pass | `corepack pnpm --dir artifacts/studio run typecheck` completed cleanly. |
+| Build | Pass with existing warnings | `corepack pnpm --dir artifacts/studio run build` completed; sourcemap, dynamic import, and large chunk warnings remain unchanged. |
+| Playwright package-script test | Pass | `corepack pnpm --dir artifacts/studio run test:line` completed 5/5 tests and exited cleanly. |
+| Production release smoke | Pass | `/studio` loaded, all eight demos loaded, preset Select changed, Play/Pause/Stop/Panic worked, and no Select empty-value crash occurred. |
+| Startup sound | Pass | Startup trace contained no `world-welcome:play` or `world-ambient:start` before Play. |
+| First-play matrix | Pass | 7/7 production preview first-play scenarios passed. |
+| Short runtime profile | Pass | `STUDIO_PROFILE_MINUTES=0.1 node scripts/runtime-profile.mjs` passed 19/19 scenarios. |
+| Sample import | Pass | `sample-import-small-and-large` scenario passed in `6,596 ms`. |
+| WAV export | Pass | `wav-export-default-and-demo` scenario passed in `15,018 ms`. |
+| Default AudioWorkletNode creation | Pass | Short profile reported `audioWorkletNodesDelta` of `0` for all scenarios. |
+| 10-minute playback | Pass | `STUDIO_PROFILE_MODE=playback10 STUDIO_PROFILE_MINUTES=10 node scripts/runtime-profile.mjs` passed in `618,255 ms`; assertions confirmed full duration, CDP responsive, `activeAudioWorkletNodes: 0`, `activeScheduledPlayers: 0`, and `activeTransportEvents: 0`. |
+
+### Release Decision
+
+Release-safe for the validated 4.0.0-launch gate.
+
+The remaining risks are non-blocking for this release gate:
+
+- Existing production build warnings remain.
+- Headless production smoke still logs two `ERR_NETWORK_ACCESS_DENIED` resource
+  loads in Chromium; filtered app error count was `0`.
+- Longer-session listener/DOM growth should remain on the post-release
+  monitoring backlog.
+
+Generated runtime profiles, production build output, Playwright artifacts, and
+temporary profiler output are not commit targets.
+
+---
+
 ## 2026-06-18 Final Release Gate Split and Sample Import Patch
 
 ### Fixes Applied

@@ -9,6 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "playwright test --reporter=./scripts/playwright-exit-reporter.cjs",
+    "test:select-values": "node scripts/check-select-values.mjs",
     "test:line": "playwright test --reporter=./scripts/playwright-exit-reporter.cjs --workers=1",
     "test:headed": "playwright test --headed",
     "test:report": "playwright show-report"

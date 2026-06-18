@@ -56,6 +56,7 @@ import {
   isFirstPlayTraceEnabled,
 } from "../performance/firstPlayTrace";
 import { recordLeanDrumTrace, trackToneCreate, trackToneDispose } from "../performance/audioNodeTrace";
+import { markStartupSound } from "../performance/startupSoundTrace";
 
 const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 const AUDIO_START_TIMEOUT_MS = 5_000;
@@ -658,6 +659,12 @@ class AudioEngine {
   play(): boolean {
     const flags = getFirstPlayFlags();
     const traceFirstPlay = isFirstPlayTraceEnabled() && !this.firstPlayAttempted;
+    markStartupSound("transport:play-request", {
+      contextState: this.getAudioContextState(),
+      transportState: Tone.getTransport().state,
+      metronomeEnabled: this.metronomeEnabled,
+      playbackState: this.playbackState,
+    });
     if (traceFirstPlay) {
       this.firstPlayAttempted = true;
       firstPlayMark("AudioEngine.play:first-attempt", {
@@ -719,10 +726,18 @@ class AudioEngine {
         contextState: this.getAudioContextState(),
         transportState: transport.state,
       });
+      markStartupSound("transport:start-before", {
+        contextState: this.getAudioContextState(),
+        transportState: transport.state,
+      });
       const transportStart = performance.now();
       if (transport.state !== "started") {
         transport.start("+0.05");
       }
+      markStartupSound("transport:start-after", {
+        contextState: this.getAudioContextState(),
+        transportState: transport.state,
+      });
       firstPlayMeasure("Tone.Transport.start", transportStart, performance.now(), {
         contextState: this.getAudioContextState(),
         transportState: transport.state,
@@ -880,6 +895,11 @@ class AudioEngine {
   }
 
   setMetronome(on: boolean) {
+    markStartupSound("metronome:set", {
+      enabled: on,
+      transportState: Tone.getTransport().state,
+      playbackState: this.playbackState,
+    });
     this.metronomeEnabled = on;
     if (!on) {
       // Explicitly remove the repeating Transport event so it stops consuming

@@ -7,6 +7,12 @@ import { audio } from "../../lib/audio/engine";
 import { visualTicker } from "../../lib/visualTicker";
 import { useStore, getStore } from "../../store";
 import type { Track } from "../../types";
+import {
+  deviceSelectId,
+  deviceSelectValue,
+  selectValueOrNone,
+  SELECT_NONE,
+} from "../../lib/ui/selectSentinels";
 
 export function VocalsPanel({ track }: { track: Track }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -112,9 +118,9 @@ export function VocalsPanel({ track }: { track: Track }) {
             Input Device
           </label>
           <Select
-            value={deviceId}
+            value={selectValueOrNone(deviceId)}
             onValueChange={(v) => {
-              setDeviceId(v);
+              setDeviceId(v === SELECT_NONE ? "" : deviceSelectId(v));
               if (monitoring) {
                 stopMon();
                 requestAnimationFrame(() => startMon());
@@ -126,12 +132,16 @@ export function VocalsPanel({ track }: { track: Track }) {
             </SelectTrigger>
             <SelectContent>
               {devices.length === 0 && (
-                <SelectItem value="__none" disabled>
+                <SelectItem value={SELECT_NONE} disabled>
                   Grant mic access to list devices
                 </SelectItem>
               )}
-              {devices.map((d) => (
-                <SelectItem key={d.deviceId} value={d.deviceId} className="text-xs">
+              {devices.map((d, index) => (
+                <SelectItem
+                  key={d.deviceId || `audioinput-${index}`}
+                  value={deviceSelectValue(d.deviceId, index)}
+                  className="text-xs"
+                >
                   {d.label || `Mic (${d.deviceId.slice(0, 6)})`}
                 </SelectItem>
               ))}

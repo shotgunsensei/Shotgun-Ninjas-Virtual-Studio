@@ -26,6 +26,7 @@ import { getStore } from "../store";
 import { audio } from "../lib/audio/engine";
 import type { DrumKitId } from "../types";
 import { firstPlayMark, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
+import { markStartupSound } from "../lib/performance/startupSoundTrace";
 
 const AMBIENT_VOLUME = 0.10;
 
@@ -66,10 +67,9 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
   // Tracks any pending delayed ambient-start so we can cancel it
   const ambientStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Per-session ambient toggle — defaults to enabled unless reduced-audio preference
-  const [ambientEnabled, setAmbientEnabledState] = useState<boolean>(
-    () => !_prefersReducedAudio(),
-  );
+  // World ambience/welcome audio is explicit opt-in. Passive studio load/unlock
+  // must not produce repeating sound before the user presses Play.
+  const [ambientEnabled, setAmbientEnabledState] = useState<boolean>(false);
 
   // Keep a ref in sync so callbacks closed over stale state can read the latest value
   const ambientEnabledRef = useRef(ambientEnabled);
@@ -128,6 +128,10 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
               ambientLoopRef.current.stop();
               ambientLoopRef.current = null;
             }
+            markStartupSound("world-ambient:start", {
+              worldId,
+              contextState: ctx.state,
+            });
             ambientLoopRef.current = startAmbientLoop(worldId, ctx, AMBIENT_VOLUME);
           } catch {
             // Non-critical
@@ -156,8 +160,10 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
   // React to ambientEnabled toggle
   useEffect(() => {
     if (ambientEnabled) {
+      markStartupSound("world-ambient-toggle:on", { worldId: activeWorldId });
       _startAmbient(activeWorldId);
     } else {
+      markStartupSound("world-ambient-toggle:off", { worldId: activeWorldId });
       _stopAmbient();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,6 +218,17 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
       // Play welcome cue — resume AudioContext if needed (browsers suspend by default)
       if (getFirstPlayFlags().disableWorldAudio) {
         firstPlayMark("world-audio:welcome-skipped");
+        markStartupSound("world-welcome:skipped", {
+          worldId: id,
+          reason: "first-play-flag",
+        });
+        return;
+      }
+      if (!ambientEnabledRef.current || _prefersReducedAudio()) {
+        markStartupSound("world-welcome:skipped", {
+          worldId: id,
+          reason: ambientEnabledRef.current ? "reduced-audio" : "ambient-disabled",
+        });
         return;
       }
       try {
@@ -219,6 +236,17 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
         const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();
         resume
           .then(() => {
+            if (!ambientEnabledRef.current || _prefersReducedAudio()) {
+              markStartupSound("world-welcome:skipped", {
+                worldId: id,
+                reason: ambientEnabledRef.current ? "reduced-audio-after-resume" : "ambient-disabled-after-resume",
+              });
+              return;
+            }
+            markStartupSound("world-welcome:play", {
+              worldId: id,
+              contextState: ctx.state,
+            });
             playWorldWelcome(world, ctx);
             // Start ambient after a short delay (let welcome cue breathe)
             ambientStartTimerRef.current = setTimeout(() => {
@@ -232,6 +260,10 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
                 }
                 const audioCtx = audioCtxRef.current;
                 if (!audioCtx || audioCtx.state === "closed") return;
+                markStartupSound("world-ambient:start", {
+                  worldId: id,
+                  contextState: audioCtx.state,
+                });
                 ambientLoopRef.current = startAmbientLoop(id, audioCtx, AMBIENT_VOLUME);
               } catch {
                 // Non-critical

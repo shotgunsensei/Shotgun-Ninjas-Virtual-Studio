@@ -4,6 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStore, getStore } from "../store";
 import { useMidi, midiNoteToName } from "../lib/midi/midi";
+import {
+  deviceSelectId,
+  deviceSelectValue,
+  selectValueOrNone,
+  SELECT_NONE,
+} from "../lib/ui/selectSentinels";
 
 function parseMidiSignature(sig: string): string {
   const parts = sig.split(":");
@@ -188,20 +194,26 @@ export function MidiPanel() {
       {midi.status === "ready" && (
         <div className="mb-2 space-y-1">
           <Select
-            value={midi.selectedId ?? ""}
-            onValueChange={(v) => midi.selectInput(v || null)}
+            value={selectValueOrNone(midi.selectedId)}
+            onValueChange={(v) =>
+              midi.selectInput(v === SELECT_NONE ? null : deviceSelectId(v))
+            }
           >
             <SelectTrigger className="bg-background h-8 text-xs">
               <SelectValue placeholder="Select MIDI input" />
             </SelectTrigger>
             <SelectContent>
               {midi.inputs.length === 0 && (
-                <SelectItem value="__none" disabled>
+                <SelectItem value={SELECT_NONE} disabled>
                   No MIDI inputs detected
                 </SelectItem>
               )}
-              {midi.inputs.map((i) => (
-                <SelectItem key={i.id} value={i.id} className="text-xs">
+              {midi.inputs.map((i, index) => (
+                <SelectItem
+                  key={i.id || `midi-input-${index}`}
+                  value={deviceSelectValue(i.id, index)}
+                  className="text-xs"
+                >
                   {i.name}
                 </SelectItem>
               ))}
