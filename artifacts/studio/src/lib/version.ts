@@ -4,7 +4,7 @@
  * Bumped manually as each Phase 3 task lands. Surfaced in the footer,
  * the About dialog, and any future PWA update toast.
  */
-export const APP_VERSION = "4.1.0-factory";
+export const APP_VERSION = "4.2.0-compass";
 export const APP_NAME = "Shotgun Ninjas Virtual Studio";
 /** Canonical landing URL stamped on exported projects so a JSON file
  *  always tells you where it came from. The browser preview rewrites
@@ -26,6 +26,18 @@ export interface ChangelogEntry {
  * Newest entry first.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "4.2.0-compass",
+    date: "2026-08-30",
+    highlights: [
+      "Creative Compass reads the current arrangement and suggests one understandable next musical move.",
+      "Editable motif, chord, bass-pulse, and drum-groove seeds plus answer, lift, and pocket variations.",
+      "Sound-pack previews can become reversible two-bar sketches; Undo Sketch restores the prior clips and sound when those generated values are still current.",
+      "Adaptive Project, Export, Learn, and More commands remain reachable from tablet through widescreen layouts.",
+      "Beginner view is the new-user default; existing preferences remain unchanged.",
+      "Scale Lock now chooses the nearest note correctly across octave boundaries.",
+    ],
+  },
   {
     version: "4.1.0-factory",
     date: "2026-08-30",

@@ -17,7 +17,10 @@ import {
   Info,
   Share2,
   Tag,
-  Home,
+  BookOpen,
+  GraduationCap,
+  MoreHorizontal,
+  Sparkles,
 } from "lucide-react";
 import type { ShareCardData } from "./ShareCardModal";
 import {
@@ -49,7 +52,7 @@ import {
   AUTOSAVE_OPTIONS,
   type AutosaveIntervalSec,
 } from "../lib/settings";
-import { PwaInstallControls } from "./PwaInstallControls";
+import { usePwaInstallAction } from "./PwaInstallControls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -82,6 +85,7 @@ import {
   projectHasUnembeddableSamples,
   summarizeProjectJson,
   getLastProjectId,
+  preserveProjectForReplacement,
   loadDraft,
   hydrateDraft,
   clearDraft,
@@ -115,6 +119,11 @@ const GlossaryPanel = lazy(() =>
 const LessonsPanel = lazy(() =>
   import("./LessonsPanel").then((module) => ({ default: module.LessonsPanel })),
 );
+const CreativeCompassPanel = lazy(() =>
+  import("./CreativeCompassPanel").then((module) => ({
+    default: module.CreativeCompassPanel,
+  })),
+);
 const ShortcutsPanel = lazy(() =>
   import("./ShortcutsPanel").then((module) => ({ default: module.ShortcutsPanel })),
 );
@@ -136,7 +145,9 @@ export function Header() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shareCardOpen, setShareCardOpen] = useState(false);
+  const [creativeCompassOpen, setCreativeCompassOpen] = useState(false);
   const [shareCardData, setShareCardData] = useState<ShareCardData | null>(null);
+  const pwaInstall = usePwaInstallAction();
   const showShortcutsButton = useSettings((s) => s.showShortcutsButton);
   const [isFullscreen, setIsFullscreen] = useState(
     typeof document !== "undefined" && !!document.fullscreenElement,
@@ -168,6 +179,7 @@ export function Header() {
       setGlossaryOpen(true);
     };
     const onOpenLessons = () => setLessonsOpen(true);
+    const onOpenCreativeCompass = () => setCreativeCompassOpen(true);
     const onOpenShortcutsPanel = () => setShortcutsPanelOpen(true);
     window.addEventListener("studio:open-shortcuts", onOpen);
     window.addEventListener("studio:open-export", onExport);
@@ -179,6 +191,7 @@ export function Header() {
     window.addEventListener("studio:open-load", onOpenLoad);
     window.addEventListener("studio:open-glossary", onOpenGlossary);
     window.addEventListener("studio:open-lessons", onOpenLessons);
+    window.addEventListener("studio:open-creative", onOpenCreativeCompass);
     window.addEventListener("studio:open-shortcuts-panel", onOpenShortcutsPanel);
     return () => {
       window.removeEventListener("studio:open-shortcuts", onOpen);
@@ -191,6 +204,7 @@ export function Header() {
       window.removeEventListener("studio:open-load", onOpenLoad);
       window.removeEventListener("studio:open-glossary", onOpenGlossary);
       window.removeEventListener("studio:open-lessons", onOpenLessons);
+      window.removeEventListener("studio:open-creative", onOpenCreativeCompass);
       window.removeEventListener("studio:open-shortcuts-panel", onOpenShortcutsPanel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -486,6 +500,7 @@ export function Header() {
     const endCriticalOperation = beginStorageCriticalOperation();
     try {
       const proj = parseProjectJson(importSummary.jsonText);
+      if (!(await preserveCurrentBeforeReplacement())) return;
       audio.stop();
       await saveProject(proj);
       await setLastProjectId(proj.id);
@@ -573,11 +588,12 @@ export function Header() {
     if (
       settings.confirmBeforeOverwrite &&
       !window.confirm(
-        "Start a fresh project? Your current project will stay saved in the Load dialog.",
+        "Start a fresh project? The Studio will preserve your current work before replacing it.",
       )
     ) {
       return;
     }
+    if (!(await preserveCurrentBeforeReplacement())) return;
     audio.stop();
     const proj = defaultProject();
     // Honor user defaults for new projects.
@@ -835,7 +851,28 @@ export function Header() {
     setOpenLoad(true);
   };
 
+  /**
+   * Project replacement must not outrun the latest edit. Normal projects are
+   * durably saved; intentionally temporary demos receive a recovery draft so
+   * simply browsing demos does not silently promote each one into Load.
+   * Replacement aborts on any storage failure.
+   */
+  const preserveCurrentBeforeReplacement = async (): Promise<boolean> => {
+    const { project: current, isTransientProject } = getStore().state;
+    try {
+      await preserveProjectForReplacement(current, isTransientProject);
+      return true;
+    } catch (err) {
+      getStore().setStatus(
+        `Current project could not be preserved; replacement cancelled: ${(err as Error).message}`,
+        "error",
+      );
+      return false;
+    }
+  };
+
   const onLoad = async (id: string) => {
+    if (!(await preserveCurrentBeforeReplacement())) return;
     const proj = await loadProject(id);
     if (!proj) return;
     audio.stop();
@@ -857,6 +894,7 @@ export function Header() {
         getStore().setStatus("No previous session to restore", "warn");
         return;
       }
+      if (!(await preserveCurrentBeforeReplacement())) return;
       const proj = await loadProject(lastId);
       if (!proj) {
         getStore().setStatus("Last session is no longer available", "warn");
@@ -889,6 +927,18 @@ export function Header() {
         return;
       }
       const proj = await hydrateDraft(snap);
+      const current = getStore().state;
+      if (
+        current.isTransientProject &&
+        !window.confirm(
+          "Recover the older draft? This replaces the current temporary demo, which has not been saved as a project.",
+        )
+      ) {
+        return;
+      }
+      if (!current.isTransientProject && !(await preserveCurrentBeforeReplacement())) {
+        return;
+      }
       audio.stop();
       resetStore(proj);
       flushMixToEngine(proj);
@@ -946,17 +996,17 @@ export function Header() {
   };
 
   return (
-    <header className="h-14 border-b border-border flex items-center px-4 gap-4 bg-graphite">
-      <div className="flex items-center gap-3">
+    <header className="h-14 min-w-0 border-b border-border flex items-center px-2 lg:px-3 gap-2 bg-graphite">
+      <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={() => setLocation("/")}
-          className="flex items-center gap-3 hover:opacity-75 transition-opacity"
+          className="flex items-center gap-2 hover:opacity-75 transition-opacity duration-150"
           title="Back to home"
           aria-label="Back to home"
         >
-          <Logo className="w-9 h-9" />
-          <div className="leading-tight">
+          <Logo className="w-8 h-8" />
+          <div className="hidden min-[1180px]:block leading-tight">
             <div className="font-display text-sm tracking-[0.2em] text-foreground/90">
               SHOTGUN NINJAS
             </div>
@@ -965,79 +1015,201 @@ export function Header() {
             </div>
           </div>
         </button>
-        <Tip label="Back to home">
-          <button
-            type="button"
-            onClick={() => setLocation("/")}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Back to home"
-          >
-            <Home className="w-3.5 h-3.5" />
-          </button>
-        </Tip>
       </div>
 
-      <div className="h-8 w-px bg-border mx-2" />
+      <div className="h-8 w-px shrink-0 bg-border" />
 
-      <div className="flex items-center gap-2 flex-1 max-w-md">
-        <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">
+      <div className="flex min-w-24 max-w-sm flex-1 items-center gap-2">
+        <span className="hidden min-[900px]:inline text-xs text-muted-foreground font-mono uppercase tracking-wider">
           Project
         </span>
         <Input
           value={project.name}
           onChange={(e) => getStore().patchProject({ name: e.target.value })}
-          className="h-8 bg-background border-border font-mono text-sm"
+          className="h-8 min-w-0 bg-background border-border px-2 font-mono text-sm"
+          aria-label="Project name"
           data-testid="project-name-input"
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={onNew} className="font-mono text-xs">
-          <FilePlus2 className="w-3.5 h-3.5 mr-1" /> New
-        </Button>
-        <Button variant="outline" size="sm" onClick={onSave} className="font-mono text-xs">
-          <Save className="w-3.5 h-3.5 mr-1" /> Save
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onSaveAs}
-          className="font-mono text-xs"
-        >
-          <Copy className="w-3.5 h-3.5 mr-1" /> Save As
-        </Button>
-        <Button variant="outline" size="sm" onClick={openLoadDialog} className="font-mono text-xs" data-testid="open-load-dialog">
-          <FolderOpen className="w-3.5 h-3.5 mr-1" /> Load
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setExportModalOpen(true)}
-          disabled={exporting}
-          className="font-mono text-xs"
-        >
-          <Download className="w-3.5 h-3.5 mr-1" /> Export
-        </Button>
-        <PwaInstallControls />
+      <div className="flex shrink-0 items-center gap-1">
+        <Tip label="Save project (S)">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onSave}
+            className="h-8 gap-1.5 px-2 font-mono text-xs"
+            aria-label="Save project"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Save</span>
+          </Button>
+        </Tip>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
               size="sm"
-              className="font-mono text-xs"
-              aria-label="Help menu"
+              className="h-8 gap-1.5 px-2 font-mono text-xs"
+              aria-label="Project menu"
+              data-testid="project-menu"
             >
-              <HelpCircle className="w-3.5 h-3.5 mr-1" /> Help
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Project</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="font-mono text-xs">
+            <DropdownMenuItem onClick={onNew} className="font-mono text-xs">
+              <FilePlus2 className="w-3.5 h-3.5 mr-1.5" /> New project
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onSaveAs} className="font-mono text-xs">
+              <Copy className="w-3.5 h-3.5 mr-1.5" /> Save as
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={openLoadDialog}
+              className="font-mono text-xs"
+            >
+              <FolderOpen className="w-3.5 h-3.5 mr-1.5" /> Load / demos
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setProjectInfoOpen(true)}
+              className="font-mono text-xs"
+              data-testid="open-project-info"
+            >
+              <Tag className="w-3.5 h-3.5 mr-1.5" /> Project info
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Tip label="Load projects and demos">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openLoadDialog}
+            className="h-8 gap-1.5 px-2 font-mono text-xs"
+            aria-label="Load projects and demos"
+            data-testid="open-load-dialog"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Load</span>
+          </Button>
+        </Tip>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setExportModalOpen(true)}
+          disabled={exporting}
+          className="h-8 gap-1.5 px-2 font-mono text-xs"
+          aria-label="Export project"
+          data-testid="open-export"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span className="hidden xl:inline">Export</span>
+        </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 px-2 font-mono text-xs"
+              aria-label="Learn menu"
+              data-testid="learn-menu"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Learn</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="font-mono text-xs">
+            <DropdownMenuItem
+              onClick={() => setCreativeCompassOpen(true)}
+              className="font-mono text-xs"
+              data-testid="open-creative-compass"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Creative Compass
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setLessonsOpen(true)}
+              className="font-mono text-xs"
+            >
+              <GraduationCap className="w-3.5 h-3.5 mr-1.5" /> Lessons
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => getStore().set({ showHelp: true })}
               className="font-mono text-xs"
             >
               <HelpCircle className="w-3.5 h-3.5 mr-1.5" />
-              Help &amp; Onboarding
+              Quick start
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setGlossaryTerm(undefined);
+                setGlossaryOpen(true);
+              }}
+              className="font-mono text-xs"
+            >
+              <BookOpen className="w-3.5 h-3.5 mr-1.5" /> Music glossary
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setShortcutsPanelOpen(true)}
+              className="font-mono text-xs"
+            >
+              <KeyboardIcon className="w-3.5 h-3.5 mr-1.5" /> Shortcuts
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-2 font-mono text-xs"
+              aria-label="More studio commands"
+              data-testid="more-menu"
+            >
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="font-mono text-xs">
+            <DropdownMenuItem
+              onClick={() => setSettingsOpen(true)}
+              className="font-mono text-xs"
+            >
+              <SettingsIcon className="w-3.5 h-3.5 mr-1.5" /> Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setAboutOpen(true)}
+              className="font-mono text-xs"
+            >
+              <Info className="w-3.5 h-3.5 mr-1.5" /> About &amp; changelog
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={toggleFullscreen} className="font-mono text-xs">
+              {isFullscreen ? (
+                <Minimize2 className="w-3.5 h-3.5 mr-1.5" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            </DropdownMenuItem>
+            {pwaInstall.available && (
+              <DropdownMenuItem
+                onSelect={() => pwaInstall.activate()}
+                className="font-mono text-xs"
+                data-testid="desktop-pwa-install-action"
+              >
+                {pwaInstall.kind === "install" ? (
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                ) : (
+                  <Share2 className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                {pwaInstall.label}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => { void onExportDiagnostics(); }}
@@ -1048,102 +1220,44 @@ export function Header() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Tip label="Music glossary — definitions for studio terms">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => { setGlossaryTerm(undefined); setGlossaryOpen(true); }}
-            className="font-mono text-xs"
-            aria-label="Open music glossary"
-          >
-            Glossary
-          </Button>
-        </Tip>
-        <Tip label="Interactive lessons — guided walkthroughs">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setLessonsOpen(true)}
-            className="font-mono text-xs"
-            aria-label="Open lessons panel"
-          >
-            Lessons
-          </Button>
-        </Tip>
-        <Tip label="Keyboard shortcut reference card">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShortcutsPanelOpen(true)}
-            className="font-mono text-xs"
-            aria-label="Open keyboard shortcuts reference"
-          >
-            Shortcuts
-          </Button>
-        </Tip>
+
         {showShortcutsButton && (
-          <Tip label="Keyboard shortcuts (?)">
+          <Tip label="Keyboard shortcuts (?)" >
             <Button
               variant="outline"
               size="sm"
               onClick={() => setShortcutsOpen(true)}
-              className="font-mono text-xs"
+              className="hidden 2xl:inline-flex h-8 px-2 font-mono text-xs"
               aria-label="Keyboard shortcuts"
             >
               <KeyboardIcon className="w-3.5 h-3.5" />
             </Button>
           </Tip>
         )}
-        <Tip label="Studio settings">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSettingsOpen(true)}
-            className="font-mono text-xs"
-            aria-label="Settings"
-          >
-            <SettingsIcon className="w-3.5 h-3.5" />
-          </Button>
-        </Tip>
-        <Tip label="Project info — title, creator, tags">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setProjectInfoOpen(true)}
-            className="font-mono text-xs"
-            aria-label="Project info"
-            data-testid="open-project-info"
-          >
-            <Tag className="w-3.5 h-3.5" />
-          </Button>
-        </Tip>
-        <Tip label="About, changelog & feedback">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAboutOpen(true)}
-            className="font-mono text-xs"
-            aria-label="About"
-          >
-            <Info className="w-3.5 h-3.5" />
-          </Button>
-        </Tip>
-        <Tip label={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={toggleFullscreen}
-            className="font-mono text-xs"
-            aria-label="Toggle fullscreen"
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-3.5 h-3.5" />
-            ) : (
-              <Maximize2 className="w-3.5 h-3.5" />
-            )}
-          </Button>
-        </Tip>
+        {pwaInstall.available && (
+          <div className="hidden 2xl:block">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={pwaInstall.activate}
+              className="h-8 gap-1.5 font-mono text-[11px] uppercase tracking-wider"
+              title={
+                pwaInstall.kind === "install"
+                  ? "Install Shotgun Ninjas Virtual Studio"
+                  : "Add Shotgun Ninjas Virtual Studio to your Home Screen"
+              }
+            >
+              {pwaInstall.kind === "install" ? (
+                <Download className="w-3.5 h-3.5" />
+              ) : (
+                <Share2 className="w-3.5 h-3.5" />
+              )}
+              {pwaInstall.label}
+            </Button>
+          </div>
+        )}
         <ThemeSwitcher />
+        {pwaInstall.dialog}
         <input
           ref={jsonImportRef}
           type="file"
@@ -1664,7 +1778,8 @@ export function Header() {
                         size="sm"
                         variant="outline"
                         data-testid={`demo-load-${d.id}`}
-                        onClick={() => {
+                        onClick={async () => {
+                          if (!(await preserveCurrentBeforeReplacement())) return;
                           loadDemo(d.id);
                           setOpenLoad(false);
                         }}
@@ -1676,6 +1791,7 @@ export function Header() {
                         size="sm"
                         data-testid={`demo-remix-${d.id}`}
                         onClick={async () => {
+                          if (!(await preserveCurrentBeforeReplacement())) return;
                           remixDemo(d.id);
                           try {
                             const proj = getStore().state.project;
@@ -1760,6 +1876,12 @@ export function Header() {
           />
         )}
         {lessonsOpen && <LessonsPanel open onOpenChange={setLessonsOpen} />}
+        {creativeCompassOpen && (
+          <CreativeCompassPanel
+            open
+            onOpenChange={setCreativeCompassOpen}
+          />
+        )}
         {shortcutsPanelOpen && (
           <ShortcutsPanel open onOpenChange={setShortcutsPanelOpen} />
         )}

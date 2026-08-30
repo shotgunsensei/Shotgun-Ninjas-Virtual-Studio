@@ -22,8 +22,9 @@ import {
 } from "../lib/worlds";
 import { useWorld } from "../contexts/WorldContext";
 import { Tip } from "./Tip";
-import { useStore } from "../store";
+import { getStore, useStore } from "../store";
 import { loadDemo } from "../lib/demos";
+import { preserveProjectForReplacement } from "../lib/storage/db";
 
 /**
  * Globe button that opens the World Picker modal from the transport bar.
@@ -82,10 +83,19 @@ export function WorldPickerModal({
     onOpenChange(false);
   };
 
-  const handleLoadDemo = (e: React.MouseEvent, demoId: string) => {
+  const handleLoadDemo = async (e: React.MouseEvent, demoId: string) => {
     e.stopPropagation();
-    loadDemo(demoId);
-    onOpenChange(false);
+    const { project, isTransientProject } = getStore().state;
+    try {
+      await preserveProjectForReplacement(project, isTransientProject);
+      loadDemo(demoId);
+      onOpenChange(false);
+    } catch (err) {
+      getStore().setStatus(
+        `Current project could not be preserved; replacement cancelled: ${(err as Error).message}`,
+        "error",
+      );
+    }
   };
 
   const handleResetPrefs = useCallback((e: React.MouseEvent, worldId: WorldId) => {

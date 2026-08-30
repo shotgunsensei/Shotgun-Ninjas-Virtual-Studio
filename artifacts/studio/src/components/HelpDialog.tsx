@@ -84,7 +84,7 @@ export function HelpDialog() {
           />
         ) : (
           <CoachStep
-            showBack
+            showBack={showOnboarding}
             onBack={() => setStep("mode")}
             onLoadDemo={() => {
               getStore().set({
@@ -113,10 +113,11 @@ function ModeStep({
     <div className="space-y-3" data-testid="onboarding-mode-step">
       <p className="text-sm text-foreground/85">
         Pick a starting mode and we'll load a matching template you can play
-        with right away.
+        with right away. New studios start in a calmer Beginner view; every
+        advanced control remains available when you want it.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {STARTING_MODES.map((m) => (
+        {STARTING_MODES.map((m, index) => (
           <button
             key={m.id}
             type="button"
@@ -124,7 +125,14 @@ function ModeStep({
             onClick={() => onPick(m.id)}
             className="text-left border border-border rounded-md p-3 bg-background hover:border-primary hover:bg-primary/5 transition-colors"
           >
-            <div className="font-mono text-sm">{m.label}</div>
+            <div className="flex items-center justify-between gap-2 font-mono text-sm">
+              <span>{m.label}</span>
+              {index === 0 && (
+                <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-primary-readable">
+                  Recommended
+                </span>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground mt-1 leading-snug">
               {m.description}
             </div>
@@ -171,7 +179,14 @@ function CoachStep({
         <Kbd>Space</Kbd> plays/pauses. <Kbd>Enter</Kbd> stops.{" "}
         <Kbd>R</Kbd> arms recording. <Kbd>?</Kbd> shows every shortcut.
       </Section>
-      <Section title="4 · Save &amp; export">
+      <Section title="4 · Follow your Creative Compass">
+        Open <span className="font-mono text-primary-readable">Creative Compass</span>{" "}
+        from <span className="font-mono">Learn</span> on larger screens or{" "}
+        <span className="font-mono">Create</span> on phones for one clear next
+        move, editable musical seeds, and short explanations of why each choice
+        works.
+      </Section>
+      <Section title="5 · Save &amp; export">
         Press <Kbd>S</Kbd> to save. Hit <Kbd>B</Kbd> (or the{" "}
         <span className="font-mono">Export</span> button) to bounce to
         WAV / MP3 / project JSON.

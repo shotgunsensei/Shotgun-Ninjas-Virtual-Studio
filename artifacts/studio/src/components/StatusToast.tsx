@@ -13,6 +13,9 @@ export function StatusToast() {
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
       <div
+        role={variant === "error" ? "alert" : "status"}
+        aria-live={variant === "error" ? "assertive" : "polite"}
+        aria-atomic="true"
         className={`pointer-events-auto px-4 py-2 rounded-md border font-mono text-xs uppercase tracking-wider ${color}`}
       >
         {message}

@@ -15,6 +15,8 @@ export type UIMode = "beginner" | "expert";
 /** Periodic real-autosave cadence options (in seconds; 0 = off). */
 export type AutosaveIntervalSec = 0 | 15 | 30 | 60;
 
+export const DEFAULT_AUTOSAVE_INTERVAL_SEC: Exclude<AutosaveIntervalSec, 0> = 30;
+
 export const AUTOSAVE_OPTIONS: Array<{
   value: AutosaveIntervalSec;
   label: string;
@@ -42,7 +44,6 @@ export interface StudioSettings {
 
   // Project
   autosaveEnabled: boolean;
-  autosaveIntervalMs: number;
   autosaveIntervalSec: AutosaveIntervalSec;
   restoreLastProjectOnLaunch: boolean;
   confirmBeforeOverwrite: boolean;
@@ -97,8 +98,7 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   defaultWorkspaceView: "compose",
 
   autosaveEnabled: true,
-  autosaveIntervalMs: 1500,
-  autosaveIntervalSec: 30,
+  autosaveIntervalSec: DEFAULT_AUTOSAVE_INTERVAL_SEC,
   restoreLastProjectOnLaunch: true,
   confirmBeforeOverwrite: true,
 
@@ -118,20 +118,86 @@ export const DEFAULT_SETTINGS: StudioSettings = {
 
   backupReminderSessions: 5,
   colorblindSafeMeters: false,
-  uiMode: "expert",
+  uiMode: "beginner",
 
   performanceMode: false,
 };
 
 const STORAGE_KEY = "studio.settings.v1";
 
+type StoredSettings = Omit<
+  Partial<StudioSettings>,
+  "autosaveEnabled" | "autosaveIntervalSec"
+> & {
+  autosaveEnabled?: unknown;
+  autosaveIntervalSec?: unknown;
+  /** Legacy Settings-modal field that the stabilized runtime never consumed. */
+  autosaveIntervalMs?: unknown;
+};
+
+function isAutosaveIntervalSec(value: unknown): value is AutosaveIntervalSec {
+  return value === 0 || value === 15 || value === 30 || value === 60;
+}
+
+/**
+ * Safely migrate the retired millisecond control to the bounded cadence used
+ * by the storage runtime. Values below 15 seconds map to the fastest supported
+ * cadence rather than re-introducing high-frequency IndexedDB serialization.
+ */
+function migrateLegacyAutosaveInterval(value: unknown): AutosaveIntervalSec | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value <= 0) return 0;
+  if (value <= 15_000) return 15;
+  if (value <= 30_000) return 30;
+  return 60;
+}
+
+/** Normalize persisted v1 settings without dropping unrelated preferences. */
+export function normalizeStoredSettings(input: unknown): StudioSettings {
+  const stored = input && typeof input === "object" ? (input as StoredSettings) : {};
+  const {
+    autosaveEnabled: rawEnabled,
+    autosaveIntervalSec: rawIntervalSec,
+    autosaveIntervalMs: rawIntervalMs,
+    ...otherSettings
+  } = stored;
+  const currentInterval = isAutosaveIntervalSec(rawIntervalSec)
+    ? rawIntervalSec
+    : undefined;
+  const legacyInterval = migrateLegacyAutosaveInterval(rawIntervalMs);
+  const migratedInterval = currentInterval ?? legacyInterval;
+  const disabledByStoredInterval = migratedInterval === 0;
+  const autosaveEnabled =
+    !disabledByStoredInterval &&
+    (typeof rawEnabled === "boolean"
+      ? rawEnabled
+      : DEFAULT_SETTINGS.autosaveEnabled);
+  const autosaveIntervalSec = autosaveEnabled
+    ? migratedInterval && migratedInterval > 0
+      ? migratedInterval
+      : DEFAULT_AUTOSAVE_INTERVAL_SEC
+    : 0;
+
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(otherSettings as Partial<StudioSettings>),
+    autosaveEnabled,
+    autosaveIntervalSec,
+  };
+}
+
+export function isAutosaveActive(
+  settings: Pick<StudioSettings, "autosaveEnabled" | "autosaveIntervalSec">,
+): boolean {
+  return settings.autosaveEnabled && settings.autosaveIntervalSec > 0;
+}
+
 function loadInitial(): StudioSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw) as Partial<StudioSettings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    return normalizeStoredSettings(JSON.parse(raw));
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -153,7 +219,19 @@ export function getSettings(): StudioSettings {
 }
 
 export function setAutosaveInterval(value: AutosaveIntervalSec) {
-  setSettings({ autosaveIntervalSec: value });
+  setSettings({
+    autosaveEnabled: value !== 0,
+    autosaveIntervalSec: value,
+  });
+}
+
+export function setAutosaveEnabled(enabled: boolean) {
+  setSettings({
+    autosaveEnabled: enabled,
+    autosaveIntervalSec: enabled
+      ? state.autosaveIntervalSec || DEFAULT_AUTOSAVE_INTERVAL_SEC
+      : 0,
+  });
 }
 
 export function subscribeSettings(fn: (s: StudioSettings) => void): () => void {
@@ -165,7 +243,15 @@ export function subscribeSettings(fn: (s: StudioSettings) => void): () => void {
 }
 
 export function setSettings(patch: Partial<StudioSettings>) {
-  state = { ...state, ...patch };
+  const next = { ...state, ...patch };
+  if (Object.prototype.hasOwnProperty.call(patch, "autosaveEnabled")) {
+    next.autosaveIntervalSec = next.autosaveEnabled
+      ? next.autosaveIntervalSec || DEFAULT_AUTOSAVE_INTERVAL_SEC
+      : 0;
+  } else if (Object.prototype.hasOwnProperty.call(patch, "autosaveIntervalSec")) {
+    next.autosaveEnabled = next.autosaveIntervalSec !== 0;
+  }
+  state = normalizeStoredSettings(next);
   persist();
   listeners.forEach((l) => l());
   applySideEffects(state);
@@ -214,7 +300,7 @@ export function applySideEffects(s: StudioSettings = state) {
   // data-cb-safe: colorblind-safe meter mode
   root.dataset.cbSafe = s.colorblindSafeMeters ? "1" : "0";
   // data-ui-mode: beginner / expert
-  root.dataset.uiMode = s.uiMode ?? "expert";
+  root.dataset.uiMode = s.uiMode ?? "beginner";
   root.dataset.workspaceView = s.defaultWorkspaceView;
   // Performance Mode: data-perf="true" activates CSS overrides that strip
   // expensive box-shadow, blur, and glow effects from dense grids.

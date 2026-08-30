@@ -13,12 +13,15 @@ This pass stabilizes the existing browser DAW first, then adds performance-safe 
 - Added full project-replacement cleanup for track voices, automation/modulation, scheduled players/events, Chop Lab, and master resources.
 - Completed master-chain disposal for meters, buses, sends, processors, and watchers.
 - Hardened lean drum hits with source caps, ended-source disconnection, correct gain/solo routing, and no raw-destination fallback.
+- Removed redundant per-hit lean-drum AudioParam writes. A primitive settings
+  cache reapplies volume, pan, mute, cutoff, and resonance only when those
+  values change and is cleared on removal, promotion, and project teardown.
 - Made async drum-bank and melodic-sample swaps generation-safe so late loads cannot replace or revive disposed voices.
 - Routed Chop Lab, sound-pack preview, and world/welcome audio through the master chain and Panic ownership.
 - Removed a second full Chop PCM copy and stopped rebuilding Chop audio on every marker pointer move.
 - Removed the remote Salamander piano download dependency; Grand Piano is now an immediate offline modeled piano with optional local licensed-layer hot swap.
 
-Primary files: `src/hooks/useTransport.ts`, `src/lib/audio/engine.ts`, `src/lib/audio/master.ts`, `src/lib/audio/leanDrumVoice.ts`, `src/lib/audio/lookahead-scheduler.ts`, `src/lib/audio/chopEngine.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/worldAudio.ts`, `src/contexts/WorldContext.tsx`, and instrument components.
+Primary files: `src/hooks/useTransport.ts`, `src/lib/audio/engine.ts`, `src/lib/audio/master.ts`, `src/lib/audio/leanDrumVoice.ts`, `src/lib/audio/leanDrumTrackSettings.ts`, `src/lib/audio/lookahead-scheduler.ts`, `src/lib/audio/chopEngine.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/worldAudio.ts`, `src/contexts/WorldContext.tsx`, and instrument components.
 
 ## Startup, Rendering, and PWA
 
@@ -37,10 +40,10 @@ Final bundle-budget measurements:
 
 | Budget | Final |
 | --- | ---: |
-| Landing initial JS | 229.64 kB raw / 73.43 kB gzip |
-| Studio initial JS | 1,167.86 kB raw / 334.75 kB gzip |
-| Core Studio App chunk | 665.79 kB raw / 195.90 kB gzip |
-| Shared CSS | 153.54 kB raw / 22.82 kB gzip |
+| Landing initial JS | 230.32 kB raw / 73.74 kB gzip |
+| Studio initial JS | 1,175.99 kB raw / 337.10 kB gzip |
+| Core Studio App chunk | 673.23 kB raw / 197.96 kB gzip |
+| Shared CSS | 156.17 kB raw / 23.22 kB gzip |
 | Largest lazy chunk | 58.39 kB gzip |
 
 Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `src/components/Footer.tsx`, `src/components/LeftBrowser.tsx`, `src/components/TransportBar.tsx`, `src/components/ChannelStrip.tsx`, `public/sw.js`, and `vite.config.ts`.
@@ -54,6 +57,16 @@ Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `sr
 - Made project-only import explicitly report all nonportable references and remove stale blob keys.
 - Serialized autosave work so overlapping writes cannot race.
 - Skipped unchanged blob writes and added guarded page-hide/visibility/unload draft flush.
+- Replaced the disconnected millisecond/seconds autosave controls with one
+  enabled flag and a bounded 15/30/60-second durable cadence. Both recovery
+  drafts and lifecycle flushes re-check the live policy; legacy values migrate
+  to the safe minimum instead of restoring high-frequency writes.
+- Made project replacement preserve the current source first: durable projects
+  are saved, transient demos receive a recovery draft, storage failure aborts,
+  and recovering over a temporary demo requires explicit confirmation.
+- Kept a transient recovery draft when the replacement destination is saved,
+  covered the World Picker path, and made same-project Load/Restore save before
+  reading so a stale IndexedDB object cannot overwrite the newest edit.
 - Moved lightweight filename/download helpers out of the heavy audio exporter.
 - Loaded Tone/export logic and the MP3 encoder only when a user exports.
 - Reused MP3 frame buffers and yielded during encoding to keep UI progress responsive.
@@ -90,6 +103,60 @@ Factory-content controls:
 
 Primary files: `src/lib/audio/sounds/factorySamples.ts`, `src/lib/audio/sounds/presets.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/audio/sounds/soundLibrary.ts`, `src/lib/audio/export.ts`, `src/lib/plugins/builtins.ts`, `src/components/PresetBrowser.tsx`, `src/components/SoundLibraryPanel.tsx`, `src/components/LessonsPanel.tsx`, `public/samples/factory/vcsl/*`, `public/sw.js`, and `scripts/fetch-vcsl-factory-samples.mjs`.
 
+## Guided Creation, Responsive Hierarchy, and Accessibility Follow-up
+
+- Added a lazy Creative Compass that analyzes four understandable arrangement
+  foundations: Pulse, Home, Weight, and Contrast. It recommends one next move
+  without scoring or judging the user's music.
+- Added deterministic motif, chord, pulse, and groove recipes plus answer,
+  octave-lift/half-time, and pocket variations. Every result is an ordinary,
+  editable two-bar clip appended after existing material.
+- Added one-click scoped undo for the latest Compass result. It removes only
+  the generated clip and never rewinds unrelated user edits.
+- Extended an enabled loop just enough to include each generated Compass or
+  pack clip, then conditionally restored the prior loop end on Undo so the new
+  idea is audible without replacing the user's arrangement.
+- Added a pure Sound Pack preview-to-sketch converter. It mirrors preview
+  timing, preserves tempo, applies kit/preset data, appends clips in one project
+  patch, and offers **Undo Sketch** without auto-playing audio. Undo survives
+  lazy browser-tab unmounts, removes only exact generated track/clip pairs,
+  and restores prior sound/project metadata only when later edits have not
+  superseded those generated values.
+- Reconciled already-realized kit/preset voices after a pack sketch so Pack B
+  cannot continue playing Pack A; an audio-enabled Play/Panic regression covers
+  the live engine path.
+- Reapplied merged preset sound parameters to realized voices and to preset
+  rebuilds, so Undo restores both the persisted track and its audible ADSR,
+  filter, glide, and send state.
+- Corrected Scale Lock's octave-boundary quantization by comparing absolute
+  neighboring MIDI candidates instead of reconstructing a circular pitch-class
+  winner in the wrong octave.
+- Preserved major/minor pentatonic identity, added scale-length-aware chord
+  progressions and true root/fifth pulses, corrected root-relative answer
+  resolution for upper roots, and rejected empty variation sources.
+- Replaced the overflowing command row with compact Project, Load, Export,
+  Learn, and More controls. Production measurements show no header overflow at
+  600, 768, 1,024, 1,366, or 1,440 pixels.
+- Added the same Creative Compass, Lessons, and Glossary access to mobile, with
+  a persistent bottom **Create** action. The Compass has a bounded, scrollable
+  320/390-pixel layout.
+- Kept eligible PWA Install/Add-to-Home-Screen actions reachable inside the
+  desktop More menu and phone menu without expanding the compact header.
+- Made Beginner view the default only when no stored preference exists. Existing
+  users keep their chosen UI mode and every expert control remains available.
+- Prevented returning-user Help from reopening mode selection and replacing the
+  active project with a demo.
+- Added keyboard-correct browser tabs, live status/error announcements, a
+  high-contrast brand-red text token, and reduced-motion suppression for lesson
+  highlighting.
+
+Primary files: `src/components/CreativeCompassPanel.tsx`,
+`src/lib/creative/creativeCompass.ts`, `src/lib/creative/packSketch.ts`,
+`src/components/Header.tsx`, `src/components/MobileStudio.tsx`,
+`src/components/SoundLibraryPanel.tsx`, `src/components/HelpDialog.tsx`,
+`src/components/LeftBrowser.tsx`, `src/components/StatusToast.tsx`,
+`src/lib/performance/scaleUtils.ts`, `src/lib/settings.ts`, and `src/index.css`.
+
 ## MIDI, Plugins, Dependencies, and Tooling
 
 - Corrected MIDI UTF-8/VLQ track names, lowercase/flat note parsing, MIDI range clamping, input sanitization, same-note overlap handling, retrigger ordering, BPM/range validation, and deterministic output.
@@ -109,13 +176,13 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 | Frozen pnpm install | Pass |
 | Root workspace typecheck | Pass |
 | Studio production + SSR/prerender build | Pass |
-| Focused unit tests | 11/11 pass |
+| Focused unit tests | 35/35 pass |
 | Select-value static guard | Pass |
 | Bundle budgets | Pass |
-| Playwright browser acceptance | 7/7 pass |
+| Playwright browser acceptance | 19/19 pass |
 | Production dependency audit | No known vulnerabilities |
 | Production runtime matrix | 19/19 pass |
-| Ten-minute playback/Panic/cleanup gate | Pass in 616.9 sec |
+| Ten-minute playback/Panic/cleanup gate | Pass in 604.3 sec |
 | Diff whitespace validation | Pass before documentation update; rerun at handoff |
 | Factory sample integrity | 26/26 hashes and PCM headers pass; license/manifest/preset links pass |
 | Factory browser path | 4/4 zones, max 3 concurrent, guide/preview/load and sampled WAV pass |

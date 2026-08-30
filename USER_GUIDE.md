@@ -5,6 +5,10 @@ app is free — no sign-up, no paywall, nothing to install. See
 [`FREE_PRODUCT_POLICY.md`](./FREE_PRODUCT_POLICY.md) for the product
 policy.
 
+New users begin in **Beginner Mode**, which keeps each channel strip focused
+on the controls needed to write and play. Tap the Beginner Mode control in the
+footer whenever you want to reveal the full expert mixer; nothing is locked.
+
 ---
 
 ## 1. Enable audio
@@ -39,16 +43,17 @@ pads live with **Q W E R / A S D F**.
 
 ## 3. Explore sounds and learn by creating
 
-Open the **Sounds** browser to explore 34 melodic presets and 19 complete
+Open the **Library** browser to explore 34 melodic presets and 19 complete
 sound packs. The **HQ** badge marks an instrument recorded from the included
 CC0 factory library. Its zones download only when you first preview, load, or
 export that instrument, then remain available to the app's offline cache.
 
-A fast creative workflow:
+A fast sound-pack workflow:
 
 1. Preview a sound pack to hear its drum groove and pitched phrase together.
-2. Read its creative prompt, load it, and press **Space** to hear the editable
-   arrangement.
+2. Read its creative prompt, then choose **Start editable sketch**. The exact
+   two-bar preview idea is added as normal drum and melody clips after your
+   existing material. Your tempo is preserved.
 3. On an HQ preset, open **Learn this sound**. Listen for the stated cue, then
    try the suggested register or playing technique.
 4. Open **Lessons · Creative Practice** for short exercises on motif
@@ -60,16 +65,43 @@ These are practice prompts, not rules. Use **Scale Lock** when you want to
 focus on rhythm and phrasing, then turn it off to explore notes outside the
 scale. Use **Chord Mode** to hear how one note can imply a fuller harmony.
 
+### Use Creative Compass when you are not sure what comes next
+
+Open **Learn → Creative Compass** on desktop/tablet, or tap **Create** in the
+phone's bottom bar. The Compass reads only the music already in your current
+project and shows four foundations:
+
+- **Pulse** — a rhythmic reference.
+- **Home** — a harmonic center.
+- **Weight** — a low-frequency anchor.
+- **Contrast** — a second scene or response.
+
+Choose a target track, root, and musical character, then add one of four
+editable seeds: Motif, Chord Lanterns, Pulse Line, or Pocket Groove. The
+Compass places a new two-bar clip after the track's existing material. It does
+not press Play, change your sound, replace clips, or send project data away.
+
+Once a track has a clip, use **Write an answer**, **Create a lift**, or **Find
+more pocket** to make a related variation. The explanation beside each move
+tells you what to listen for. **Undo** removes only the last Compass clip;
+**Undo Sketch** in the Sound Library removes only the latest generated clips
+and restores the previous pack sound unless you changed that sound afterward.
+
 ## 4. Save a project
 
-Projects autosave to your browser's IndexedDB every ~1.5 seconds, so
-just keep working. To force a save: press **S** (or **Ctrl/Cmd + S**),
-or click **Save** in the header. To name a project, edit the title in
-the header.
+With Auto-save on, projects save to your browser's IndexedDB every 30 seconds
+by default; the safe choices are 15, 30, or 60 seconds. A separate recovery
+draft is queued about 8 seconds after an edit and waits while playback or
+another storage operation is active. The Auto-save switch controls both paths.
+To force a durable save at any time, press **S** (or **Ctrl/Cmd + S**) or click
+**Save** in the header. To name a project, edit the title in the header.
 
-To load, duplicate, or delete a saved project, click **Load** in the
-header. Loading replaces the current project — save first if you have
-unsaved changes you care about.
+To load, duplicate, or delete a saved project, click **Load** in the header.
+New, Save As, and Project Info live under **Project**; learning tools live
+under **Learn**; settings and diagnostics live under **More**. Loading replaces
+the current project, so the Studio first saves a normal project or writes a
+recovery draft for a temporary demo. If that preservation step fails, the
+replacement is cancelled instead of risking your work.
 
 ## 5. Export a WAV
 

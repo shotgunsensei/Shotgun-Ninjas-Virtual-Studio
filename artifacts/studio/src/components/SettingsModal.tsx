@@ -18,9 +18,14 @@ import { Button } from "@/components/ui/button";
 import { RotateCcw, KeyRound, Trash2, Gauge, Globe, Accessibility } from "lucide-react";
 import * as Tone from "tone";
 import {
+  AUTOSAVE_OPTIONS,
+  DEFAULT_AUTOSAVE_INTERVAL_SEC,
   DEFAULT_SETTINGS,
   resetSettings,
+  setAutosaveEnabled,
+  setAutosaveInterval,
   setSettings,
+  type AutosaveIntervalSec,
   useSettings,
 } from "../lib/settings";
 import { THEMES } from "../lib/themes";
@@ -313,21 +318,22 @@ export function SettingsModal({
           <TabsContent value="project" className="space-y-3 pt-3">
             <ToggleRow
               label="Auto-save"
-              hint="Quietly save your project to this browser as you work."
+              hint="Save the project and its recovery draft to this browser as you work."
               value={s.autosaveEnabled}
-              onChange={(v) => setSettings({ autosaveEnabled: v })}
+              onChange={setAutosaveEnabled}
             />
             <SelectRow
               label="Auto-save interval"
-              value={String(s.autosaveIntervalMs)}
-              options={[
-                { value: "500", label: "500 ms (fast)" },
-                { value: "1500", label: "1.5 s (default)" },
-                { value: "5000", label: "5 s" },
-                { value: "15000", label: "15 s" },
-              ]}
+              hint="Cadence for durable project saves; recovery drafts use a separate safe debounce."
+              value={String(
+                s.autosaveIntervalSec || DEFAULT_AUTOSAVE_INTERVAL_SEC,
+              )}
+              options={AUTOSAVE_OPTIONS.filter((option) => option.value !== 0).map(
+                (option) => ({ value: String(option.value), label: option.label }),
+              )}
+              disabled={!s.autosaveEnabled}
               onChange={(v) =>
-                setSettings({ autosaveIntervalMs: Number(v) || 1500 })
+                setAutosaveInterval(Number(v) as AutosaveIntervalSec)
               }
             />
             <ToggleRow
@@ -545,19 +551,22 @@ function SelectRow({
   value,
   options,
   onChange,
+  disabled = false,
 }: {
   label: string;
   hint?: string;
   value: string;
   options: Array<{ value: string; label: string }>;
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <Row label={label} hint={hint}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-background border border-border rounded-md h-7 px-2 font-mono text-xs"
+        disabled={disabled}
+        className="bg-background border border-border rounded-md h-7 px-2 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

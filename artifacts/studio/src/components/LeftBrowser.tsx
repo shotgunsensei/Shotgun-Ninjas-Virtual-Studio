@@ -1,4 +1,12 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { getStore, useStore } from "../store";
 import { DRUM_KIT_LIST } from "../lib/audio/sounds/kits";
 import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
@@ -44,14 +52,59 @@ export function LeftBrowser() {
     }
   }, [tab]);
 
+  const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
+
+  const focusTab = (nextTab: TabId) => {
+    setTab(nextTab);
+    const button = tabRefs.current[nextTab];
+    button?.focus();
+    button?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+
+  const onTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentTab: TabId,
+  ) => {
+    const currentIndex = TABS.findIndex((item) => item.id === currentTab);
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % TABS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = TABS.length - 1;
+    }
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    focusTab(TABS[nextIndex].id);
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex border-b border-border bg-graphite/60 overflow-x-auto">
+      <div
+        className="flex border-b border-border bg-graphite/60 overflow-x-auto"
+        role="tablist"
+        aria-label="Studio browser"
+        aria-orientation="horizontal"
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
+            ref={(node) => {
+              tabRefs.current[t.id] = node;
+            }}
+            id={`studio-browser-tab-${t.id}`}
             type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            aria-controls={`studio-browser-panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
+            onKeyDown={(event) => onTabKeyDown(event, t.id)}
             className={`px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest transition-colors ${
               tab === t.id
                 ? "text-foreground border-b border-primary"
@@ -64,33 +117,89 @@ export function LeftBrowser() {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
-        {tab === "library" && (
-          <Suspense
-            fallback={
-              <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Loading sound library...
-              </div>
-            }
-          >
-            <SoundLibraryPanel />
-          </Suspense>
-        )}
-        {tab === "tracks" && <TracksTab />}
-        {tab === "kits" && <KitsTab />}
-        {tab === "presets" && <PresetsTab />}
-        {tab === "samples" && <SamplesTab />}
-        {tab === "projects" && <ProjectsTab />}
-        {tab === "plugins" && (
-          <Suspense
-            fallback={
-              <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Loading plugins...
-              </div>
-            }
-          >
-            <PluginBrowser />
-          </Suspense>
-        )}
+        <div
+          id="studio-browser-panel-library"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-library"
+          tabIndex={tab === "library" ? 0 : -1}
+          hidden={tab !== "library"}
+        >
+          {tab === "library" && (
+            <Suspense
+              fallback={
+                <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Loading sound library...
+                </div>
+              }
+            >
+              <SoundLibraryPanel />
+            </Suspense>
+          )}
+        </div>
+        <div
+          id="studio-browser-panel-tracks"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-tracks"
+          tabIndex={tab === "tracks" ? 0 : -1}
+          hidden={tab !== "tracks"}
+        >
+          {tab === "tracks" && <TracksTab />}
+        </div>
+        <div
+          id="studio-browser-panel-kits"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-kits"
+          tabIndex={tab === "kits" ? 0 : -1}
+          hidden={tab !== "kits"}
+        >
+          {tab === "kits" && <KitsTab />}
+        </div>
+        <div
+          id="studio-browser-panel-presets"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-presets"
+          tabIndex={tab === "presets" ? 0 : -1}
+          hidden={tab !== "presets"}
+        >
+          {tab === "presets" && <PresetsTab />}
+        </div>
+        <div
+          id="studio-browser-panel-samples"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-samples"
+          tabIndex={tab === "samples" ? 0 : -1}
+          hidden={tab !== "samples"}
+        >
+          {tab === "samples" && <SamplesTab />}
+        </div>
+        <div
+          id="studio-browser-panel-projects"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-projects"
+          tabIndex={tab === "projects" ? 0 : -1}
+          hidden={tab !== "projects"}
+        >
+          {tab === "projects" && <ProjectsTab />}
+        </div>
+        <div
+          id="studio-browser-panel-plugins"
+          role="tabpanel"
+          aria-labelledby="studio-browser-tab-plugins"
+          tabIndex={tab === "plugins" ? 0 : -1}
+          hidden={tab !== "plugins"}
+        >
+          {tab === "plugins" && (
+            <Suspense
+              fallback={
+                <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Loading plugins...
+                </div>
+              }
+            >
+              <PluginBrowser />
+            </Suspense>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -212,7 +321,7 @@ function PresetsTab() {
             <div className="flex items-center justify-between gap-1">
               <div className="truncate">{p.name}</div>
               {p.layers?.length ? (
-                <span className="shrink-0 text-[7px] uppercase tracking-wider text-primary">
+                <span className="shrink-0 text-[7px] uppercase tracking-wider text-primary-readable">
                   HQ
                 </span>
               ) : null}

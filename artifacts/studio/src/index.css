@@ -17,6 +17,7 @@
   --color-popover-foreground: hsl(var(--popover-foreground));
 
   --color-primary: hsl(var(--primary));
+  --color-primary-readable: hsl(var(--primary-readable));
   --color-primary-foreground: hsl(var(--primary-foreground));
 
   --color-secondary: hsl(var(--secondary));
@@ -69,6 +70,8 @@
   --popover-foreground: 0 0% 96%;
 
   --primary: 0 78% 48%;
+  /* Brand-safe red for small text: 5.45:1 on background, 5.02:1 on graphite. */
+  --primary-readable: 0 90% 62%;
   --primary-foreground: 0 0% 100%;
   --secondary: 0 0% 14%;
   --secondary-foreground: 0 0% 96%;
@@ -302,6 +305,12 @@
     outline-offset: 3px;
     animation: lesson-highlight-pulse 1.2s ease-in-out infinite;
     border-radius: var(--radius);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lesson-highlight {
+      animation: none !important;
+    }
   }
 
   /* Beginner mode badge in footer */

@@ -218,9 +218,15 @@ export async function saveProject(project: Project): Promise<void> {
       .put({ lastProjectId: project.id }, META_LAST_PROJECT);
     const savedInfo: LastSavedInfo = { projectId: project.id, ts: Date.now() };
     await tx.objectStore(META_STORE).put(savedInfo, META_LAST_SAVED);
-    // Saving makes any pending draft obsolete — clear it so the recovery
-    // prompt won't re-offer stale data on next load.
-    await tx.objectStore(META_STORE).delete(META_DRAFT);
+    // A durable save only supersedes a draft of the same project. Replacement
+    // flows may intentionally keep an edited transient demo in the single
+    // recovery slot while saving the new/imported/remixed destination.
+    const pendingDraft = (await tx
+      .objectStore(META_STORE)
+      .get(META_DRAFT)) as DraftSnapshot | undefined;
+    if (!pendingDraft || pendingDraft.projectId === project.id) {
+      await tx.objectStore(META_STORE).delete(META_DRAFT);
+    }
     await tx.done;
   }, {
     tracks: project.tracks.length,
@@ -351,6 +357,15 @@ export async function saveDraft(project: Project): Promise<void> {
     tracks: project.tracks.length,
     samples: project.samples?.length ?? 0,
   });
+}
+
+/** Preserve the current source before replacing it with another project. */
+export async function preserveProjectForReplacement(
+  project: Project,
+  isTransientProject: boolean,
+): Promise<void> {
+  if (isTransientProject) await saveDraft(project);
+  else await saveProject(project);
 }
 
 export async function loadDraft(): Promise<DraftSnapshot | null> {

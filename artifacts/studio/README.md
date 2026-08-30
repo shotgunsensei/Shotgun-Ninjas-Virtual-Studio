@@ -12,6 +12,10 @@ every visible knob, slider, button, and pad is wired to real audio.
   TX81Z piano, folk harp, vibraphone, Tanzanian kalimba, ocarina, and tenor sax
   stabs. Zones load on demand and are cached for offline reuse instead of being
   added to the startup bundle.
+- **Creative Compass** with arrangement-aware next moves, deterministic
+  editable motif/chord/pulse/groove seeds, related variations, musical
+  explanations, and scoped undo. Pack previews can become ordinary two-bar
+  drum/melody clips without changing tempo or replacing user work.
 - **Creative practice tools** with instrument listening guides, pack prompts,
   melodic preview phrases, and lessons on motifs, timbre/register,
   call-and-response, and harmony.
@@ -27,9 +31,13 @@ every visible knob, slider, button, and pad is wired to real audio.
   - Vocals: real `getUserMedia` capture stored as a Blob with waveform preview.
 - **Web MIDI** with device picker, live event monitor, and **MIDI Learn** for
   Transport, Metronome, per-track volume, and individual drum pads.
-- **Local persistence** in IndexedDB — projects (including vocal blobs)
-  autosaved every 1.5s and reloaded on next visit.
+- **Local persistence** in IndexedDB — projects (including vocal blobs) use a
+  configurable 15/30/60-second durable autosave (30 seconds by default) plus a
+  short-debounced recovery draft. One Auto-save switch controls both paths.
 - **Cyber-ninja branding** — dark graphite + red primary + neon-blue accent.
+- **Adaptive workspace** — new users start in the lighter Beginner view,
+  command groups remain reachable on tablets, phones get the same Create/Learn
+  entry points, and existing expert preferences are preserved.
 - **Performance controls** — bounded sample decoding/cache, lazy-loaded panels,
   Performance Mode, Panic, diagnostics, and a native WAV render path.
 

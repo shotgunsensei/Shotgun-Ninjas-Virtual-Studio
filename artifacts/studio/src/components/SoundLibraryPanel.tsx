@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
+import { Sparkles, Undo2 } from "lucide-react";
 import {
   SOUND_PACKS,
   SOUND_PACK_CATEGORIES,
@@ -8,12 +9,19 @@ import {
 } from "../lib/audio/sounds/soundLibrary";
 import { DRUM_KITS } from "../lib/audio/sounds/kits";
 import { buildKit } from "../lib/audio/sounds/kits";
-import { buildPresetVoice, findPreset } from "../lib/audio/sounds/presets";
+import {
+  buildPresetVoice,
+  findPreset,
+  presetSoundParams,
+} from "../lib/audio/sounds/presets";
 import { tryLoadMelodicSampler } from "../lib/audio/sounds/samples";
 import { PackCoverArt } from "./PackCoverArt";
-import { getStore, useStore } from "../store";
+import { getStore, makeId, useStore, type PackSketchUndoState } from "../store";
 import type { DrumPiece } from "../lib/audio/voices";
+import type { Track } from "../types";
 import { audio } from "../lib/audio/engine";
+import { createPackSketch } from "../lib/creative/packSketch";
+import { nextCreativeClipStart } from "../lib/creative/creativeCompass";
 
 const ALL_CATEGORY = "All" as const;
 type FilterCategory = typeof ALL_CATEGORY | PackCategory;
@@ -132,6 +140,7 @@ async function startPreview(
 export function SoundLibraryPanel() {
   const project = useStore((s) => s.project);
   const panicRevision = useStore((s) => s.panicRevision);
+  const lastSketch = useStore((s) => s.lastPackSketch);
   const [filter, setFilter] = useState<FilterCategory>(ALL_CATEGORY);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const previewRef = useRef<PreviewHandle | null>(null);
@@ -210,6 +219,244 @@ export function SoundLibraryPanel() {
     getStore().setStatus(`Pack loaded: ${pack.name}`, "info");
   };
 
+  const handleStartSketch = (pack: SoundPack) => {
+    stopPreview();
+    const current = getStore().state.project;
+    const drumTrack = current.tracks.find((track) => track.kind === "drums");
+    if (!drumTrack) {
+      getStore().setStatus("Add a drum track before starting a pack sketch.", "warn");
+      return;
+    }
+
+    const preset = findPreset(pack.presetId);
+    const melodicTrack = preset
+      ? current.tracks.find((track) => preset.compatibleWith.includes(track.kind))
+      : undefined;
+    if (pack.demoMelody?.length && !melodicTrack) {
+      getStore().setStatus(
+        "This pack needs a compatible piano, guitar, or bass track for its melody.",
+        "warn",
+      );
+      return;
+    }
+
+    const startBeat = Math.max(
+      nextCreativeClipStart(drumTrack, current.bpm),
+      melodicTrack ? nextCreativeClipStart(melodicTrack, current.bpm) : 0,
+      current.loopEnabled ? current.loopStartBeat : 0,
+    );
+    const sketch = createPackSketch({
+      pack,
+      drumTrack,
+      melodicTrack,
+      startBeat,
+      ids: {
+        drumClipId: makeId(),
+        melodicClipId: pack.demoMelody?.length ? makeId() : undefined,
+      },
+    });
+
+    const replacements = new Map<string, (typeof current.tracks)[number]>();
+    const appliedMelodicSound = sketch.melodic
+      ? preset
+        ? {
+            ...(sketch.melodic.track.sound ?? {}),
+            ...presetSoundParams(preset),
+          }
+        : sketch.melodic.track.sound
+      : undefined;
+    replacements.set(sketch.drum.track.id, sketch.drum.track);
+    if (sketch.melodic) {
+      replacements.set(sketch.melodic.track.id, {
+        ...sketch.melodic.track,
+        sound: appliedMelodicSound,
+      });
+    }
+
+    const tracks = current.tracks.map((track) => replacements.get(track.id) ?? track);
+    const appliedBars = Math.max(
+      current.bars,
+      Math.ceil((startBeat + sketch.lengthBeats) / 4),
+    );
+    const appliedLoopEndBeat = current.loopEnabled
+      ? Math.max(current.loopEndBeat, startBeat + sketch.lengthBeats)
+      : current.loopEndBeat;
+    getStore().patchProject({
+      tracks,
+      soundPackId: pack.id,
+      bars: appliedBars,
+      loopEndBeat: appliedLoopEndBeat,
+    });
+
+    // A project patch updates engine snapshots but intentionally does not
+    // create voices while audio is locked. Reconcile only voices that already
+    // exist so a Pack A -> Pack B sketch switch cannot keep playing Pack A.
+    try {
+      audio.setKit(sketch.drum.track.id, pack.kitId);
+      if (sketch.melodic && pack.presetId) {
+        audio.setMelodicPreset(sketch.melodic.track.id, pack.presetId);
+        if (appliedMelodicSound) {
+          audio.setSoundParams(sketch.melodic.track.id, appliedMelodicSound);
+        }
+      }
+    } catch {
+      // The project snapshot remains authoritative. Playback preparation or a
+      // later live trigger will retry selector reconciliation.
+    }
+    const selected = sketch.melodic ?? sketch.drum;
+    getStore().set({
+      selectedTrackId: selected.track.id,
+      selectedClipId: selected.clip.id,
+    });
+    const undoState: PackSketchUndoState = {
+      projectId: current.id,
+      packId: pack.id,
+      packName: pack.name,
+      previousSoundPackId: current.soundPackId,
+      previousBars: current.bars,
+      appliedBars,
+      previousLoopEndBeat: current.loopEndBeat,
+      appliedLoopEndBeat,
+      clips: [
+        { trackId: sketch.drum.track.id, clipId: sketch.drum.clip.id },
+        ...(sketch.melodic
+          ? [{ trackId: sketch.melodic.track.id, clipId: sketch.melodic.clip.id }]
+          : []),
+      ],
+      tracks: [
+        {
+          trackId: drumTrack.id,
+          previous: {
+            kitId: drumTrack.kitId,
+            presetId: drumTrack.presetId,
+            sound: drumTrack.sound ? { ...drumTrack.sound } : undefined,
+          },
+          applied: {
+            kitId: sketch.drum.track.kitId,
+            presetId: sketch.drum.track.presetId,
+            sound: sketch.drum.track.sound ? { ...sketch.drum.track.sound } : undefined,
+          },
+        },
+        ...(sketch.melodic && melodicTrack
+          ? [{
+              trackId: melodicTrack.id,
+              previous: {
+                kitId: melodicTrack.kitId,
+                presetId: melodicTrack.presetId,
+                sound: melodicTrack.sound ? { ...melodicTrack.sound } : undefined,
+              },
+              applied: {
+                kitId: sketch.melodic.track.kitId,
+                presetId: sketch.melodic.track.presetId,
+                sound: appliedMelodicSound
+                  ? { ...appliedMelodicSound }
+                  : undefined,
+              },
+            }]
+          : []),
+      ],
+    };
+    getStore().set({ lastPackSketch: undoState });
+    const tempoNote =
+      pack.demoBpm && pack.demoBpm !== current.bpm
+        ? ` Pack preview tempo is ${pack.demoBpm} BPM; your ${current.bpm} BPM tempo was preserved.`
+        : "";
+    getStore().setStatus(`${pack.name} editable sketch added.${tempoNote}`, "info");
+  };
+
+  const undoLastSketch = () => {
+    if (!lastSketch || lastSketch.projectId !== getStore().state.project.id) return;
+    const current = getStore().state.project;
+    const clipIdsByTrack = new Map<string, Set<string>>();
+    for (const clip of lastSketch.clips) {
+      const ids = clipIdsByTrack.get(clip.trackId) ?? new Set<string>();
+      ids.add(clip.clipId);
+      clipIdsByTrack.set(clip.trackId, ids);
+    }
+    const receipts = new Map(lastSketch.tracks.map((entry) => [entry.trackId, entry]));
+    const sameSound = (left: Track["sound"], right: Track["sound"]) =>
+      JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+    const tracks = current.tracks.map((track) => {
+      const receipt = receipts.get(track.id);
+      const generatedIds = clipIdsByTrack.get(track.id);
+      const next = {
+        ...track,
+        noteClips: generatedIds
+          ? track.noteClips.filter((clip) => !generatedIds.has(clip.id))
+          : track.noteClips,
+      };
+      if (!receipt) return next;
+
+      // Restore a generated selector only while it still has the generated
+      // value. Any sound edit made after sketch creation wins.
+      if (next.kitId === receipt.applied.kitId) next.kitId = receipt.previous.kitId;
+      if (next.presetId === receipt.applied.presetId) {
+        next.presetId = receipt.previous.presetId;
+      }
+      if (sameSound(next.sound, receipt.applied.sound)) {
+        next.sound = receipt.previous.sound ? { ...receipt.previous.sound } : undefined;
+      }
+      return next;
+    });
+    const furthestRemainingBeat = tracks.reduce((furthest, track) => {
+      const noteEnd = track.noteClips.reduce(
+        (end, clip) => Math.max(end, clip.start + clip.length),
+        0,
+      );
+      const audioEnd = track.audioClips.reduce(
+        (end, clip) =>
+          Math.max(end, clip.start + clip.durationSec * (current.bpm / 60)),
+        0,
+      );
+      return Math.max(furthest, noteEnd, audioEnd);
+    }, 0);
+    const furthestSectionBar = (current.sections ?? []).reduce(
+      (furthest, section) => Math.max(furthest, section.bar + 1),
+      0,
+    );
+    const loopEndBeat =
+      current.loopEndBeat === lastSketch.appliedLoopEndBeat
+        ? lastSketch.previousLoopEndBeat
+        : current.loopEndBeat;
+    const minimumBars = Math.max(
+      1,
+      Math.ceil(furthestRemainingBeat / 4),
+      furthestSectionBar,
+      Math.ceil(loopEndBeat / 4),
+    );
+    const bars =
+      current.bars === lastSketch.appliedBars
+        ? Math.max(lastSketch.previousBars, minimumBars)
+        : current.bars;
+    const soundPackId =
+      current.soundPackId === lastSketch.packId
+        ? lastSketch.previousSoundPackId
+        : current.soundPackId;
+    getStore().patchProject({ tracks, bars, soundPackId, loopEndBeat });
+
+    // Keep already-realized audio voices aligned with the restored project.
+    for (const receipt of lastSketch.tracks) {
+      const restored = tracks.find((track) => track.id === receipt.trackId);
+      if (restored) {
+        try {
+          audio.changePreset(restored);
+        } catch {
+          // The restored project snapshot is authoritative and will retry on
+          // the next preparation/live trigger.
+        }
+      }
+    }
+    const { selectedClipId, selectedTrackId } = getStore().state;
+    if (
+      selectedClipId &&
+      clipIdsByTrack.get(selectedTrackId)?.has(selectedClipId)
+    ) {
+      getStore().set({ selectedClipId: null });
+    }
+    getStore().setStatus(`${lastSketch.packName} sketch clips removed.`, "info");
+    getStore().set({ lastPackSketch: null });
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Category filter strip */}
@@ -230,6 +477,29 @@ export function SoundLibraryPanel() {
         ))}
       </div>
 
+      {lastSketch && (
+        <div
+          className="mx-2 mt-2 flex items-center justify-between gap-2 rounded border border-emerald-500/35 bg-emerald-500/5 px-2.5 py-2"
+          role="status"
+        >
+          <div className="min-w-0">
+            <div className="truncate font-mono text-[10px] text-foreground">
+              {lastSketch.packName} sketch added
+            </div>
+            <div className="text-[9px] text-muted-foreground">
+              Editable clips are selected on the timeline.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={undoLastSketch}
+            className="flex h-7 shrink-0 items-center gap-1 rounded border border-border px-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Undo2 className="size-3" aria-hidden /> Undo sketch
+          </button>
+        </div>
+      )}
+
       {/* Pack cards */}
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {visible.map((pack) => {
@@ -243,6 +513,7 @@ export function SoundLibraryPanel() {
               isPreviewing={isPreviewing}
               onPreview={() => void handlePreview(pack)}
               onLoad={() => handleLoadPack(pack)}
+              onSketch={() => handleStartSketch(pack)}
             />
           );
         })}
@@ -259,9 +530,17 @@ interface PackCardProps {
   isPreviewing: boolean;
   onPreview: () => void;
   onLoad: () => void;
+  onSketch: () => void;
 }
 
-function PackCard({ pack, isActive, isPreviewing, onPreview, onLoad }: PackCardProps) {
+function PackCard({
+  pack,
+  isActive,
+  isPreviewing,
+  onPreview,
+  onLoad,
+  onSketch,
+}: PackCardProps) {
   return (
     <div
       className={`rounded border transition-colors ${
@@ -351,6 +630,16 @@ function PackCard({ pack, isActive, isPreviewing, onPreview, onLoad }: PackCardP
           }`}
         >
           {isActive ? "Loaded" : "Load Pack"}
+        </button>
+      </div>
+      <div className="px-2 pb-2">
+        <button
+          type="button"
+          onClick={onSketch}
+          className="flex min-h-8 w-full items-center justify-center gap-1.5 rounded border border-primary/45 bg-primary/10 px-2 py-1.5 font-mono text-[9px] uppercase tracking-widest text-primary-readable transition-colors duration-150 hover:bg-primary/15"
+          data-testid={`start-pack-sketch-${pack.id}`}
+        >
+          <Sparkles className="size-3" aria-hidden /> Start editable sketch
         </button>
       </div>
     </div>

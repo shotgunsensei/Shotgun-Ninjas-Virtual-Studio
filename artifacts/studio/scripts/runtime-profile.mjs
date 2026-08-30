@@ -11,6 +11,7 @@ const FRESH_TRAP_ONLY = process.env.STUDIO_PROFILE_FRESH_TRAP_ONLY === "1";
 const REPEATED_LOAD_ONLY = process.env.STUDIO_PROFILE_REPEATED_LOAD_ONLY === "1";
 const PLAYBACK10_ONLY = PROFILE_MODE === "playback10";
 const SAMPLE_IMPORT_ONLY = PROFILE_MODE === "sample-import";
+const PRESET_SWITCHING_ONLY = PROFILE_MODE === "preset-switching";
 const OUT_DIR = join(process.cwd(), "runtime-profile");
 const RUN_ID = Date.now();
 const OUT_PATH = join(OUT_DIR, `runtime-profile-${RUN_ID}.json`);
@@ -702,10 +703,15 @@ async function switchPresets(page, count) {
   await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
   const strip = page.locator('[data-testid^="channel-strip-"]').filter({ hasText: /piano|bass|guitar/i }).first();
   await strip.click({ timeout: 5_000 });
-  const loadButtons = page.locator("button", { hasText: /^Load$/ });
-  const available = await loadButtons.count();
-  if (available === 0) throw new Error("No preset Load buttons available");
   for (let i = 0; i < count; i++) {
+    // Scope to preset rows. A global /^Load$/ locator can accidentally click
+    // the header's project Load command and leave the modal over the browser,
+    // producing a harness failure unrelated to preset switching.
+    const loadButtons = page
+      .locator('[data-testid^="preset-row-"]')
+      .getByRole("button", { name: "Load", exact: true });
+    const available = await loadButtons.count();
+    if (available === 0) throw new Error("No preset Load buttons available");
     const idx = i % Math.min(available, 8);
     await loadButtons.nth(idx).click();
     await page.waitForTimeout(250);
@@ -1103,6 +1109,20 @@ async function main() {
   if (REPEATED_LOAD_ONLY) {
     results.push(await scenario("repeated-load-growth", page, cdp, async (r) => {
       await repeatedLoadGrowthProbe(page, cdp, r);
+    }));
+    writeSummary();
+    console.log(OUT_PATH);
+    await browser.close();
+    if (results.some((r) => r.status !== "pass")) process.exitCode = 1;
+    return;
+  }
+
+  if (PRESET_SWITCHING_ONLY) {
+    results.push(await scenario("repeated-preset-switching", page, cdp, async (r) => {
+      await resetStudioScenario(page, "trap-starter");
+      await captureAudioNodeTrace(page, r, "preset-switch:before");
+      await switchPresets(page, 20);
+      await captureAudioNodeTrace(page, r, "preset-switch:after");
     }));
     writeSummary();
     console.log(OUT_PATH);

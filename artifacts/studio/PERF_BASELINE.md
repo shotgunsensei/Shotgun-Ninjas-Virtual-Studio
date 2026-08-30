@@ -23,10 +23,10 @@ The pre-change build placed almost the entire application in one initial JavaScr
 | Measurement | Before | Final |
 | --- | ---: | ---: |
 | Monolithic main JS | 2,123.67 kB raw / 605.11 kB gzip | Replaced by route-aware chunks |
-| Landing initial JS | Included in monolith | 229.64 kB raw / 73.43 kB gzip |
-| Studio initial JS | Included in monolith | 1,167.86 kB raw / 334.75 kB gzip |
-| Main Studio `App` chunk | 2,123.67 kB raw / 605.11 kB gzip | 665.79 kB raw / 195.90 kB gzip |
-| Shared CSS | 153.13 kB raw | 153.54 kB raw / 22.82 kB gzip |
+| Landing initial JS | Included in monolith | 230.32 kB raw / 73.74 kB gzip |
+| Studio initial JS | Included in monolith | 1,175.99 kB raw / 337.10 kB gzip |
+| Main Studio `App` chunk | 2,123.67 kB raw / 605.11 kB gzip | 673.23 kB raw / 197.96 kB gzip |
+| Shared CSS | 153.13 kB raw | 156.17 kB raw / 23.22 kB gzip |
 | Public source map | 8,176.30 kB | Not emitted by default |
 | Largest lazy chunk | N/A | MP3 encoder, 58.39 kB gzip |
 
@@ -52,49 +52,73 @@ Runtime decode behavior is bounded independently of transfer size:
 - Native WAV export reuses decoded zones and selects/repitches the nearest
   chromatic root rather than exporting the modeled approximation.
 
+## Creative Compass Follow-up Baseline
+
+The 4.2 follow-up adds a deterministic, data-only composition coach and keeps
+it outside the initial Studio route. `CreativeCompassPanel` is a 3.75 kB gzip
+lazy chunk; the pure recipe converter is a separate 3.79 kB gzip chunk. No new
+audio package, worker, sample, scheduler, or project-schema field was added.
+
+The Sound Library's new **Start editable sketch** path converts the same
+two-bar preview data into ordinary note clips. It performs one project patch,
+does not start playback, preserves tempo and existing clips, and exposes a
+session-safe undo that survives lazy tab unmounts. Undo removes only generated
+track/clip pairs and conditionally restores the previous kit, preset, sound,
+pack, and arrangement length without overwriting later user edits. Realized
+audio voices reconcile to new selectors before live input or playback. The
+pure converter has explicit tests that prohibit timer, audio, and global-ID
+side effects.
+
+Responsive production checks at 600, 768, 1,024, 1,366, and 1,440 CSS pixels
+measured `header.scrollWidth === header.clientWidth`; Project, Load, Export,
+and Learn remained pointer-accessible. Eligible PWA install actions remain
+reachable from More and the phone menu. The Creative Compass stayed within
+320- and 390-pixel mobile viewports without horizontal or vertical escape.
+
 ## Runtime Baseline and Final Result
 
 Both sets were captured against production preview with the same repository profiler. Browser start and garbage collection introduce run-to-run variance; bundle size and pass/fail assertions are the more deterministic load indicators.
 
 | Scenario | Before | Final exact build |
 | --- | ---: | ---: |
-| First play: largest long task | 421 ms | 321 ms |
-| First play: total long tasks | 730 ms | 676 ms |
-| First play: heap delta | +19.43 MB | +16.34 MB |
-| Cold-load measured duration | 234 ms | 920 ms |
-| Audio startup / Panic / replay: largest long task | Not isolated | 111 ms |
-| Mixer stress | Not isolated | 56.86 sec, zero long tasks |
-| Visualizer + Performance Mode stress | Not isolated | 11.49 sec, zero long tasks |
-| Repeated preset switching | Not isolated | 10.00 sec / 53 ms max long task |
-| Repeated project replacement | 137 ms max / 3,351 ms total | 104 ms max / 2,925 ms total |
-| Save/load/autosave: largest long task | 111 ms | 99 ms |
-| WAV export: largest long task | 99 ms | 92 ms |
+| First play: largest long task | 421 ms | 341 ms |
+| First play: total long tasks | 730 ms | 691 ms |
+| First play: heap delta | +19.43 MB | +15.01 MB |
+| Cold-load measured duration | 234 ms | 935 ms |
+| Audio startup / Panic / replay: largest long task | Not isolated | 115 ms |
+| Mixer stress | Not isolated | 27.95 sec / 100 ms max long task |
+| Visualizer + Performance Mode stress | Not isolated | 10.97 sec, zero long tasks |
+| Repeated preset switching | Not isolated | 9.46 sec, zero long tasks |
+| Repeated project replacement | 137 ms max / 3,351 ms total | 97 ms max / 2,713 ms total |
+| Save/load/autosave: largest long task | 111 ms | 96 ms |
+| WAV export: largest long task | 99 ms | 77 ms |
 
 The final cold-load wall time remained slower than the initial sample despite a
 44.7% smaller gzip Studio startup payload; earlier post-fix samples measured
-678, 916, and 1,269 ms. First-play heap samples ranged from +16.34 to +23.95
+678, 916, 935, and 1,269 ms. First-play heap samples ranged from +15.01 to +23.95
 MB across graph variants. This variability remains a field/device telemetry
 requirement rather than being hidden as a deterministic runtime win.
 
 ## Ten-Minute Release Gate
 
-Evidence: `runtime-profile/runtime-profile-1788061725807.json`
+Exact-source evidence: `runtime-profile/runtime-profile-1788109493599.json`
 
 - Continuous production playback plus stop, Panic, cleanup, and idle checks: **pass**.
-- Scenario duration: 616,899 ms.
+- Scenario duration: 604,282 ms.
 - Full requested playback duration reached: yes.
 - Page errors: 0.
 - Console messages: 0.
 - CDP/browser responsiveness after playback: pass.
-- Active scheduled audio players after cleanup: 0.
-- Active Tone transport events after cleanup: 0.
-- Active lean one-shot sources after cleanup: 0.
-- Active AudioWorklet nodes after cleanup: 0.
-- Six recorded long tasks occurred during startup/demo preparation; the longest was 327 ms and none occurred during the sustained playback window.
+- Ten-minute heap delta: +1.70 MB.
+- Largest recorded long task in the scenario: 169 ms; total: 376 ms.
+- Active scheduled players, AudioWorklet nodes, and lean one-shot sources: 0.
+- The project intentionally remained loaded with its reusable transport schedule;
+  the later 20-cycle project-replacement cleanup check ended with 0 active
+  transport events, 0 track voices, 0 players, and 0 worklets.
 
 ## Final Production Matrix
 
-Evidence: `runtime-profile/runtime-profile-1788072902071.json`
+Exact-source evidence: `runtime-profile/runtime-profile-1788109493599.json`
 
 All 19 scenarios passed:
 
@@ -102,7 +126,7 @@ All 19 scenarios passed:
 - Cold load.
 - Audio startup, Panic, and replay.
 - Playback with mixer and scope.
-- 57-second mixer stress.
+- 28-second mixer stress.
 - Visualizer and Performance Mode stress.
 - Repeated preset switching.
 - Repeated project load/unload.
@@ -112,10 +136,9 @@ All 19 scenarios passed:
 - Default/demo WAV export.
 - Service-worker cache/update simulation.
 
-The profile contains zero page errors and zero console warnings/errors. A
-follow-up matrix-only run after repairing the Windows profiler exit path also
-passed 7/7 first-play variants and exited normally with code 0; evidence:
-`runtime-profile/runtime-profile-1788073285093.json`.
+The profile contains zero page errors and zero console warnings/errors. Its
+project-replacement idle checkpoint records 0 active transport events, 0 track
+voices, 0 scheduled players, 0 lean one-shot sources, and 0 AudioWorklet nodes.
 
 ## Commands and Results
 
@@ -124,10 +147,10 @@ passed 7/7 first-play variants and exited normally with code 0; evidence:
 | `corepack pnpm install --frozen-lockfile` | Pass; lockfile current |
 | `corepack pnpm typecheck` (root) | Pass across libraries and four relevant workspaces |
 | `corepack pnpm build` (Studio) | Pass, including SSR/prerender |
-| `corepack pnpm test:unit` | Pass, 11/11, including all factory hashes/WAV headers/catalog references |
+| `corepack pnpm test:unit` | Pass, 35/35, including factory integrity, Creative Compass, pack conversion, lean-drum settings deduplication, autosave migration/policy, Scale Lock, MIDI, and storage |
 | `corepack pnpm test:select-values` | Pass |
 | `corepack pnpm test:bundle` | Pass |
-| `corepack pnpm test` | Pass, Playwright 7/7 |
+| `corepack pnpm test` | Pass, Playwright 19/19, including audio-enabled pack switching, melodic/reversible sketch undo, generated-loop reachability, responsive PWA access, keyboard tabs, and durable/transient replacement safety |
 | `corepack pnpm audit --prod` | Pass, no known vulnerabilities |
 | `node scripts/runtime-profile.mjs` | Pass, 19/19 production scenarios |
 | Focused factory browser gate | Pass: guide, 4/4 local zones, max 3 concurrent, sampled preview/load, native WAV |

@@ -68,7 +68,12 @@ import { PwaUpdateToast } from "./components/PwaUpdateToast";
 import { BackgroundFx } from "./components/BackgroundFx";
 import { Logo } from "./components/Logo";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { applySideEffects, getSettings, subscribeSettings } from "./lib/settings";
+import {
+  applySideEffects,
+  getSettings,
+  isAutosaveActive,
+  subscribeSettings,
+} from "./lib/settings";
 import { APP_NAME, APP_VERSION } from "./lib/version";
 import { DropZone } from "./components/DropZone";
 import { StudioErrorBoundary } from "./components/ErrorBoundary";
@@ -872,9 +877,10 @@ function Studio() {
   //   1. A configurable periodic "real" autosave that writes to the
   //      durable project record. Interval comes from user settings
   //      (off / 15s / 30s / 60s). Skipped for transient demo projects.
-  //   2. A short-debounced "draft" snapshot that always runs on dirty
-  //      state, even for transient projects, so a crash or accidental
-  //      tab close can be recovered via Recover Unsaved Project.
+  //   2. A short-debounced "draft" snapshot that runs on dirty state,
+  //      including transient projects, so a crash or accidental tab close
+  //      can be recovered via Recover Unsaved Project. The user's single
+  //      Auto-save switch disables both paths.
   const isTransient = useStore((s) => s.isTransientProject);
   // projectRef always holds the latest snapshot — kept fresh by the store
   // subscription below so the render path never needs to subscribe to project.
@@ -887,10 +893,20 @@ function Studio() {
   const draftSaveInFlightRef = useRef(false);
   const projectSaveInFlightRef = useRef(false);
   const draftTimerRef = useRef<number | null>(null);
+  const [autosaveEnabled, setAutosaveEnabled] = useState(
+    () => isAutosaveActive(getSettings()),
+  );
   const [autosaveSec, setAutosaveSec] = useState(
     () => getSettings().autosaveIntervalSec,
   );
-  useEffect(() => subscribeSettings((s) => setAutosaveSec(s.autosaveIntervalSec)), []);
+  useEffect(
+    () =>
+      subscribeSettings((settings) => {
+        setAutosaveEnabled(isAutosaveActive(settings));
+        setAutosaveSec(settings.autosaveIntervalSec);
+      }),
+    [],
+  );
 
   // Single store subscription that handles both dirty-marking and the
   // debounced draft write. Runs outside React's render cycle so fader
@@ -898,9 +914,17 @@ function Studio() {
   // just to keep the autosave timer up to date.
   useEffect(() => {
     const queueDraftSave = () => {
+      if (!isAutosaveActive(getSettings())) {
+        if (draftTimerRef.current) {
+          window.clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+        return;
+      }
       if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
       draftTimerRef.current = window.setTimeout(() => {
         draftTimerRef.current = null;
+        if (!isAutosaveActive(getSettings())) return;
         if (!dirtyRef.current) return;
         if (projectRevisionRef.current <= savedDraftRevisionRef.current) {
           countPerf("skippedAutosaves", 1, { reason: "clean-draft-revision" });
@@ -937,7 +961,8 @@ function Studio() {
           });
       }, 8000);
     };
-    return getStore().subscribe(() => {
+    if (autosaveEnabled && dirtyRef.current) queueDraftSave();
+    const unsubscribe = getStore().subscribe(() => {
       const store = getStore();
       const next = store.state.project;
       const nextRevision = store.state.projectRevision;
@@ -948,16 +973,24 @@ function Studio() {
       dirtyRevisionRef.current = nextRevision;
       queueDraftSave();
     });
-  }, []);
+    return () => {
+      unsubscribe();
+      if (draftTimerRef.current) {
+        window.clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    };
+  }, [autosaveEnabled]);
 
   // Periodic real autosave on a user-configurable interval. 0 disables
   // (manual Save still works). Always writes when dirty, regardless of
   // debounce — the user explicitly opted into this cadence.
   useEffect(() => {
-    if (autosaveSec === 0) return;
+    if (!autosaveEnabled || autosaveSec === 0) return;
     if (isTransient) return;
     const untrackInterval = trackInterval("periodic-project-autosave");
     const handle = window.setInterval(() => {
+      if (!isAutosaveActive(getSettings())) return;
       if (!dirtyRef.current) {
         countPerf("skippedAutosaves", 1, { reason: "clean-project" });
         return;
@@ -998,12 +1031,13 @@ function Studio() {
       window.clearInterval(handle);
       untrackInterval();
     };
-  }, [autosaveSec, isTransient]);
+  }, [autosaveEnabled, autosaveSec, isTransient]);
 
   // Flush when the page becomes hidden (fires earlier and more reliably than
   // unload on mobile), with beforeunload/pagehide as final best-effort signals.
   useEffect(() => {
     const flushLatestDraft = () => {
+      if (!isAutosaveActive(getSettings())) return;
       if (!dirtyRef.current) return;
       if (draftSaveInFlightRef.current || projectSaveInFlightRef.current) return;
       if (isStorageCriticalOperationActive()) return;

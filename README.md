@@ -25,9 +25,10 @@ The repo is a pnpm monorepo. The studio app itself lives in
   microphone vocals. Six high-quality factory instruments use 26 same-origin
   CC0 sample zones: TX81Z piano, folk harp, vibraphone, Tanzanian kalimba,
   ocarina, and tenor sax stabs.
-- **Creative learning built into the studio** — sampled-instrument listening
-  guides, practical "try this" prompts, pitched pack previews, and lessons on
-  motif development, timbre/register, call-and-response, and harmony tools.
+- **Creative Compass and learning built into the studio** — arrangement-aware
+  next moves, editable motif/chord/pulse/groove seeds, scoped variations and
+  undo, sampled-instrument listening guides, and practical lessons. Sound-pack
+  previews can become editable two-bar clips without replacing existing work.
 - **Transport** — Play / Pause / Stop / Record, BPM 40–240, metronome,
   configurable count-in, loop region, master volume, master meter with
   latching clip indicator, master oscilloscope, and a Panic button that
@@ -40,11 +41,16 @@ The repo is a pnpm monorepo. The studio app itself lives in
   preview.
 - **Web MIDI** — device picker, live monitor, MIDI Learn for transport,
   metronome, per-track volume, and individual drum pads.
-- **Local persistence** — IndexedDB autosave (~1.5 s debounce) including
-  vocal Blobs, with project import/export as JSON.
+- **Local persistence** — configurable 15/30/60-second IndexedDB project
+  autosave (30 seconds by default), a separate 8-second recovery-draft
+  debounce, vocal Blobs, and project import/export as JSON. One Auto-save
+  switch controls both storage paths.
 - **WAV export** at master quality with progress and clipping warning.
 - **Cyber-ninja branding** — dark graphite + red primary + neon-blue
   accent, with multiple themes.
+- **Adaptive, accessible workspace** — Beginner Mode for new users, compact
+  tablet-safe command groups, the same Create/Learn tools on phones, keyboard
+  browser tabs, live status announcements, and reduced-motion support.
 - **Global error boundary** with copy-trace, panic, and recovery-data
   download.
 - **Diagnostics panel** showing app version, AudioContext state, sample
@@ -119,8 +125,8 @@ side and persists to the user's own browser storage.
   They are cached for later offline use, so the first use of an instrument can
   reflect network speed while startup avoids the 24.07 MiB sample payload.
 - There is no cloud sync — projects live in your browser's IndexedDB. If
-  you clear site data, projects are gone. Use **File · Export Project
-  JSON** to back up.
+  you clear site data, projects are gone. Use **Export → Project JSON** to
+  back up.
 - Web MIDI sysex is not requested; controllers that require sysex for
   bidirectional comms will only send/receive standard MIDI.
 

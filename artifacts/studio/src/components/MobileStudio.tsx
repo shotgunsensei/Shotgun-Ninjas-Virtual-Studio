@@ -18,6 +18,10 @@ import {
   Keyboard as KeyboardIcon,
   Volume2,
   AlertOctagon,
+  BookOpen,
+  GraduationCap,
+  Sparkles,
+  Share,
 } from "lucide-react";
 import { useStore, getStore } from "../store";
 import { audio } from "../lib/audio/engine";
@@ -37,6 +41,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
+import { usePwaInstallAction } from "./PwaInstallControls";
 
 /**
  * Performance/sketch shell for phones (<600px). Prioritizes pads,
@@ -62,6 +67,7 @@ export function MobileStudio() {
   const isRecording = useStore((s) => s.isRecording);
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const { play, pause, stop, record } = useTransport();
+  const pwaInstall = usePwaInstallAction();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [mixerOpen, setMixerOpen] = useState(false);
@@ -172,6 +178,7 @@ export function MobileStudio() {
             min={40}
             max={240}
             value={project.bpm}
+            aria-label="Project tempo in beats per minute"
             onChange={(e) =>
               getStore().patchProject({
                 bpm: Math.max(40, Math.min(240, Number(e.target.value) || 0)),
@@ -186,6 +193,7 @@ export function MobileStudio() {
             value={[project.masterVolume * 100]}
             max={100}
             step={1}
+            aria-label="Master volume"
             onValueChange={([v]) =>
               getStore().patchProject({ masterVolume: (v ?? 0) / 100 })
             }
@@ -241,7 +249,7 @@ export function MobileStudio() {
       </main>
 
       {/* Bottom action bar */}
-      <div className="h-14 px-2 grid grid-cols-3 gap-2 border-t border-border bg-graphite shrink-0">
+      <div className="h-14 px-2 grid grid-cols-4 gap-1 border-t border-border bg-graphite shrink-0">
         <ActionButton
           icon={<Layers className="w-4 h-4" />}
           label="Tracks"
@@ -251,6 +259,12 @@ export function MobileStudio() {
           icon={<Sliders className="w-4 h-4" />}
           label="Mixer"
           onClick={() => setMixerOpen(true)}
+        />
+        <ActionButton
+          icon={<Sparkles className="w-4 h-4" />}
+          label="Create"
+          onClick={() => window.dispatchEvent(new CustomEvent("studio:open-creative"))}
+          testId="mobile-open-creative"
         />
         <ActionButton
           icon={<Download className="w-4 h-4" />}
@@ -308,12 +322,53 @@ export function MobileStudio() {
                 window.dispatchEvent(new CustomEvent("studio:open-export"));
               }}
             />
+            {pwaInstall.available && (
+              <MenuItem
+                icon={
+                  pwaInstall.kind === "install" ? (
+                    <Download className="w-4 h-4" />
+                  ) : (
+                    <Share className="w-4 h-4" />
+                  )
+                }
+                label={pwaInstall.label}
+                onClick={() => {
+                  setMenuOpen(false);
+                  pwaInstall.activate();
+                }}
+                testId="mobile-pwa-install-action"
+              />
+            )}
             <MenuItem
               icon={<HelpCircle className="w-4 h-4" />}
-              label="Help"
+              label="Quick Start"
               onClick={() => {
                 setMenuOpen(false);
                 getStore().set({ showHelp: true });
+              }}
+            />
+            <MenuItem
+              icon={<Sparkles className="w-4 h-4" />}
+              label="Creative Compass"
+              onClick={() => {
+                setMenuOpen(false);
+                window.dispatchEvent(new CustomEvent("studio:open-creative"));
+              }}
+            />
+            <MenuItem
+              icon={<GraduationCap className="w-4 h-4" />}
+              label="Lessons"
+              onClick={() => {
+                setMenuOpen(false);
+                window.dispatchEvent(new CustomEvent("studio:open-lessons"));
+              }}
+            />
+            <MenuItem
+              icon={<BookOpen className="w-4 h-4" />}
+              label="Glossary"
+              onClick={() => {
+                setMenuOpen(false);
+                window.dispatchEvent(new CustomEvent("studio:open-glossary"));
               }}
             />
             <MenuItem
@@ -387,6 +442,7 @@ export function MobileStudio() {
           </div>
         </DrawerContent>
       </Drawer>
+      {pwaInstall.dialog}
     </div>
   );
 }
@@ -419,15 +475,18 @@ function ActionButton({
   icon,
   label,
   onClick,
+  testId,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-testid={testId}
       className="touch-pad rounded-md border border-border bg-background hover-elevate active-elevate flex flex-col items-center justify-center gap-0.5"
     >
       {icon}
@@ -442,15 +501,18 @@ function MenuItem({
   icon,
   label,
   onClick,
+  testId,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-testid={testId}
       className="touch-pad rounded-md border border-border bg-background hover-elevate active-elevate flex items-center gap-2 px-3 py-3 text-left"
     >
       {icon}

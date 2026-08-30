@@ -82,12 +82,14 @@ There are no other routes; navigation is internal selection state.
 ### Save / load
 
 - Local-only via `idb` (IndexedDB). Projects are serialized as JSON;
-  audio clip blobs are stored separately keyed by `blobKey`. Autosave
-  fires on a 1.5 s debounce in `App.tsx` and the last opened project
-  id is restored on boot.
-- **No cloud save, no project import/export of full session.** WAV
-  and MP3 bounce of the rendered mix is supported via the Header's
-  Export action (see `src/lib/audio/export.ts`).
+  audio clip blobs are stored separately keyed by `blobKey`. A single
+  Auto-save policy controls configurable 15/30/60-second durable saves and an
+  8-second recovery-draft debounce; the last opened project id is restored on
+  boot.
+- Portable project JSON can embed track clips, sample-library audio, and Chop
+  Lab audio; project-only export explicitly reports nonportable references.
+  WAV, MP3, stems, MIDI, MusicXML, and DAW-pack export remain available from
+  the Header (see `src/lib/audio/export.ts`).
 
 ### Build / console warnings observed in the baseline
 

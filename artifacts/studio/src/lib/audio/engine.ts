@@ -50,6 +50,7 @@ import {
   stopChopEngine,
 } from "./chopEngine";
 import { createLeanDrumVoice, type LeanDrumVoice } from "./leanDrumVoice";
+import { LeanDrumTrackSettingsCache } from "./leanDrumTrackSettings";
 import {
   startPerfTimer,
   trackAudioResource,
@@ -162,6 +163,7 @@ declare global {
   interface Window {
     __SN_AUDIO_ENGINE_STATUS__?: {
       voiceModes: () => ReturnType<AudioEngine["getVoiceModeSnapshot"]>;
+      soundSelectors: () => ReturnType<AudioEngine["getVoiceSoundSelectorSnapshot"]>;
     };
   }
 }
@@ -189,6 +191,7 @@ class AudioEngine {
   private voices = new Map<string, TrackVoice>();
   private leanDrumVoices = new Map<string, LeanDrumVoice>();
   private leanTrackSnapshots = new Map<string, Track>();
+  private leanTrackSettings = new LeanDrumTrackSettingsCache();
   private projectTrackSnapshots = new Map<string, Track>();
   private voiceModes = new Map<string, VoiceMode>();
   private voicePromotions: Array<{
@@ -255,6 +258,7 @@ class AudioEngine {
     if (typeof window !== "undefined") {
       window.__SN_AUDIO_ENGINE_STATUS__ = {
         voiceModes: () => this.getVoiceModeSnapshot(),
+        soundSelectors: () => this.getVoiceSoundSelectorSnapshot(),
       };
     }
 
@@ -1044,12 +1048,69 @@ class AudioEngine {
    * requested voice before transport preparation has run. */
   setProjectTrackSnapshots(tracks: readonly Track[]) {
     this.projectTrackSnapshots = new Map(tracks.map((track) => [track.id, track]));
+    // Keep promotion snapshots current without doing AudioParam work in the
+    // note scheduler. The settings cache below remains the source of truth for
+    // whether a realized lean voice needs an update.
+    for (const track of tracks) {
+      if (this.leanDrumVoices.has(track.id)) {
+        this.leanTrackSnapshots.set(track.id, track);
+      }
+    }
+  }
+
+  private applyLeanTrackSettingsIfChanged(
+    track: Track,
+    lean: LeanDrumVoice,
+  ): boolean {
+    if (!this.leanTrackSettings.needsApply(track)) return false;
+    lean.applyTrack(track);
+    this.leanTrackSettings.markApplied(track);
+    return true;
+  }
+
+  /** Reconcile only an already-realized Tone voice. This never creates an
+   * audio graph while the browser is locked, but guarantees that a project
+   * selector change cannot leave the previous kit or preset sounding. */
+  private reconcileExistingSoundSelector(track: Track): void {
+    const voice = this.voices.get(track.id);
+    if (!voice) return;
+
+    if (track.kind === "drums") {
+      if (track.kitId) {
+        if (voice.kitId !== track.kitId || !voice.kit) {
+          this.setKit(track.id, track.kitId);
+        }
+      } else if (voice.kit) {
+        this.changePreset(track);
+      }
+      return;
+    }
+
+    if (track.kind === "vocals") return;
+    if (track.presetId) {
+      if (voice.presetId !== track.presetId || !voice.poly) {
+        this.setMelodicPreset(track.id, track.presetId);
+      }
+    } else if (voice.presetId) {
+      this.changePreset(track);
+    }
   }
 
   private ensurePlayableTrack(trackId: string, reason: string): void {
-    if (this.voices.has(trackId) || this.leanDrumVoices.has(trackId)) return;
     const track = this.projectTrackSnapshots.get(trackId);
     if (!track) return;
+    if (this.voices.has(trackId)) {
+      this.reconcileExistingSoundSelector(track);
+      return;
+    }
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean) {
+      if (this.applyLeanTrackSettingsIfChanged(track, lean)) {
+        const anySolo = this.soloSet.size > 0;
+        lean.setAudible(!track.muted && (!anySolo || track.solo));
+      }
+      return;
+    }
     this.ensureTrack(track, {
       mode: track.kind === "drums" ? "lean" : "tone",
       reason,
@@ -1123,19 +1184,7 @@ class AudioEngine {
       this.voices.set(track.id, v);
       this.recordVoicePromotion(track.id, currentMode, "tone", reason, started);
     } else {
-      // Rebuild instrument when v2 sound-model selectors change.
-      const wantKit = track.kitId;
-      const wantPreset = track.presetId;
-      if (track.kind === "drums" && wantKit && v.kitId !== wantKit) {
-        this.setKit(track.id, wantKit);
-      } else if (
-        track.kind !== "drums" &&
-        track.kind !== "vocals" &&
-        wantPreset &&
-        v.presetId !== wantPreset
-      ) {
-        this.setMelodicPreset(track.id, wantPreset);
-      }
+      this.reconcileExistingSoundSelector(track);
     }
     this.applyTrackSettings(track);
     // v2: re-apply per-track sound params and per-piece mixer overrides
@@ -1169,6 +1218,7 @@ class AudioEngine {
   private ensureLeanDrumTrack(track: Track, reason: string, started: number): void {
     const existingTone = this.voices.get(track.id);
     if (existingTone) {
+      this.reconcileExistingSoundSelector(track);
       this.applyTrackSettings(track);
       return;
     }
@@ -1178,9 +1228,10 @@ class AudioEngine {
     if (!lean) {
       lean = createLeanDrumVoice(track, this.masterChain.input);
       this.leanDrumVoices.set(track.id, lean);
+      this.leanTrackSettings.markApplied(track);
       this.recordVoicePromotion(track.id, from, "lean", reason, started);
     } else {
-      lean.applyTrack(track);
+      this.applyLeanTrackSettingsIfChanged(track, lean);
     }
     firstPlayMeasure("ensureTrack", started, performance.now(), {
       trackId: track.id,
@@ -1193,7 +1244,10 @@ class AudioEngine {
 
   private disposeLeanDrumTrack(trackId: string): void {
     const lean = this.leanDrumVoices.get(trackId);
-    if (!lean) return;
+    if (!lean) {
+      this.leanTrackSettings.delete(trackId);
+      return;
+    }
     try {
       lean.dispose();
     } catch {
@@ -1201,6 +1255,7 @@ class AudioEngine {
     }
     this.leanDrumVoices.delete(trackId);
     this.leanTrackSnapshots.delete(trackId);
+    this.leanTrackSettings.delete(trackId);
     if (!this.voices.has(trackId)) this.voiceModes.set(trackId, "disposed");
   }
 
@@ -1221,6 +1276,7 @@ class AudioEngine {
         // ignore promotion cleanup races
       }
       this.leanDrumVoices.delete(trackId);
+      this.leanTrackSettings.delete(trackId);
     }
     const v = this.buildVoice(track);
     this.voices.set(trackId, v);
@@ -1270,10 +1326,24 @@ class AudioEngine {
     };
   }
 
+  /** Read-only selector diagnostics used by runtime and browser regression
+   * tests. Project selectors and realized voices must agree after a pack or
+   * preset switch; exposing IDs avoids relying on private Tone node shapes. */
+  getVoiceSoundSelectorSnapshot() {
+    return Array.from(this.voices.entries()).map(([trackId, voice]) => ({
+      trackId,
+      kitId: voice.kitId,
+      presetId: voice.presetId,
+      hasKit: Boolean(voice.kit),
+      hasMelodicVoice: Boolean(voice.poly),
+    }));
+  }
+
   removeTrack(trackId: string) {
     this.cancelScheduledForTrack(trackId);
     this.removeTrackAutomation(trackId);
     this.leanTrackSnapshots.delete(trackId);
+    this.leanTrackSettings.delete(trackId);
     for (const key of Array.from(this.paramOverrides)) {
       if (key.startsWith(`${trackId}:`)) this.paramOverrides.delete(key);
     }
@@ -1300,6 +1370,7 @@ class AudioEngine {
     for (const id of this.getActiveTrackIds()) {
       this.removeTrack(id);
     }
+    this.leanTrackSettings.clear();
     this.soloSet.clear();
   }
 
@@ -1349,7 +1420,7 @@ class AudioEngine {
     if (!v) {
       const lean = this.leanDrumVoices.get(track.id);
       if (lean) {
-        lean.applyTrack(track);
+        this.applyLeanTrackSettingsIfChanged(track, lean);
         lean.setAudible(audible);
       }
       return;
@@ -1408,7 +1479,7 @@ class AudioEngine {
     const v = this.voices.get(track.id);
     if (!v) {
       const lean = this.leanDrumVoices.get(track.id);
-      if (lean) lean.applyTrack(track);
+      if (lean) this.applyLeanTrackSettingsIfChanged(track, lean);
       return;
     }
     const endTiming = startPerfTimer("instrument-replacement", {
@@ -1417,6 +1488,10 @@ class AudioEngine {
     });
     this.disposeInstrument(v);
     this.attachInstrument(v, track);
+    // Rebuilding a selector creates a fresh synth/sampler with factory
+    // defaults. Reapply the project's sound model immediately so custom
+    // ADSR, filter, spatial sends, and glide cannot diverge from saved state.
+    if (track.sound) this.setSoundParams(track.id, track.sound);
     endTiming();
   }
 

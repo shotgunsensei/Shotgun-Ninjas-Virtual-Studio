@@ -80,26 +80,35 @@ export function quantizeToScale(
   rootSemitone: number,
   scale: ScaleId,
 ): number {
-  if (scale === "chromatic") return note;
-  const intervals = SCALE_INTERVALS[scale];
-  const octave = Math.floor((note - rootSemitone) / 12);
-  const relSemitone = ((note - rootSemitone) % 12 + 12) % 12;
+  const boundedNote = Math.max(0, Math.min(127, note));
+  if (scale === "chromatic") return boundedNote;
 
-  let bestOffset = intervals[0];
+  const intervals = SCALE_INTERVALS[scale];
+  const root = ((Math.round(rootSemitone) % 12) + 12) % 12;
+
+  let bestNote = boundedNote;
   let bestDist = Infinity;
   for (const iv of intervals) {
-    const dist = Math.min(
-      Math.abs(relSemitone - iv),
-      12 - Math.abs(relSemitone - iv),
-    );
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestOffset = iv;
+    const pitchClass = (root + iv) % 12;
+    const distanceToLower = ((boundedNote - pitchClass) % 12 + 12) % 12;
+    const lower = boundedNote - distanceToLower;
+
+    // Compare absolute MIDI candidates rather than pitch-class distance alone.
+    // The previous implementation could identify the next octave's root as the
+    // nearest pitch class, then reconstruct it in the current octave and jump
+    // down by eleven semitones. Checking both adjacent candidates preserves the
+    // octave displacement. Ties resolve downward for deterministic behavior.
+    for (const candidate of [lower, lower + 12]) {
+      if (candidate < 0 || candidate > 127) continue;
+      const dist = Math.abs(candidate - boundedNote);
+      if (dist < bestDist || (dist === bestDist && candidate < bestNote)) {
+        bestDist = dist;
+        bestNote = candidate;
+      }
     }
   }
 
-  const quantized = rootSemitone + octave * 12 + bestOffset;
-  return Math.max(0, Math.min(127, quantized));
+  return bestNote;
 }
 
 /**

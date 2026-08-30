@@ -137,6 +137,28 @@ function projectSchedulingChanged(previous: Project, next: Project): boolean {
   return false;
 }
 
+/**
+ * Session-only receipt for the most recently generated Sound Library sketch.
+ * It deliberately lives outside Project so undo metadata is never exported or
+ * autosaved, while still surviving lazy browser-tab unmounts.
+ */
+export interface PackSketchUndoState {
+  projectId: string;
+  packId: string;
+  packName: string;
+  clips: Array<{ trackId: string; clipId: string }>;
+  previousSoundPackId?: string;
+  previousBars: number;
+  appliedBars: number;
+  previousLoopEndBeat: number;
+  appliedLoopEndBeat: number;
+  tracks: Array<{
+    trackId: string;
+    previous: Pick<Track, "kitId" | "presetId" | "sound">;
+    applied: Pick<Track, "kitId" | "presetId" | "sound">;
+  }>;
+}
+
 class Store {
   private listeners = new Set<Listener>();
   state: {
@@ -193,6 +215,8 @@ class Store {
     chopLab: ChopLabState;
     /** Accumulated clip events for the session log. */
     clipHistory: ClipHistoryEntry[];
+    /** Bounded undo receipt for the latest generated Sound Library sketch. */
+    lastPackSketch: PackSketchUndoState | null;
     /** Export range — shared between the timeline drag-region and the
      *  Export dialog so both stay in sync without prop drilling. */
     exportRangeMode: "whole" | "loop" | "custom";
@@ -230,6 +254,7 @@ class Store {
       pendingSample: null,
       chopLab: { ...DEFAULT_CHOP_LAB },
       clipHistory: [],
+      lastPackSketch: null,
       exportRangeMode: "whole",
       exportStartBar: 1,
       exportEndBar: project.bars,
