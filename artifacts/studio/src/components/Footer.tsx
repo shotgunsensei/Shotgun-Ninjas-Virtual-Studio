@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Info } from "lucide-react";
 import { APP_VERSION } from "../lib/version";
-import { AboutDialog } from "./AboutDialog";
 import { TrustBadgeStrip, TrustStatementModal } from "./TrustStatementModal";
 import { useSettings } from "../lib/settings";
+
+const AboutDialog = lazy(() =>
+  import("./AboutDialog").then((module) => ({ default: module.AboutDialog })),
+);
 
 /**
  * Tiny footer strip pinned at the bottom of the studio shell. Surfaces
@@ -54,12 +57,18 @@ export function StudioFooter() {
           About · v{APP_VERSION}
         </button>
       </div>
-      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-      <TrustStatementModal
-        open={trustOpen}
-        onOpenChange={setTrustOpen}
-        defaultTab={trustTab}
-      />
+      {aboutOpen && (
+        <Suspense fallback={null}>
+          <AboutDialog open onOpenChange={setAboutOpen} />
+        </Suspense>
+      )}
+      {trustOpen && (
+        <TrustStatementModal
+          open
+          onOpenChange={setTrustOpen}
+          defaultTab={trustTab}
+        />
+      )}
     </>
   );
 }

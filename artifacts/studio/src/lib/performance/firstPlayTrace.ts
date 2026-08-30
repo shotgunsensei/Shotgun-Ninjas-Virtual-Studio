@@ -43,6 +43,7 @@ const STORAGE_KEY = "sn:firstPlayTrace";
 const events: FirstPlayTraceEvent[] = [];
 let observer: PerformanceObserver | null = null;
 let current = "idle";
+let cachedFlags: FirstPlayFlags | null = null;
 
 function params(): URLSearchParams | null {
   if (typeof window === "undefined") return null;
@@ -50,6 +51,7 @@ function params(): URLSearchParams | null {
 }
 
 export function getFirstPlayFlags(): FirstPlayFlags {
+  if (cachedFlags) return cachedFlags;
   const search = params();
   const has = (name: string) => search?.has(name) ?? false;
   let storageTrace = false;
@@ -58,7 +60,7 @@ export function getFirstPlayFlags(): FirstPlayFlags {
   } catch {
     storageTrace = false;
   }
-  return {
+  cachedFlags = {
     trace: has("snFirstPlayTrace") || storageTrace,
     disableProjectSchedules: has("snDisableProjectSchedules"),
     disableTransportCallbacks: has("snDisableTransportCallbacks"),
@@ -68,6 +70,7 @@ export function getFirstPlayFlags(): FirstPlayFlags {
     disableAnalyzers: has("snDisableAnalyzers"),
     leanDrumValidation: has("snLeanDrumValidation"),
   };
+  return cachedFlags;
 }
 
 export function isFirstPlayTraceEnabled(): boolean {

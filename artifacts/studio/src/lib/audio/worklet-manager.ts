@@ -270,7 +270,7 @@ registerProcessor('sn-saturation', SaturationProcessor);
 `;
 
 type WorkletNodeKind = 'metronome' | 'sample-player' | 'soft-clipper' | 'limiter' | 'saturation';
-const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
+const AUDIO_WORKLETS_ENABLED = import.meta.env?.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 
 const PROCESSOR_NAMES: Record<WorkletNodeKind, string> = {
   'metronome':     'sn-metronome',

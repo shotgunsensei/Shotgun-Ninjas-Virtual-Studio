@@ -6,9 +6,7 @@ import { StudioFooter } from "./components/Footer";
 import { TransportBar } from "./components/TransportBar";
 import { Timeline } from "./components/Timeline";
 import { ChannelStripsBar } from "./components/ChannelStrip";
-import { CorruptionRecoveryDialog } from "./components/CorruptionRecoveryDialog";
-import { MissingSamplesDialog, type MissingSampleEntry } from "./components/MissingSamplesDialog";
-import { ChangelogDialog } from "./components/ChangelogDialog";
+import type { MissingSampleEntry } from "./components/MissingSamplesDialog";
 // MidiPanel is heavier than the rest of the inspector (pulls in the
 // MIDI runtime + device listing) and lives in a collapsible aside, so
 // lazy-loading it keeps the initial bundle smaller without affecting
@@ -22,8 +20,48 @@ const ModulationPanel = lazy(() =>
 const HelpDialog = lazy(() =>
   import("./components/HelpDialog").then((m) => ({ default: m.HelpDialog })),
 );
+const CorruptionRecoveryDialog = lazy(() =>
+  import("./components/CorruptionRecoveryDialog").then((m) => ({
+    default: m.CorruptionRecoveryDialog,
+  })),
+);
+const MissingSamplesDialog = lazy(() =>
+  import("./components/MissingSamplesDialog").then((m) => ({
+    default: m.MissingSamplesDialog,
+  })),
+);
+const ChangelogDialog = lazy(() =>
+  import("./components/ChangelogDialog").then((m) => ({ default: m.ChangelogDialog })),
+);
 const ChopLab = lazy(() =>
   import("./components/instruments/ChopLab").then((m) => ({ default: m.ChopLab })),
+);
+const SamplePreviewDialog = lazy(() =>
+  import("./components/SamplePreviewDialog").then((m) => ({ default: m.SamplePreviewDialog })),
+);
+const MobileStudio = lazy(() =>
+  import("./components/MobileStudio").then((m) => ({ default: m.MobileStudio })),
+);
+const Keyboard = lazy(() =>
+  import("./components/instruments/Keyboard").then((m) => ({ default: m.Keyboard })),
+);
+const GuitarPanel = lazy(() =>
+  import("./components/instruments/GuitarPanel").then((m) => ({ default: m.GuitarPanel })),
+);
+const DrumPads = lazy(() =>
+  import("./components/instruments/DrumPads").then((m) => ({ default: m.DrumPads })),
+);
+const PianoRoll = lazy(() =>
+  import("./components/instruments/PianoRoll").then((m) => ({ default: m.PianoRoll })),
+);
+const VocalsPanel = lazy(() =>
+  import("./components/instruments/VocalsPanel").then((m) => ({ default: m.VocalsPanel })),
+);
+const PerformanceModePanel = lazy(() =>
+  import("./components/PerformanceModePanel").then((m) => ({ default: m.PerformanceModePanel })),
+);
+const PerformancePadScreen = lazy(() =>
+  import("./components/PerformancePadScreen").then((m) => ({ default: m.PerformancePadScreen })),
 );
 import { StatusToast } from "./components/StatusToast";
 import { PwaUpdateToast } from "./components/PwaUpdateToast";
@@ -33,22 +71,16 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { applySideEffects, getSettings, subscribeSettings } from "./lib/settings";
 import { APP_NAME, APP_VERSION } from "./lib/version";
 import { DropZone } from "./components/DropZone";
-import { SamplePreviewDialog } from "./components/SamplePreviewDialog";
 import { StudioErrorBoundary } from "./components/ErrorBoundary";
 import { LeftBrowser } from "./components/LeftBrowser";
 import { applyTheme, getStoredThemeId } from "./lib/themes";
 import { WorldProvider } from "./contexts/WorldContext";
 import { applyWorldTheme, findWorld, getStoredWorldId } from "./lib/worlds";
-import { Keyboard } from "./components/instruments/Keyboard";
-import { GuitarPanel } from "./components/instruments/GuitarPanel";
-import { DrumPads } from "./components/instruments/DrumPads";
-import { PianoRoll } from "./components/instruments/PianoRoll";
-import { VocalsPanel } from "./components/instruments/VocalsPanel";
 import { PresetBrowser } from "./components/PresetBrowser";
 import { GroovePanel } from "./components/GroovePanel";
 import { MelodicParams } from "./components/MelodicParams";
 import { EffectsRack } from "./components/EffectsRack";
-import { useTransport } from "./hooks/useTransport";
+import { TransportProvider, useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { getChopEngine } from "./lib/audio/chopEngine";
 import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
@@ -71,15 +103,12 @@ import type { DrumPiece } from "./lib/audio/engine";
 import { initPluginSystem } from "./lib/plugins";
 import { useSettings } from "./lib/settings";
 import { useViewport } from "./hooks/use-mobile";
-import { MobileStudio } from "./components/MobileStudio";
 import {
   Drawer,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import { PerformanceModePanel } from "./components/PerformanceModePanel";
-import { PerformancePadScreen } from "./components/PerformancePadScreen";
 import { performanceRouter } from "./lib/performance/router";
 import { midiNoteToName } from "./lib/midi/midi";
 import { basslinePattern } from "./lib/performance/bassline";
@@ -338,7 +367,9 @@ export default function App() {
             }));
           }}
         >
-          <Studio />
+          <TransportProvider>
+            <Studio />
+          </TransportProvider>
         </StudioErrorBoundary>
       </TooltipProvider>
     </WorldProvider>
@@ -373,6 +404,7 @@ function Studio() {
   const { play, pause, stop, record } = useTransport();
   const isPlaying = useStore((s) => s.isPlaying);
   const selectedClipId = useStore((s) => s.selectedClipId);
+  const helpDialogOpen = useStore((s) => s.showHelp || s.showOnboarding);
 
   const [leftCollapsed, setLeftCollapsed] = useState(() =>
     readCollapse(COLLAPSE_KEYS.left),
@@ -389,6 +421,7 @@ function Studio() {
 
   // Performance pad screen (fullscreen 4×4 grid)
   const [padScreenOpen, setPadScreenOpen] = useState(false);
+  const performanceOpen = useStore((s) => s.project.performance?.open ?? false);
 
   // Initialize the unified performance router once and wire it to the audio engine.
   useEffect(() => {
@@ -852,6 +885,7 @@ function Studio() {
   const savedProjectRevisionRef = useRef(projectRevisionRef.current);
   const savedDraftRevisionRef = useRef(projectRevisionRef.current);
   const draftSaveInFlightRef = useRef(false);
+  const projectSaveInFlightRef = useRef(false);
   const draftTimerRef = useRef<number | null>(null);
   const [autosaveSec, setAutosaveSec] = useState(
     () => getSettings().autosaveIntervalSec,
@@ -882,7 +916,7 @@ function Studio() {
           queueDraftSave();
           return;
         }
-        if (draftSaveInFlightRef.current) {
+        if (draftSaveInFlightRef.current || projectSaveInFlightRef.current) {
           countPerf("skippedAutosaves", 1, { reason: "draft-save-in-flight" });
           queueDraftSave();
           return;
@@ -937,8 +971,13 @@ function Studio() {
         countPerf("skippedAutosaves", 1, { reason: "critical-storage-operation" });
         return;
       }
+      if (projectSaveInFlightRef.current || draftSaveInFlightRef.current) {
+        countPerf("skippedAutosaves", 1, { reason: "save-in-flight" });
+        return;
+      }
       const snap = projectRef.current;
       const revision = projectRevisionRef.current;
+      projectSaveInFlightRef.current = true;
       countPerf("autosaveAttempts", 1, { kind: "periodic-project" });
       saveProject(snap)
         .then(() => {
@@ -950,6 +989,9 @@ function Studio() {
         })
         .catch(() => {
           /* ignore quota errors — next tick will retry */
+        })
+        .finally(() => {
+          projectSaveInFlightRef.current = false;
         });
     }, autosaveSec * 1000);
     return () => {
@@ -958,22 +1000,43 @@ function Studio() {
     };
   }, [autosaveSec, isTransient]);
 
-  // beforeunload: best-effort flush of the draft slot so a tab close
-  // mid-edit still leaves the most recent state recoverable. We can't
-  // await async work here, but saveDraft kicks off the IDB write
-  // immediately and most browsers will let it complete.
+  // Flush when the page becomes hidden (fires earlier and more reliably than
+  // unload on mobile), with beforeunload/pagehide as final best-effort signals.
   useEffect(() => {
-    const onBeforeUnload = () => {
+    const flushLatestDraft = () => {
       if (!dirtyRef.current) return;
+      if (draftSaveInFlightRef.current || projectSaveInFlightRef.current) return;
+      if (isStorageCriticalOperationActive()) return;
+      const revision = projectRevisionRef.current;
+      draftSaveInFlightRef.current = true;
       try {
-        countPerf("autosaveAttempts", 1, { kind: "beforeunload-draft" });
-        saveDraft(projectRef.current);
+        countPerf("autosaveAttempts", 1, { kind: "lifecycle-draft" });
+        void saveDraft(projectRef.current)
+          .then(() => {
+            savedDraftRevisionRef.current = Math.max(
+              savedDraftRevisionRef.current,
+              revision,
+            );
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            draftSaveInFlightRef.current = false;
+          });
       } catch {
-        /* ignore */
+        draftSaveInFlightRef.current = false;
       }
     };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushLatestDraft();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", flushLatestDraft);
+    window.addEventListener("beforeunload", flushLatestDraft);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", flushLatestDraft);
+      window.removeEventListener("beforeunload", flushLatestDraft);
+    };
   }, []);
 
   const handleDroppedAudioFiles = (files: File[]) => {
@@ -1167,10 +1230,14 @@ function Studio() {
         <div className="hidden" aria-hidden>
           <Header />
         </div>
-        <MobileStudio />
-        <Suspense fallback={null}>
-          <HelpDialog />
+        <Suspense fallback={<StudioPanelLoader label="Loading mobile studio…" />}>
+          <MobileStudio />
         </Suspense>
+        {helpDialogOpen && (
+          <Suspense fallback={null}>
+            <HelpDialog />
+          </Suspense>
+        )}
         <StatusToast />
         <DropZone onFiles={handleDroppedAudioFiles} />
         <PendingSampleHost />
@@ -1223,11 +1290,19 @@ function Studio() {
       )}
       <TransportBar />
       {/* Performance Mode overlay — rendered above everything else */}
-      <PerformanceModePanel />
-      <PerformancePadScreen
-        open={padScreenOpen}
-        onClose={() => setPadScreenOpen(false)}
-      />
+      {performanceOpen && (
+        <Suspense fallback={null}>
+          <PerformanceModePanel />
+        </Suspense>
+      )}
+      {padScreenOpen && (
+        <Suspense fallback={null}>
+          <PerformancePadScreen
+            open
+            onClose={() => setPadScreenOpen(false)}
+          />
+        </Suspense>
+      )}
       <div className="flex flex-1 overflow-hidden">
         {/* Left browser: inline on desktop, drawer trigger on tablet. */}
         {showInlineLeft ? (
@@ -1367,44 +1442,54 @@ function Studio() {
         </>
       )}
 
-      <Suspense fallback={null}>
-        <HelpDialog />
-      </Suspense>
+      {helpDialogOpen && (
+        <Suspense fallback={null}>
+          <HelpDialog />
+        </Suspense>
+      )}
       <StatusToast />
       <PwaUpdateToast />
       <DropZone onFiles={handleDroppedAudioFiles} />
       <PendingSampleHost />
       <StudioFooter />
 
-      {/* Corruption recovery — blocks all interaction until resolved */}
-      <CorruptionRecoveryDialog
-        open={!!corruptionInfo}
-        rawJson={corruptionInfo?.rawJson ?? null}
-        onRestoreAutosave={onCorruptionRestoreAutosave}
-        onStartFresh={onCorruptionStartFresh}
-      />
+      <Suspense fallback={null}>
+        {/* Corruption recovery — blocks all interaction until resolved */}
+        {corruptionInfo && (
+          <CorruptionRecoveryDialog
+            open
+            rawJson={corruptionInfo.rawJson}
+            onRestoreAutosave={onCorruptionRestoreAutosave}
+            onStartFresh={onCorruptionStartFresh}
+          />
+        )}
 
-      {/* Missing samples wizard */}
-      <MissingSamplesDialog
-        open={missingSamplesOpen && missingSamples.length > 0}
-        entries={missingSamples}
-        onClose={() => {
-          setMissingSamplesOpen(false);
-          setMissingSamples([]);
-          clearBootstrapResult("missingSamples");
-        }}
-        onMuteTrack={(sampleId) => {
-          const tracks = getStore().state.project.tracks.map((t) => {
-            const hasMissing = t.audioClips.some((c) => c.id === sampleId);
-            if (hasMissing) return { ...t, muted: true };
-            return t;
-          });
-          getStore().patchProject({ tracks });
-        }}
-      />
+        {/* Missing samples wizard */}
+        {missingSamplesOpen && missingSamples.length > 0 && (
+          <MissingSamplesDialog
+            open
+            entries={missingSamples}
+            onClose={() => {
+              setMissingSamplesOpen(false);
+              setMissingSamples([]);
+              clearBootstrapResult("missingSamples");
+            }}
+            onMuteTrack={(sampleId) => {
+              const tracks = getStore().state.project.tracks.map((t) => {
+                const hasMissing = t.audioClips.some((c) => c.id === sampleId);
+                if (hasMissing) return { ...t, muted: true };
+                return t;
+              });
+              getStore().patchProject({ tracks });
+            }}
+          />
+        )}
 
-      {/* Changelog — auto-opens on version bump */}
-      <ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} />
+        {/* Changelog — auto-opens on version bump */}
+        {changelogOpen && (
+          <ChangelogDialog open onOpenChange={setChangelogOpen} />
+        )}
+      </Suspense>
     </div>
   );
 }
@@ -1522,14 +1607,25 @@ function CollapsedRail({
 
 function PendingSampleHost() {
   const pending = useStore((s) => s.pendingSample);
+  if (!pending) return null;
   return (
-    <SamplePreviewDialog
-      open={!!pending}
-      blob={pending?.blob ?? null}
-      defaultName={pending?.defaultName ?? "Sample"}
-      recordedTrackId={pending?.recordedTrackId}
-      onClose={() => getStore().set({ pendingSample: null })}
-    />
+    <Suspense fallback={null}>
+      <SamplePreviewDialog
+        open
+        blob={pending.blob}
+        defaultName={pending.defaultName}
+        recordedTrackId={pending.recordedTrackId}
+        onClose={() => getStore().set({ pendingSample: null })}
+      />
+    </Suspense>
+  );
+}
+
+function StudioPanelLoader({ label }: { label: string }) {
+  return (
+    <div className="h-full flex items-center justify-center bg-background font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+      {label}
+    </div>
   );
 }
 
@@ -1623,8 +1719,20 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
           </button>
         </div>
       )}
-      {instrument}
-      {isMelodic && <PianoRoll track={track} />}
+      <Suspense
+        fallback={
+          <div className="panel-inset rounded-md p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Loading instrument…
+          </div>
+        }
+      >
+        {instrument}
+      </Suspense>
+      {isMelodic && (
+        <Suspense fallback={null}>
+          <PianoRoll track={track} />
+        </Suspense>
+      )}
       {isMelodic && <PresetBrowser track={track} />}
       {isMelodic && <MelodicParams track={track} />}
       {track.kind !== "vocals" && <GroovePanel track={track} />}

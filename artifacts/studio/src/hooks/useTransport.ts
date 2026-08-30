@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
+import type { ReactNode } from "react";
 import * as Tone from "tone";
 import { audio } from "../lib/audio/engine";
 import { getStore, useStore, makeId } from "../store";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { startPerfTimer } from "../utils/performanceDiagnostics";
 import { firstPlayMark, firstPlayMeasure, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
+import { useSettings } from "../lib/settings";
 
 /**
  * Hook providing the play/pause/stop/record actions for the transport bar.
@@ -12,36 +22,27 @@ import { firstPlayMark, firstPlayMeasure, getFirstPlayFlags } from "../lib/perfo
  * behaviorally identical, and lets MIDI Learn invoke the same code paths.
  */
 
-export function useTransport() {
-  const audioUnlocked = useStore((s) => s.audioUnlocked);
-  const isPlaying = useStore((s) => s.isPlaying);
-  const panicRevision = useStore((s) => s.panicRevision);
-  const [projectSchedulesArmed, setProjectSchedulesArmed] = useState(false);
+export interface TransportActions {
+  play: () => Promise<void>;
+  pause: () => void;
+  stop: () => Promise<void>;
+  record: () => Promise<void>;
+}
 
-  // Fingerprint that changes only when clip structure or BPM changes —
-  // NOT on fader/mute/name edits. Prevents rescheduling audio on every
-  // slider move, which previously caused needless audio glitches.
-  const scheduleKey = useStore((s) => {
-    const p = s.project;
-    return (
-      s.transportScheduleRevision +
-      '|' +
-      p.bpm +
-      '|' +
-      p.tracks
-        .map(
-          (t) =>
-            t.id +
-            ':' +
-            t.noteClips
-              .map((c) => `${c.id}@${c.start}:${c.length}:${c.notes.length}`)
-              .join(',') +
-            '/' +
-            t.audioClips.map((c) => `${c.id}@${c.start}`).join(','),
-        )
-        .join(';')
-    );
-  });
+const TransportContext = createContext<TransportActions | null>(null);
+
+function useTransportController(): TransportActions {
+  const audioUnlocked = useStore((s) => s.audioUnlocked);
+  const panicRevision = useStore((s) => s.panicRevision);
+  const scheduleRevision = useStore((s) => s.transportScheduleRevision);
+  const bpm = useStore((s) => s.project.bpm);
+  const masterVolume = useStore((s) => s.project.masterVolume);
+  const loopEnabled = useStore((s) => s.project.loopEnabled);
+  const loopStartBeat = useStore((s) => s.project.loopStartBeat);
+  const loopEndBeat = useStore((s) => s.project.loopEndBeat);
+  const metronome = useStore((s) => s.project.metronome);
+  const globalSwing = useStore((s) => s.project.globalGroove?.swing ?? 0);
+  const metronomeVolume = useSettings((s) => s.metronomeVolume);
 
   // Separate mute/solo signal — cheap string comparison, no reschedule.
   const muteKey = useStore((s) =>
@@ -55,8 +56,24 @@ export function useTransport() {
     audioPlayers: [],
     audioIds: [],
   });
-  const leanPreflightKeyRef = useRef<string | null>(null);
+  const preparedRevisionRef = useRef<number | null>(null);
+  const preparationGenerationRef = useRef(0);
+  const preparationRef = useRef<{
+    revision: number;
+    promise: Promise<boolean>;
+  } | null>(null);
   const handledPanicRevisionRef = useRef(panicRevision);
+
+  // View-independent project → engine synchronization. Keeping this beside
+  // the sole transport owner makes desktop and mobile playback identical.
+  useEffect(() => { audio.setBpm(bpm); }, [bpm]);
+  useEffect(() => { audio.setMaster(masterVolume); }, [masterVolume]);
+  useEffect(() => {
+    audio.setLoop(loopEnabled, loopStartBeat, loopEndBeat);
+  }, [loopEnabled, loopStartBeat, loopEndBeat]);
+  useEffect(() => { audio.setMetronome(metronome); }, [metronome]);
+  useEffect(() => { audio.setMetronomeVolume(metronomeVolume); }, [metronomeVolume]);
+  useEffect(() => { audio.setSwing(globalSwing); }, [globalSwing]);
 
   const ensureUnlocked = useCallback(async () => {
     if (!audioUnlocked) {
@@ -69,35 +86,163 @@ export function useTransport() {
     }
   }, [audioUnlocked]);
 
-  const prepareLeanDrumPreflight = useCallback(() => {
-    if (projectSchedulesArmed || isPlaying) return;
-    if (leanPreflightKeyRef.current === scheduleKey) return;
-    const tracks = getStore().state.project.tracks;
-    const drumTracks = tracks.filter((t) => t.kind === "drums" && t.noteClips.length > 0);
-    if (drumTracks.length === 0) return;
-    firstPlayMark("project-schedule:lean-preflight:start", {
-      tracks: drumTracks.length,
-    });
-    audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
+  const clearProjectSchedules = useCallback(() => {
+    preparationGenerationRef.current += 1;
+    preparedRevisionRef.current = null;
+    audio.cancelScheduled([
+      ...scheduledRef.current.noteIds,
+      ...scheduledRef.current.audioIds,
+    ]);
     audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
-    const noteIds: number[] = [];
-    for (const t of drumTracks) {
-      audio.ensureTrack(t, {
-        mode: "lean",
-        reason: "lean-preflight",
-        allowHeavy: false,
-        deadlineMs: 50,
+    scheduledRef.current = { noteIds: [], audioPlayers: [], audioIds: [] };
+  }, []);
+
+  /** Build every audible voice and transport callback before playback starts.
+   * The old first-play path armed drums only, which made melodic and recorded
+   * audio clips silent on the first Play click. */
+  const prepareProjectSchedules = useCallback(async (): Promise<boolean> => {
+    const revision = getStore().state.transportScheduleRevision;
+    if (preparedRevisionRef.current === revision) return true;
+    if (audio.getPlaybackState() === "playing" || audio.getPlaybackState() === "starting") {
+      return false;
+    }
+    if (preparationRef.current?.revision === revision) {
+      return preparationRef.current.promise;
+    }
+
+    const generation = ++preparationGenerationRef.current;
+    const run = async () => {
+      const flags = getFirstPlayFlags();
+      firstPlayMark("project-schedule:run:start", {
+        revision,
+        disableProjectSchedules: flags.disableProjectSchedules,
+        disableTransportCallbacks: flags.disableTransportCallbacks,
+        disableGraphBuildOnPlay: flags.disableGraphBuildOnPlay,
+        useMinimalAudioGraph: flags.useMinimalAudioGraph,
       });
-      for (const c of t.noteClips) {
-        noteIds.push(...audio.scheduleClip(t, c));
+      if (flags.disableProjectSchedules || flags.disableTransportCallbacks) {
+        preparedRevisionRef.current = revision;
+        firstPlayMark("project-schedule:skipped");
+        return true;
+      }
+
+      const allTracks = getStore().state.project.tracks;
+      const tracks = flags.leanDrumValidation
+        ? allTracks.filter((track) => track.kind === "drums")
+        : allTracks;
+      const keepTrackIds = new Set(allTracks.map((track) => track.id));
+      const noteIds: number[] = [];
+      const audioPlayers: Tone.Player[] = [];
+      const audioIds: number[] = [];
+      const audioReady: Promise<void>[] = [];
+      const yieldToBrowser = () =>
+        new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      const cleanupPending = () => {
+        audio.cancelScheduled([...noteIds, ...audioIds]);
+        audio.disposeScheduledAudioPlayers(audioPlayers);
+      };
+
+      audio.cancelScheduled([
+        ...scheduledRef.current.noteIds,
+        ...scheduledRef.current.audioIds,
+      ]);
+      audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
+      scheduledRef.current = { noteIds: [], audioPlayers: [], audioIds: [] };
+
+      try {
+        for (const id of audio.getActiveTrackIds()) {
+          if (!keepTrackIds.has(id)) {
+            audio.removeTrack(id);
+            await yieldToBrowser();
+          }
+        }
+
+        for (const track of tracks) {
+          if (generation !== preparationGenerationRef.current) {
+            cleanupPending();
+            return false;
+          }
+          firstPlayMark("project-schedule:track", {
+            trackId: track.id,
+            kind: track.kind,
+            noteClips: track.noteClips.length,
+            audioClips: track.audioClips.length,
+          });
+          audio.ensureTrack(track, {
+            mode: track.kind === "drums" ? "lean" : "tone",
+            reason: "project-schedule",
+            allowHeavy: track.kind !== "drums",
+            deadlineMs: track.kind === "drums" ? 50 : undefined,
+          });
+          for (const clip of track.noteClips) {
+            noteIds.push(...audio.scheduleClip(track, clip));
+          }
+          for (const clip of track.audioClips) {
+            if (!clip.blob) continue;
+            const scheduled = audio.scheduleAudioClip(track, clip);
+            if (scheduled) {
+              audioIds.push(scheduled.id);
+              audioPlayers.push(scheduled.player);
+              audioReady.push(scheduled.ready);
+            }
+          }
+          await yieldToBrowser();
+        }
+
+        // Solo is a project-wide decision; apply it once with the complete set
+        // after every track voice exists so ordering cannot affect audibility.
+        audio.refreshAllMutes(allTracks);
+
+        if (audioReady.length > 0) {
+          let timeoutId: number | null = null;
+          try {
+            await Promise.race([
+              Promise.all(audioReady).then(() => undefined),
+              new Promise<never>((_, reject) => {
+                timeoutId = window.setTimeout(
+                  () => reject(new Error("Audio clip preparation timed out.")),
+                  15_000,
+                );
+              }),
+            ]);
+          } finally {
+            if (timeoutId !== null) window.clearTimeout(timeoutId);
+          }
+        }
+
+        if (
+          generation !== preparationGenerationRef.current ||
+          getStore().state.transportScheduleRevision !== revision
+        ) {
+          cleanupPending();
+          return false;
+        }
+
+        scheduledRef.current = { noteIds, audioPlayers, audioIds };
+        preparedRevisionRef.current = revision;
+        firstPlayMark("project-schedule:run:complete", {
+          revision,
+          noteIds: noteIds.length,
+          audioIds: audioIds.length,
+          audioPlayers: audioPlayers.length,
+        });
+        return true;
+      } catch (error) {
+        cleanupPending();
+        throw error;
+      }
+    };
+
+    const promise = run();
+    preparationRef.current = { revision, promise };
+    try {
+      return await promise;
+    } finally {
+      if (preparationRef.current?.promise === promise) {
+        preparationRef.current = null;
       }
     }
-    scheduledRef.current = { noteIds, audioPlayers: [], audioIds: [] };
-    leanPreflightKeyRef.current = scheduleKey;
-    firstPlayMark("project-schedule:lean-preflight:complete", {
-      noteIds: noteIds.length,
-    });
-  }, [isPlaying, projectSchedulesArmed, scheduleKey]);
+  }, []);
 
   const play = useCallback(async () => {
     const endTiming = startPerfTimer("transport-play");
@@ -113,7 +258,11 @@ export function useTransport() {
         transportState: audio.state,
         playbackState: audio.getPlaybackState(),
       });
-      prepareLeanDrumPreflight();
+      const prepared = await prepareProjectSchedules();
+      if (!prepared) {
+        getStore().setStatus("Playback changed while preparing. Press Play again.", "warn");
+        return;
+      }
       const started = audio.play();
       firstPlayMark("useTransport.play:after-engine-play", {
         started,
@@ -122,17 +271,13 @@ export function useTransport() {
       });
       if (started) {
         getStore().set({ isPlaying: true });
-        if (getFirstPlayFlags().leanDrumValidation) {
-          firstPlayMark("project-schedule:lean-validation-skip-full-arm");
-        } else {
-          window.setTimeout(() => {
-            firstPlayMark("project-schedule:armed-after-first-play");
-            setProjectSchedulesArmed(true);
-          }, 0);
-        }
       } else {
         getStore().setStatus("Audio is still starting. Try Play again in a moment.", "warn");
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      firstPlayMark("useTransport.play:error", { message });
+      getStore().setStatus(`Playback preparation failed: ${message}`, "error");
     } finally {
       firstPlayMeasure("useTransport.play", startedAt, performance.now(), {
         transportState: audio.state,
@@ -140,7 +285,7 @@ export function useTransport() {
       });
       endTiming();
     }
-  }, [audioUnlocked, ensureUnlocked, prepareLeanDrumPreflight]);
+  }, [audioUnlocked, ensureUnlocked, prepareProjectSchedules]);
 
   const pause = useCallback(() => {
     audio.pause();
@@ -213,6 +358,16 @@ export function useTransport() {
       getStore().setStatus("Arm a track (record dot on the channel) to record.", "warn");
       return;
     }
+    try {
+      if (!(await prepareProjectSchedules())) {
+        getStore().setStatus("Project changed while preparing to record. Try again.", "warn");
+        return;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      getStore().setStatus(`Recording preparation failed: ${message}`, "error");
+      return;
+    }
 
     const startRecording = async () => {
       const beat = audio.positionBeats();
@@ -281,139 +436,47 @@ export function useTransport() {
         getStore().setStatus("Audio is still starting. Try Record again in a moment.", "warn");
       }
     }
-  }, [ensureUnlocked]);
+  }, [ensureUnlocked, prepareProjectSchedules]);
 
   useEffect(() => {
     if (panicRevision !== handledPanicRevisionRef.current) {
       handledPanicRevisionRef.current = panicRevision;
-      setProjectSchedulesArmed(false);
-      leanPreflightKeyRef.current = null;
-      audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
-      audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
-      scheduledRef.current = { noteIds: [], audioPlayers: [], audioIds: [] };
+      clearProjectSchedules();
       firstPlayMark("project-schedule:panic-reset");
-      return;
     }
-    if (!audioUnlocked) {
-      firstPlayMark("project-schedule:deferred-until-audio-unlocked");
-      return;
+  }, [clearProjectSchedules, panicRevision]);
+
+  // A scheduling-relevant edit invalidates captured callbacks. Preparation is
+  // intentionally deferred until the next Play so fader/UI activity stays
+  // light and playback never rebuilds graphs in the middle of a callback.
+  useEffect(() => {
+    if (preparedRevisionRef.current !== scheduleRevision) {
+      preparationGenerationRef.current += 1;
+      preparedRevisionRef.current = null;
     }
-    if (!projectSchedulesArmed) {
-      firstPlayMark("project-schedule:deferred-until-first-play");
-      return;
-    }
-    if (isPlaying || audio.getPlaybackState() === "playing") {
-      firstPlayMark("project-schedule:deferred-while-playing", {
-        isPlaying,
-        playbackState: audio.getPlaybackState(),
-      });
-      return;
-    }
-    let cancelled = false;
-    const noteIds: number[] = [];
-    const audioPlayers: Tone.Player[] = [];
-    const audioIds: number[] = [];
+  }, [scheduleRevision]);
 
-    const yieldToBrowser = () =>
-      new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-
-    const run = async () => {
-      const flags = getFirstPlayFlags();
-      firstPlayMark("project-schedule:run:start", {
-        disableProjectSchedules: flags.disableProjectSchedules,
-        disableTransportCallbacks: flags.disableTransportCallbacks,
-        disableGraphBuildOnPlay: flags.disableGraphBuildOnPlay,
-        useMinimalAudioGraph: flags.useMinimalAudioGraph,
-      });
-      if (flags.disableProjectSchedules || flags.disableTransportCallbacks) {
-        firstPlayMark("project-schedule:skipped");
-        return;
-      }
-      const tracks = getStore().state.project.tracks;
-      const keepTrackIds = new Set(tracks.map((t) => t.id));
-      for (const id of audio.getActiveTrackIds()) {
-        if (cancelled) break;
-        if (!keepTrackIds.has(id)) {
-          audio.removeTrack(id);
-          await yieldToBrowser();
-        }
-      }
-      audio.cancelScheduled([...scheduledRef.current.noteIds, ...scheduledRef.current.audioIds]);
-      audio.disposeScheduledAudioPlayers(scheduledRef.current.audioPlayers);
-
-      for (const t of tracks) {
-        if (cancelled) break;
-        firstPlayMark("project-schedule:track", {
-          trackId: t.id,
-          kind: t.kind,
-          noteClips: t.noteClips.length,
-          audioClips: t.audioClips.length,
-        });
-        try {
-          audio.ensureTrack(t, {
-            mode: t.kind === "drums" ? "lean" : "tone",
-            reason: "project-schedule",
-            allowHeavy: t.kind !== "drums",
-            deadlineMs: t.kind === "drums" ? 50 : undefined,
-          });
-        } catch (err) {
-          firstPlayMark("project-schedule:ensureTrack-error", {
-            trackId: t.id,
-            message: err instanceof Error ? err.message : String(err),
-          });
-          throw err;
-        }
-        for (const c of t.noteClips) {
-          if (cancelled) break;
-          noteIds.push(...audio.scheduleClip(t, c));
-        }
-        for (const c of t.audioClips) {
-          if (cancelled) break;
-          if (c.blob) {
-            const r = audio.scheduleAudioClip(t, c);
-            if (r) {
-              audioIds.push(r.id);
-              audioPlayers.push(r.player);
-            }
-          }
-        }
-        await yieldToBrowser();
-      }
-
-      if (cancelled) {
-        audio.cancelScheduled([...noteIds, ...audioIds]);
-        audio.disposeScheduledAudioPlayers(audioPlayers);
-        return;
-      }
-      scheduledRef.current = { noteIds, audioPlayers, audioIds };
-      firstPlayMark("project-schedule:run:complete", {
-        noteIds: noteIds.length,
-        audioIds: audioIds.length,
-        audioPlayers: audioPlayers.length,
-      });
-    };
-
-    const timeoutId = window.setTimeout(() => {
-      void run().catch((err) => {
-        firstPlayMark("project-schedule:run:error", {
-          message: err instanceof Error ? err.message : String(err),
-        });
-        getStore().setStatus("Playback prep failed. Press Panic, then try again.", "error");
-      });
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-      audio.cancelScheduled([...noteIds, ...audioIds]);
-      audio.disposeScheduledAudioPlayers(audioPlayers);
-    };
-  }, [audioUnlocked, isPlaying, panicRevision, projectSchedulesArmed, scheduleKey]);
+  useEffect(() => clearProjectSchedules, [clearProjectSchedules]);
 
   // Apply mute/solo to engine only when those flags actually change.
   useEffect(() => {
     audio.refreshAllMutes(getStore().state.project.tracks);
   }, [muteKey]);
 
-  return { play, pause, stop, record };
+  return useMemo(() => ({ play, pause, stop, record }), [pause, play, record, stop]);
+}
+
+/** Owns the sole project scheduler for the mounted Studio. All desktop,
+ * mobile, keyboard, and MIDI controls consume the same action instance. */
+export function TransportProvider({ children }: { children: ReactNode }) {
+  const actions = useTransportController();
+  return createElement(TransportContext.Provider, { value: actions }, children);
+}
+
+export function useTransport(): TransportActions {
+  const actions = useContext(TransportContext);
+  if (!actions) {
+    throw new Error("useTransport must be used within TransportProvider");
+  }
+  return actions;
 }

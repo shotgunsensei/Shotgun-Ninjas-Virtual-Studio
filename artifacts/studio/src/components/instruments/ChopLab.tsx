@@ -97,8 +97,6 @@ export function ChopLab({ track }: { track: Track }) {
         audioBufferRef.current = decoded;
         setSampleName(cl.sampleName ?? null);
         setRelinkNeeded(false);
-        // Re-seed the engine with the restored markers + settings.
-        engine.loadBuffer(decoded, cl.markers, cl.sliceSettings);
         getStore().setStatus(`Chop Lab restored: ${cl.sampleName ?? "sample"}`, "info");
       } catch {
         setRelinkNeeded(true);
@@ -617,6 +615,9 @@ function WaveformCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragIndexRef = useRef<number | null>(null);
+  const dragTimeRef = useRef<number | null>(null);
+  const pendingMarkersRef = useRef<number[] | null>(null);
+  const ignorePointerUpRef = useRef(false);
   const isDragging = useRef(false);
 
   const duration = audioBuffer.duration;
@@ -671,8 +672,11 @@ function WaveformCanvas({
     ctx.lineTo(W, H / 2);
     ctx.stroke();
 
-    // Slice markers.
-    markers.forEach((t, i) => {
+    // Slice markers. During a drag this uses a local preview array so moving a
+    // marker does not rebuild the audio engine or write project state on every
+    // pointer event. The store receives one update when the drag commits.
+    const displayMarkers = pendingMarkersRef.current ?? markers;
+    displayMarkers.forEach((t, i) => {
       const x = Math.round((t / duration) * W);
       ctx.strokeStyle = "#facc15";
       ctx.lineWidth = 1.5;
@@ -693,6 +697,7 @@ function WaveformCanvas({
 
   // Resize + redraw.
   useEffect(() => {
+    pendingMarkersRef.current = null;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ro = new ResizeObserver(() => {
@@ -721,10 +726,11 @@ function WaveformCanvas({
     return -1;
   }
 
-  const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
     if (e.button === 2) {
       // Right-click: delete marker.
+      ignorePointerUpRef.current = true;
       const idx = markerIndexNear(canvas, e.clientX);
       if (idx !== -1) getStore().deleteChopLabMarker(idx);
       return;
@@ -732,28 +738,54 @@ function WaveformCanvas({
     const idx = markerIndexNear(canvas, e.clientX);
     if (idx !== -1) {
       dragIndexRef.current = idx;
+      dragTimeRef.current = markers[idx];
+      pendingMarkersRef.current = markers.slice();
       isDragging.current = false;
+      canvas.setPointerCapture(e.pointerId);
     } else {
       dragIndexRef.current = null;
     }
   };
 
-  const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (dragIndexRef.current === null) return;
     isDragging.current = true;
     const t = timeFromX(canvasRef.current!, e.clientX);
-    getStore().moveChopLabMarker(dragIndexRef.current, t);
+    dragTimeRef.current = t;
+    const preview = pendingMarkersRef.current ?? markers.slice();
+    preview[dragIndexRef.current] = t;
+    pendingMarkersRef.current = preview;
     draw();
   };
 
-  const onMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const clearDrag = () => {
+    dragIndexRef.current = null;
+    dragTimeRef.current = null;
+    pendingMarkersRef.current = null;
+    isDragging.current = false;
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (ignorePointerUpRef.current) {
+      ignorePointerUpRef.current = false;
+      clearDrag();
+      return;
+    }
+    try {
+      if (canvasRef.current?.hasPointerCapture(e.pointerId)) {
+        canvasRef.current.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Pointer capture may already have been released by the browser.
+    }
     if (dragIndexRef.current !== null) {
-      if (!isDragging.current) {
+      if (isDragging.current && dragTimeRef.current !== null) {
+        getStore().moveChopLabMarker(dragIndexRef.current, dragTimeRef.current);
+      } else {
         // Was a click on existing marker — select slice.
         getStore().patchChopLab({ activeSliceIndex: dragIndexRef.current });
       }
-      dragIndexRef.current = null;
-      isDragging.current = false;
+      clearDrag();
     } else {
       // Click on empty space: add marker.
       const t = timeFromX(canvasRef.current!, e.clientX);
@@ -763,14 +795,20 @@ function WaveformCanvas({
     }
   };
 
+  const onPointerCancel = () => {
+    clearDrag();
+    draw();
+  };
+
   return (
     <canvas
       ref={canvasRef}
       className="w-full h-20 rounded-md cursor-crosshair"
       style={{ imageRendering: "pixelated" }}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onContextMenu={(e) => e.preventDefault()}
       title="Click to add marker · Drag to move · Right-click to delete"
     />

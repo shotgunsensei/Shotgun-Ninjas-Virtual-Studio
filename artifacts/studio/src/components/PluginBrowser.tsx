@@ -18,7 +18,10 @@ import { Power, AlertTriangle, Search, PackagePlus, X, Loader2, ExternalLink } f
 import { useStore, getStore } from "../store";
 import { pluginRegistry } from "../lib/plugins/registry";
 import { PLUGIN_ID_TO_FX_MODULE } from "../lib/plugins/builtins";
-import { loadWamPlugin } from "../lib/plugins/wam-loader";
+import {
+  loadWamPlugin,
+  REMOTE_WAM_LOADING_SUPPORTED,
+} from "../lib/plugins/wam-loader";
 import type { PluginManifest } from "../lib/plugins/types";
 import type { DrumKitId, FxModuleId } from "../types";
 
@@ -158,16 +161,18 @@ function InstrumentPluginRow({ manifest }: { manifest: PluginManifest }) {
         store.setStatus("Select a melodic track to apply this preset.", "warn");
         return;
       }
-      store.patchTrack(selectedTrackId, { presetId });
-      store.setStatus(`Preset: ${manifest.name}`, "info");
+      if (store.applyMelodicPreset(selectedTrackId, presetId)) {
+        store.setStatus(`Preset: ${manifest.name}`, "info");
+      }
     } else if (manifest.id.startsWith("instrument.drumkit.")) {
       const kitId = manifest.id.replace("instrument.drumkit.", "") as DrumKitId;
       if (track.kind !== "drums") {
         store.setStatus("Select a drum track to change kits.", "warn");
         return;
       }
-      store.patchTrack(selectedTrackId, { kitId });
-      store.setStatus(`Kit: ${manifest.name}`, "info");
+      if (store.applyDrumKit(selectedTrackId, kitId)) {
+        store.setStatus(`Kit: ${manifest.name}`, "info");
+      }
     }
   };
 
@@ -339,7 +344,7 @@ function WamLoadDialog({
         <div className="flex items-center gap-2">
           <PackagePlus className="w-3.5 h-3.5 text-primary" />
           <span className="font-mono text-[11px] text-foreground font-medium">
-            Load WAM Plugin
+            External WAM Status
           </span>
         </div>
         <button
@@ -353,9 +358,9 @@ function WamLoadDialog({
 
       <div className="flex-1 flex flex-col gap-3 p-3">
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          Enter the URL of a WAM2-compatible ES module. The plugin will be
-          fetched, its descriptor read, and it will appear in the browser
-          immediately.
+          Remote WAM loading is paused until the Studio has a genuinely
+          isolated audio-plugin host. Built-in instruments and effects remain
+          fully available.
         </p>
 
         <div className="space-y-1">
@@ -375,13 +380,13 @@ function WamLoadDialog({
               }
             }}
             onKeyDown={handleKey}
-            placeholder="https://example.com/my-wam-plugin/index.js"
+            placeholder="Remote plugin URLs are disabled during stabilization"
             className={`w-full bg-background/60 border rounded px-2 py-1.5 text-[11px] font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none transition-colors ${
               state === "error"
                 ? "border-red-500/60 focus:border-red-500"
                 : "border-border focus:border-primary/50"
             }`}
-            disabled={state === "loading"}
+            disabled={!REMOTE_WAM_LOADING_SUPPORTED || state === "loading"}
           />
           {state === "error" && (
             <div className="flex items-start gap-1.5 text-[9px] text-red-400 font-mono leading-snug">
@@ -393,13 +398,13 @@ function WamLoadDialog({
 
         <div className="bg-muted/20 border border-border/40 rounded p-2 space-y-0.5">
           <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
-            What to expect
+            Why it is paused
           </div>
           <div className="text-[9px] text-muted-foreground/70 space-y-0.5">
-            <p>• The module must export a WAM2 <code className="text-muted-foreground">descriptor</code> object.</p>
-            <p>• Parameters are read from <code className="text-muted-foreground">getParameterInfo()</code>.</p>
-            <p>• Missing fields fall back to URL-derived defaults.</p>
-            <p>• The host sandbox isolates factory errors from the engine.</p>
+            <p>• A URL-based module otherwise runs with this page's permissions.</p>
+            <p>• The previous metadata loader did not route or process audio.</p>
+            <p>• A try/catch is an error boundary, not a security sandbox.</p>
+            <p>• Re-enabling requires isolation, integrity, routing, bypass, and cleanup.</p>
           </div>
         </div>
 
@@ -413,7 +418,7 @@ function WamLoadDialog({
           </button>
           <button
             onClick={handleLoad}
-            disabled={!url.trim() || state === "loading"}
+            disabled={!REMOTE_WAM_LOADING_SUPPORTED || !url.trim() || state === "loading"}
             className="flex-1 px-3 py-1.5 bg-primary/20 border border-primary/40 hover:bg-primary/30 rounded font-mono text-[11px] text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             {state === "loading" ? (
@@ -424,7 +429,7 @@ function WamLoadDialog({
             ) : (
               <>
                 <PackagePlus className="w-3 h-3" />
-                Load Plugin
+                Unavailable
               </>
             )}
           </button>
@@ -600,10 +605,10 @@ export function PluginBrowser() {
         <button
           onClick={() => setShowWamDialog(true)}
           className="flex items-center gap-1 px-2 py-0.5 rounded border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary font-mono text-[9px] uppercase tracking-wider transition-colors"
-          title="Load an external WAM2 plugin from a URL"
+          title="View external WAM security status"
         >
           <PackagePlus className="w-2.5 h-2.5" />
-          Load WAM
+          WAM Status
         </button>
       </div>
     </div>

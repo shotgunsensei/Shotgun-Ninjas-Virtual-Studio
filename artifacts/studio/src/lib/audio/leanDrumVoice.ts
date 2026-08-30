@@ -12,6 +12,7 @@ export interface LeanDrumVoice {
   readonly trackId: string;
   trigger: (piece: DrumPiece, time: number, velocity: number) => void;
   applyTrack: (track: Track) => void;
+  setAudible: (audible: boolean) => void;
   applySoundParams: (partial: Partial<SoundParams>) => void;
   stopAll: () => void;
   dispose: () => void;
@@ -79,9 +80,18 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
   const filter = ctx.createBiquadFilter();
   const noiseBuffer = makeNoiseBuffer(ctx);
   let disposed = false;
-  let muted = false;
+  let audible = true;
   let volume = 1;
-  const activeSources = new Set<AudioScheduledSourceNode>();
+  let routingAvailable = false;
+  interface ActiveHit {
+    source: AudioScheduledSourceNode;
+    sourceGain: GainNode;
+    pieceFilter: BiquadFilterNode;
+    piece: DrumPiece;
+    cleaned: boolean;
+  }
+  const activeHits = new Set<ActiveHit>();
+  const MAX_ACTIVE_HITS = 64;
 
   filter.type = "lowpass";
   filter.frequency.value = 18_000;
@@ -89,18 +99,37 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
   pan.connect(filter);
   try {
     filter.connect(getNativeInput(destination));
+    routingAvailable = true;
   } catch (err) {
-    firstPlayMark("lean-drum-voice:master-connect-fallback", {
+    firstPlayMark("lean-drum-voice:master-connect-failed", {
       trackId: track.id,
       message: err instanceof Error ? err.message : String(err),
     });
-    filter.connect(ctx.destination);
   }
 
+  const cleanup = (hit: ActiveHit, forced = false) => {
+    if (hit.cleaned) return;
+    hit.cleaned = true;
+    activeHits.delete(hit);
+    try {
+      hit.source.onended = null;
+      hit.source.disconnect();
+      hit.sourceGain.disconnect();
+      hit.pieceFilter.disconnect();
+      recordLeanDrumTrace("source-disconnected", {
+        trackId: track.id,
+        piece: hit.piece,
+        forced,
+      });
+    } catch {
+      // ignore one-shot cleanup races
+    }
+  };
+
   const applyTrack = (nextTrack: Track) => {
-    muted = nextTrack.muted;
+    audible = !nextTrack.muted;
     volume = nextTrack.volume;
-    output.gain.value = muted ? 0 : Math.max(0, Math.min(1, volume));
+    output.gain.value = audible ? Math.max(0, Math.min(1, volume)) : 0;
     pan.pan.value = Math.max(-1, Math.min(1, nextTrack.pan));
     if (nextTrack.sound) voice.applySoundParams(nextTrack.sound);
   };
@@ -109,10 +138,12 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
     mode: "lean",
     trackId: track.id,
     trigger: (piece, time, velocity) => {
-      if (disposed || muted || velocity <= 0.001) return;
+      if (disposed || !routingAvailable || !audible || velocity <= 0.001) return;
       recordLeanDrumTrace("hit-triggered", { trackId: track.id, piece });
       const decay = PIECE_DECAY[piece] ?? 0.12;
-      const amp = Math.max(0, Math.min(1, velocity)) * Math.max(0, Math.min(1, volume));
+      // Track volume is applied once by the shared output node. Per-hit gain
+      // contains velocity only, avoiding the former volume-squared response.
+      const amp = Math.max(0, Math.min(1, velocity));
       const sourceGain = ctx.createGain();
       const pieceFilter = ctx.createBiquadFilter();
       sourceGain.gain.setValueAtTime(Math.max(0.0001, amp), time);
@@ -123,28 +154,37 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
       pieceFilter.connect(sourceGain);
       sourceGain.connect(output);
 
-      const cleanup = (source?: AudioScheduledSourceNode) => {
-        if (source) activeSources.delete(source);
-        try {
-          source?.disconnect();
-          sourceGain.disconnect();
-          pieceFilter.disconnect();
-          recordLeanDrumTrace("source-disconnected", { trackId: track.id, piece });
-        } catch {
-          // ignore one-shot cleanup races
+      const registerHit = (source: AudioScheduledSourceNode) => {
+        const hit: ActiveHit = {
+          source,
+          sourceGain,
+          pieceFilter,
+          piece,
+          cleaned: false,
+        };
+        activeHits.add(hit);
+        source.onended = () => {
+          recordLeanDrumTrace("source-ended", { trackId: track.id, piece });
+          cleanup(hit);
+        };
+        if (activeHits.size > MAX_ACTIVE_HITS) {
+          const oldest = activeHits.values().next().value as ActiveHit | undefined;
+          if (oldest) {
+            try {
+              oldest.source.stop();
+            } catch {
+              // already stopped
+            }
+            cleanup(oldest, true);
+          }
         }
       };
 
       if (usesNoise(piece)) {
         const src = ctx.createBufferSource();
-        activeSources.add(src);
+        registerHit(src);
         recordLeanDrumTrace("source-created", { trackId: track.id, piece, type: "AudioBufferSourceNode" });
         src.buffer = noiseBuffer;
-        src.onended = () => {
-          src.onended = null;
-          recordLeanDrumTrace("source-ended", { trackId: track.id, piece, type: "AudioBufferSourceNode" });
-          cleanup(src);
-        };
         src.connect(pieceFilter);
         src.start(time);
         src.stop(time + decay);
@@ -152,7 +192,7 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
       }
 
       const osc = ctx.createOscillator();
-      activeSources.add(osc);
+      registerHit(osc);
       recordLeanDrumTrace("source-created", { trackId: track.id, piece, type: "OscillatorNode" });
       osc.type = piece === "kick" ? "sine" : "triangle";
       const startFreq = PIECE_FREQ[piece] ?? 90;
@@ -160,16 +200,19 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
       if (piece === "kick") {
         osc.frequency.exponentialRampToValueAtTime(Math.max(30, startFreq * 0.45), time + 0.08);
       }
-      osc.onended = () => {
-        osc.onended = null;
-        recordLeanDrumTrace("source-ended", { trackId: track.id, piece, type: "OscillatorNode" });
-        cleanup(osc);
-      };
       osc.connect(pieceFilter);
       osc.start(time);
       osc.stop(time + decay);
     },
     applyTrack,
+    setAudible: (nextAudible) => {
+      audible = nextAudible;
+      output.gain.setTargetAtTime(
+        audible ? Math.max(0, Math.min(1, volume)) : 0,
+        ctx.currentTime,
+        0.01,
+      );
+    },
     applySoundParams: (partial) => {
       if (partial.cutoff !== undefined) {
         filter.frequency.setTargetAtTime(cutoffNormToHz(partial.cutoff), ctx.currentTime, 0.02);
@@ -179,20 +222,13 @@ export function createLeanDrumVoice(track: Track, destination: Tone.InputNode): 
       }
     },
     stopAll: () => {
-      for (const source of Array.from(activeSources)) {
+      for (const hit of Array.from(activeHits)) {
         try {
-          source.onended = null;
-          source.stop();
+          hit.source.stop();
         } catch {
           // ignore sources that already ended
         }
-        try {
-          source.disconnect();
-        } catch {
-          // ignore disconnect races
-        }
-        activeSources.delete(source);
-        recordLeanDrumTrace("source-disconnected", { trackId: track.id, forced: true });
+        cleanup(hit, true);
       }
     },
     dispose: () => {

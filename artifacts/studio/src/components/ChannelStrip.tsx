@@ -1,6 +1,17 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import * as Icons from "lucide-react";
-import { Volume2, Trash2, Copy, Mic, Sliders } from "lucide-react";
+import type { ComponentType } from "react";
+import {
+  AudioWaveform,
+  Copy,
+  Drum,
+  Guitar,
+  Mic,
+  Music,
+  Piano,
+  Sliders,
+  Trash2,
+  Volume2,
+} from "lucide-react";
 import { StereoMeter } from "./Meter";
 import { MasterStrip } from "./MasterStrip";
 import { Slider } from "@/components/ui/slider";
@@ -75,6 +86,15 @@ const PRESETS: Record<InstrumentKind, { value: AnyPreset; label: string }[]> = {
 };
 
 const DEFAULT_EQ: TrackEq = { low: 0, mid: 0, high: 0, hpfOn: false, hpfHz: 80 };
+
+const TRACK_ICONS: Readonly<Record<string, ComponentType<{ className?: string }>>> = {
+  Piano,
+  Guitar,
+  Drum,
+  AudioWaveform,
+  Mic,
+  Music,
+};
 
 function kindLabel(k: InstrumentKind) {
   return k.charAt(0).toUpperCase() + k.slice(1);
@@ -156,9 +176,7 @@ const ChannelStrip = memo(function ChannelStrip({
 
   const color = track.meta?.color ?? "#7dd3fc";
   const iconName = track.meta?.icon ?? "Music";
-  const Icon =
-    (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[iconName] ??
-    Icons.Music;
+  const Icon = TRACK_ICONS[iconName] ?? Music;
   const sourceLabel = track.meta?.sourceLabel ?? "MIDI";
   const eq = track.eq ?? DEFAULT_EQ;
   const fxCount = fxRackEnabledCount(track);

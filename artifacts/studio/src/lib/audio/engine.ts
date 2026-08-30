@@ -14,6 +14,7 @@ import type {
   ModulationRouting,
   ModulationSource,
   NoteClip,
+  Project,
   SendBusId,
   SoundParams,
   Track,
@@ -41,7 +42,13 @@ import { buildKit, cutoffNormToHz, findKit, type KitVoice } from "./sounds/kits"
 import { buildPresetVoice, findPreset } from "./sounds/presets";
 import { tryLoadMelodicSampler } from "./sounds/samples";
 import { applyGroove, getGroove, shouldFlam, shouldGhost } from "./sounds/groove";
-import { getChopEngine } from "./chopEngine";
+import {
+  configureChopEngineOutput,
+  disconnectChopEngineOutput,
+  disposeChopEngine,
+  getChopEngine,
+  stopChopEngine,
+} from "./chopEngine";
 import { createLeanDrumVoice, type LeanDrumVoice } from "./leanDrumVoice";
 import {
   startPerfTimer,
@@ -58,7 +65,7 @@ import {
 import { recordLeanDrumTrace, trackToneCreate, trackToneDispose } from "../performance/audioNodeTrace";
 import { markStartupSound } from "../performance/startupSoundTrace";
 
-const AUDIO_WORKLETS_ENABLED = import.meta.env.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
+const AUDIO_WORKLETS_ENABLED = import.meta.env?.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 const AUDIO_START_TIMEOUT_MS = 5_000;
 const FIRST_PLAY_WATCHDOG_MS = 2_000;
 
@@ -116,6 +123,8 @@ interface TrackVoice {
   kitId?: DrumKitId;
   /** Active melodic preset id (when track.presetId is set). */
   presetId?: string;
+  /** Invalidates async sampler loads when an instrument is replaced/disposed. */
+  instrumentGeneration: number;
   mic?: Tone.UserMedia;
   micOn?: boolean;
   dispose: () => void;
@@ -180,6 +189,7 @@ class AudioEngine {
   private voices = new Map<string, TrackVoice>();
   private leanDrumVoices = new Map<string, LeanDrumVoice>();
   private leanTrackSnapshots = new Map<string, Track>();
+  private projectTrackSnapshots = new Map<string, Track>();
   private voiceModes = new Map<string, VoiceMode>();
   private voicePromotions: Array<{
     trackId: string;
@@ -220,7 +230,7 @@ class AudioEngine {
   private soloSet = new Set<string>();
   unlocked = false;
   private disposed = false;
-  private audioStartScheduled = false;
+  private audioStartPromise: Promise<void> | null = null;
   private workletInitAttempted = false;
   private workletUnavailable = false;
   private noteEverPlayed = false;
@@ -235,7 +245,7 @@ class AudioEngine {
   constructor() {
     const globalKey = "__SN_STUDIO_AUDIO_ENGINE_ACTIVE__";
     const scope = globalThis as typeof globalThis & Record<string, boolean | undefined>;
-    if (scope[globalKey] && import.meta.env.DEV) {
+    if (scope[globalKey] && (import.meta.env?.DEV ?? false)) {
       console.warn("[AudioEngine] Duplicate AudioEngine construction detected; retaining singleton export.");
     }
     scope[globalKey] = true;
@@ -273,11 +283,10 @@ class AudioEngine {
    */
   async unlock() {
     if (this.disposed) throw new Error("AudioEngine has been disposed");
-    if (this.unlocked) return;
+    if (this.unlocked && this.isAudioContextRunning()) return;
     const endInit = startPerfTimer("audio-engine-init");
     try {
-      this.unlocked = true;
-      this.scheduleAudioContextStart();
+      await this.ensureAudioContextStarted();
     } finally {
       endInit();
     }
@@ -311,22 +320,46 @@ class AudioEngine {
       const details = describeError(err);
       firstPlayMark("tone-start:error", details);
       console.warn("[AudioEngine] AudioContext start did not complete promptly.", details, err);
+      throw err;
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     }
   }
 
-  private scheduleAudioContextStart(): void {
-    if (this.audioStartScheduled) return;
-    this.audioStartScheduled = true;
+  private async ensureAudioContextStarted(): Promise<void> {
+    if (this.isAudioContextRunning()) {
+      this.unlocked = true;
+      return;
+    }
+    if (this.audioStartPromise) return this.audioStartPromise;
     firstPlayMark("audio-context-start:scheduled", {
       contextState: this.getAudioContextState(),
     });
-    void (async () => {
+    const startPromise = (async () => {
       await this.startToneWithTimeout();
+      if (!this.isAudioContextRunning()) {
+        throw new Error(`AudioContext is ${this.getAudioContextState()} after Tone.start().`);
+      }
+      this.unlocked = true;
+      configureChopEngineOutput(this.masterChain.input);
       await this.tryInitWorkletsOnce();
-      lookaheadScheduler.start();
     })();
+    this.audioStartPromise = startPromise;
+    try {
+      await startPromise;
+    } catch (error) {
+      this.unlocked = false;
+      throw error;
+    } finally {
+      if (this.audioStartPromise === startPromise) this.audioStartPromise = null;
+    }
+  }
+
+  private scheduleAudioContextStart(): void {
+    void this.ensureAudioContextStarted().catch((error) => {
+      const details = describeError(error);
+      firstPlayMark("audio-context-start:retryable-error", details);
+    });
   }
 
   private async tryInitWorkletsOnce(): Promise<void> {
@@ -413,6 +446,9 @@ class AudioEngine {
       this.metronomeSynth.dispose();
       this.metronomeAccent.dispose();
       this.metronomeGain.dispose();
+      stopChopEngine();
+      disposeChopEngine();
+      disconnectChopEngineOutput();
       this.masterChain.dispose();
       workletManager.dispose();
     } catch {
@@ -429,6 +465,22 @@ class AudioEngine {
   }
 
   // ---- master ----
+
+  /** Connect a trusted Tone node to the studio master chain. */
+  connectToMaster(node: Tone.ToneAudioNode): void {
+    node.connect(this.masterChain.input);
+  }
+
+  /**
+   * Native Web Audio input for the studio master chain. World ambience and
+   * other raw-AudioContext sources use this so Panic, master volume, limiting,
+   * metering, and export monitoring remain authoritative.
+   */
+  getMasterNativeInput(): AudioNode {
+    // MasterChain.input is a Tone.Gain, whose concrete input is a native
+    // GainNode. Tone's broader InputNode union obscures that at type level.
+    return this.masterChain.input.input as AudioNode;
+  }
 
   /** Tone.Meter for the post-master bus (used by StereoMeter). */
   getMasterMeter(): Tone.Meter {
@@ -866,6 +918,7 @@ class AudioEngine {
       for (const lean of this.leanDrumVoices.values()) {
         lean.stopAll();
       }
+      stopChopEngine();
 
       // Phase 6: clear any queued worklet metronome clicks and lookahead events.
       if (this.metronomeWorkletNode) {
@@ -982,12 +1035,32 @@ class AudioEngine {
   }
 
   // ---- tracks ----
+  /** Keep lightweight project snapshots so live pads/keys can realize only the
+   * requested voice before transport preparation has run. */
+  setProjectTrackSnapshots(tracks: readonly Track[]) {
+    this.projectTrackSnapshots = new Map(tracks.map((track) => [track.id, track]));
+  }
+
+  private ensurePlayableTrack(trackId: string, reason: string): void {
+    if (this.voices.has(trackId) || this.leanDrumVoices.has(trackId)) return;
+    const track = this.projectTrackSnapshots.get(trackId);
+    if (!track) return;
+    this.ensureTrack(track, {
+      mode: track.kind === "drums" ? "lean" : "tone",
+      reason,
+      allowHeavy: track.kind !== "drums",
+      deadlineMs: track.kind === "drums" ? 50 : undefined,
+    });
+    this.refreshAllMutes(Array.from(this.projectTrackSnapshots.values()));
+  }
+
   ensureTrack(track: Track, options: EnsureTrackOptions = {}) {
     if (this.noAudio) return;
     const requestedMode = options.mode ?? "tone";
     const reason = options.reason ?? "unspecified";
     const allowHeavy = options.allowHeavy ?? requestedMode === "tone";
     const flags = getFirstPlayFlags();
+    this.projectTrackSnapshots.set(track.id, track);
     const duringPlay = this.playbackState === "starting" || this.playbackState === "playing";
     const hadVoice = this.voices.has(track.id);
     const currentMode = this.getVoiceMode(track.id);
@@ -1225,6 +1298,35 @@ class AudioEngine {
     this.soloSet.clear();
   }
 
+  /** Atomically clear all project-owned audio state before a project/demo is
+   * replaced. This prevents reused track ids from inheriting voices,
+   * automation, modulation, Chop slices, or scheduled callbacks. */
+  replaceProject(project: Project) {
+    try {
+      this.stop();
+    } catch {
+      // continue with hard teardown
+    }
+    this.cancelAllProjectSchedules();
+    this.stopAutomationScheduler();
+    this.disposeAllTracks();
+    stopChopEngine();
+    disposeChopEngine();
+    this.chopKitTrackId = null;
+    this.trackAutomationData.clear();
+    this.modulationSources = [];
+    this.modulationRoutings = [];
+    this.modOutputs.clear();
+    this.lfoPhases.clear();
+    this.driftState.clear();
+    this.stepModState.clear();
+    this.paramOverrides.clear();
+    this.soloSet.clear();
+    this.setProjectTrackSnapshots(project.tracks);
+    this.setGlobalGroove(project.globalGroove);
+    this.masterChain.releasePanicHold();
+  }
+
   removeAllTracksExcept(trackIds: readonly string[]) {
     if (this.noAudio) return;
     const keep = new Set(trackIds);
@@ -1234,17 +1336,19 @@ class AudioEngine {
   }
 
   applyTrackSettings(track: Track) {
+    if (track.solo) this.soloSet.add(track.id);
+    else this.soloSet.delete(track.id);
+    const anySolo = this.soloSet.size > 0;
+    const audible = !track.muted && (!anySolo || track.solo);
     const v = this.voices.get(track.id);
     if (!v) {
       const lean = this.leanDrumVoices.get(track.id);
-      if (lean) lean.applyTrack(track);
+      if (lean) {
+        lean.applyTrack(track);
+        lean.setAudible(audible);
+      }
       return;
     }
-    if (track.solo) this.soloSet.add(track.id);
-    else this.soloSet.delete(track.id);
-
-    const anySolo = this.soloSet.size > 0;
-    const audible = !track.muted && (!anySolo || track.solo);
     const db = audible
       ? track.volume <= 0.005
         ? -60
@@ -1260,6 +1364,7 @@ class AudioEngine {
   }
 
   refreshAllMutes(tracks: Track[]) {
+    this.soloSet = new Set(tracks.filter((track) => track.solo).map((track) => track.id));
     for (const t of tracks) this.applyTrackSettings(t);
   }
 
@@ -1361,6 +1466,7 @@ class AudioEngine {
   ) {
     if (!def) return;
     const r = def.synth;
+    const generation = v.instrumentGeneration;
     void tryLoadMelodicSampler(def.layers, {
       release: Math.max(0.1, r.release * 2),
       attack: Math.max(0, r.attack * 0.4),
@@ -1369,7 +1475,7 @@ class AudioEngine {
       if (!sampler) return;
       // User may have swapped presets, removed the track, or the engine
       // may already have a sampler attached (e.g. duplicate probe).
-      if (v.presetId !== presetId) {
+      if (v.presetId !== presetId || v.instrumentGeneration !== generation) {
         try { sampler.dispose(); } catch { /* ignore */ }
         return;
       }
@@ -1388,8 +1494,10 @@ class AudioEngine {
           try { old.dispose(); } catch { /* ignore */ }
         }
       } catch {
-        // ignore — best effort swap
+        try { sampler.dispose(); } catch { /* ignore */ }
       }
+    }).catch(() => {
+      // The already-connected synth fallback remains authoritative.
     });
   }
 
@@ -1758,6 +1866,7 @@ class AudioEngine {
 
   /** Internal: dispose whichever instrument(s) are attached. */
   private disposeInstrument(v: TrackVoice) {
+    v.instrumentGeneration += 1;
     if (v.poly) {
       try {
         releaseAllNotes(v.poly);
@@ -1819,6 +1928,7 @@ class AudioEngine {
     velocity = 0.9,
     source?: "qwerty" | "midi",
   ) {
+    this.ensurePlayableTrack(trackId, "live-note");
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
     try {
@@ -1847,6 +1957,7 @@ class AudioEngine {
     velocity = 0.9,
     source?: "qwerty" | "midi",
   ) {
+    this.ensurePlayableTrack(trackId, "live-note-hold");
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
     try {
@@ -1903,6 +2014,7 @@ class AudioEngine {
       return;
     }
 
+    this.ensurePlayableTrack(trackId, "live-drum");
     const t = time ?? Tone.now();
     const v = this.voices.get(trackId);
     const lean = this.leanDrumVoices.get(trackId);
@@ -2166,7 +2278,7 @@ class AudioEngine {
       blob?: Blob;
       reversed?: boolean;
     },
-  ): { id: number; player: Tone.Player } | null {
+  ): { id: number; player: Tone.Player; ready: Promise<void> } | null {
     const flags = getFirstPlayFlags();
     if (flags.disableProjectSchedules || flags.disableTransportCallbacks) {
       firstPlayMark("scheduleAudioClip:skipped", {
@@ -2185,9 +2297,20 @@ class AudioEngine {
       durationSec: clip.durationSec,
     });
     const url = URL.createObjectURL(clip.blob);
-    const player = new Tone.Player(url).connect(v.channel);
+    let settleReady!: () => void;
+    let rejectReady!: (error: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+      settleReady = resolve;
+      rejectReady = reject;
+    });
+    const player = new Tone.Player({
+      url,
+      autostart: false,
+      onload: () => settleReady(),
+      onerror: (error) => rejectReady(error),
+    }).connect(v.channel);
+    if (player.loaded) settleReady();
     trackToneCreate("scheduledPlayer", track.id);
-    player.autostart = false;
     // Phase 11: honour the reversed flag
     if (clip.reversed) player.reverse = true;
     this.activeAudioPlayers.add(player);
@@ -2227,7 +2350,7 @@ class AudioEngine {
     }, `0:${clip.start}:0`);
     this.registerScheduledTransportEvent(evId, "audio-clip", track.id);
     this.audioClipResources.set(player, { url, trackId: track.id, eventId: evId });
-    return { id: evId, player };
+    return { id: evId, player, ready };
   }
 
   private registerScheduledTransportEvent(id: number, label: string, trackId?: string) {
@@ -2445,7 +2568,11 @@ class AudioEngine {
       delay,
       filter,
       sends,
+      instrumentGeneration: 0,
       dispose: () => {
+        voice.instrumentGeneration += 1;
+        voice.presetId = undefined;
+        voice.kitId = undefined;
         if (voice.poly) voice.poly.dispose();
         if (voice.drums) {
           const drums = voice.drums;

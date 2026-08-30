@@ -155,11 +155,11 @@ export function initPwa() {
   // Only register the SW in production builds. Registering in `vite dev`
   // would fight HMR and is unnecessary for offline verification, which is
   // done against the built/preview output per the task spec.
-  if (!import.meta.env.PROD) return;
+  if (!(import.meta.env?.PROD ?? false)) return;
 
   // The SW lives at the artifact base path so its scope matches the app.
-  const swUrl = `${import.meta.env.BASE_URL}sw.js`;
-  const swScope = import.meta.env.BASE_URL || "/";
+  const swUrl = `${import.meta.env?.BASE_URL ?? "/"}sw.js`;
+  const swScope = import.meta.env?.BASE_URL || "/";
 
   navigator.serviceWorker
     .register(swUrl, { scope: swScope })

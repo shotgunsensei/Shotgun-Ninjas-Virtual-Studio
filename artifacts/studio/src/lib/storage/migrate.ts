@@ -1,5 +1,11 @@
-import type { Project, ProjectMetadata, Track } from "../../types";
-import { DEFAULT_MASTER_BUS } from "../audio/master";
+import type {
+  ChopLabPersistedState,
+  PerformanceSettings,
+  Project,
+  ProjectMetadata,
+  Track,
+} from "../../types";
+import { DEFAULT_MASTER_BUS } from "../audio/master-defaults";
 
 /**
  * Current project schema version. Bumped whenever we add or rename a
@@ -15,8 +21,10 @@ import { DEFAULT_MASTER_BUS } from "../audio/master";
  *        (creator/description/tags/mood/genre) populated.
  *   v4 — Phase 11: automationLanes per track; modulationSources and
  *        modulationRoutings at project level.
+ *   v5 — Preserve Sound Library, Performance Mode, and Chop Lab project
+ *        state across every IndexedDB, draft-recovery, and JSON load path.
  */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /** Known FX module ids — anything else is dropped (with a warning) by
  *  `checkProjectHealth`. Kept in sync with `FxModuleId`. */
@@ -58,6 +66,45 @@ function normalizeMetadata(raw: unknown): ProjectMetadata | undefined {
   if (typeof m.mood === "string" && m.mood.trim()) out.mood = m.mood.trim();
   if (typeof m.genre === "string" && m.genre.trim()) out.genre = m.genre.trim();
   return Object.keys(out).length ? out : undefined;
+}
+
+function objectValue(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+}
+
+function normalizePerformance(raw: unknown): PerformanceSettings | undefined {
+  const value = objectValue(raw);
+  if (!value) return undefined;
+
+  // Preserve the complete persisted shape for current projects. Individual
+  // controls merge their own defaults at read time, so an older partial object
+  // remains valid without migration inventing user choices.
+  return value as unknown as PerformanceSettings;
+}
+
+function normalizeChopLab(raw: unknown): ChopLabPersistedState | undefined {
+  const value = objectValue(raw);
+  if (!value) return undefined;
+
+  return {
+    markers: Array.isArray(value.markers)
+      ? value.markers.filter((marker): marker is number => Number.isFinite(marker))
+      : [],
+    sliceSettings: Array.isArray(value.sliceSettings)
+      ? (value.sliceSettings as ChopLabPersistedState["sliceSettings"])
+      : [],
+    sensitivity:
+      typeof value.sensitivity === "number" && Number.isFinite(value.sensitivity)
+        ? value.sensitivity
+        : 0.5,
+    sampleName: typeof value.sampleName === "string" ? value.sampleName : undefined,
+    sampleBlobKey:
+      typeof value.sampleBlobKey === "string" ? value.sampleBlobKey : undefined,
+    sampleBlob:
+      typeof Blob !== "undefined" && value.sampleBlob instanceof Blob
+        ? value.sampleBlob
+        : undefined,
+  };
 }
 
 function migrateTrack(t: unknown): Track {
@@ -110,6 +157,15 @@ export function migrateProject(input: unknown): MigrationResult {
   const raw = (input ?? {}) as Partial<Project> & Record<string, unknown>;
   const fromVersion = typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1;
 
+  if (!Number.isInteger(fromVersion) || fromVersion < 1) {
+    throw new Error(`Invalid project schema version: ${String(raw.schemaVersion)}`);
+  }
+  if (fromVersion > CURRENT_SCHEMA_VERSION) {
+    throw new Error(
+      `This project uses schema v${fromVersion}, but this version of the studio only supports up to v${CURRENT_SCHEMA_VERSION}. Update the studio before opening it.`,
+    );
+  }
+
   // v1 → v2: stamp schemaVersion, guarantee v2 mixer / sample / sections
   // defaults exist so the rest of the app can stop guarding for missing
   // optional fields on every render.
@@ -142,6 +198,16 @@ export function migrateProject(input: unknown): MigrationResult {
           ? raw.updatedAt
           : Date.now(),
     metadata: normalizeMetadata(raw.metadata),
+    // v5: these fields existed in the Project type before the migration
+    // pipeline preserved them. Omitting them here silently reset the selected
+    // sound pack, live-performance setup, and Chop Lab sample reference on
+    // every load/import/recovery.
+    soundPackId:
+      typeof raw.soundPackId === "string" && raw.soundPackId.trim()
+        ? raw.soundPackId.trim()
+        : undefined,
+    performance: normalizePerformance(raw.performance),
+    chopLab: normalizeChopLab(raw.chopLab),
     // v4: Phase 11 — automation & modulation defaults
     modulationSources: Array.isArray(raw.modulationSources) ? raw.modulationSources : [],
     modulationRoutings: Array.isArray(raw.modulationRoutings) ? raw.modulationRoutings : [],

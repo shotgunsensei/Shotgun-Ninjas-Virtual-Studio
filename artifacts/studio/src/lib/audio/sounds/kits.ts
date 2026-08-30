@@ -1095,8 +1095,13 @@ function buildPieceVoice(
   // the trigger function so subsequent hits use the loaded samples.
   // Falls back silently to synth when no layers / no files / decode errors.
   let sampleBank: DrumSampleBank | null = null;
+  let disposed = false;
   void tryLoadDrumSamples(def.layers, filter).then((bank) => {
     if (!bank) return;
+    if (disposed) {
+      bank.dispose();
+      return;
+    }
     sampleBank = bank;
     pv.trigger = (time, velocity) => {
       try {
@@ -1107,10 +1112,15 @@ function buildPieceVoice(
         // ignore
       }
     };
+  }).catch(() => {
+    // Synth fallback stays active when a sample host or decoder fails.
   });
 
   const baseDispose = pv.dispose;
   pv.dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    pv.trigger = () => {};
     if (sampleBank) sampleBank.dispose();
     baseDispose();
   };

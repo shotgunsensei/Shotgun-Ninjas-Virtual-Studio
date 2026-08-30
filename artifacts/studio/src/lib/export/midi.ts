@@ -27,9 +27,10 @@ const NOTE_SEMITONES: Record<string, number> = {
 export function noteNameToMidi(note: string): number {
   const m = note.match(/^([A-Ga-g][#b]?)(-?\d+)$/);
   if (!m) return 60;
-  const semi = NOTE_SEMITONES[m[1]] ?? 0;
+  const normalizedPitch = `${m[1][0].toUpperCase()}${m[1].slice(1)}`;
+  const semi = NOTE_SEMITONES[normalizedPitch] ?? 0;
   const octave = parseInt(m[2], 10);
-  return (octave + 1) * 12 + semi;
+  return Math.max(0, Math.min(127, (octave + 1) * 12 + semi));
 }
 
 function writeVlq(value: number): number[] {
@@ -51,12 +52,17 @@ function writeUint16(v: number): number[] {
   return [(v >>> 8) & 0xff, v & 0xff];
 }
 
-function writeString(s: string): number[] {
-  return Array.from(s).map((c) => c.charCodeAt(0));
+function writeAscii(s: string): number[] {
+  return Array.from(s, (c) => c.charCodeAt(0) & 0x7f);
+}
+
+function writeUtf8(s: string): number[] {
+  return Array.from(new TextEncoder().encode(s));
 }
 
 function buildTempoTrack(bpm: number): number[] {
-  const uspqn = Math.round(60_000_000 / bpm);
+  const safeBpm = Number.isFinite(bpm) ? Math.max(4, Math.min(960, bpm)) : 120;
+  const uspqn = Math.max(1, Math.min(0xffffff, Math.round(60_000_000 / safeBpm)));
   const events: number[] = [
     ...writeVlq(0),
     0xff, 0x51, 0x03,
@@ -67,7 +73,7 @@ function buildTempoTrack(bpm: number): number[] {
     0xff, 0x2f, 0x00,
   ];
   return [
-    ...writeString("MTrk"),
+    ...writeAscii("MTrk"),
     ...writeUint32(events.length),
     ...events,
   ];
@@ -88,7 +94,8 @@ function collectNotes(track: Track, startBeat: number, endBeat: number): MidiNot
 
   for (const clip of track.noteClips) {
     for (const ev of clip.notes) {
-      const absT = clip.start + ev.time;
+      const absT = Number(clip.start) + Number(ev.time);
+      if (!Number.isFinite(absT)) continue;
       if (absT < startBeat || absT >= endBeat) continue;
       const relT = absT - startBeat;
 
@@ -99,34 +106,80 @@ function collectNotes(track: Track, startBeat: number, endBeat: number): MidiNot
         midiNote = noteNameToMidi(ev.note);
       }
 
-      const velocity = Math.max(1, Math.min(127, Math.round(ev.velocity * 127)));
+      const rawVelocity = Number.isFinite(ev.velocity) ? ev.velocity : 0.8;
+      const velocity = Math.max(1, Math.min(127, Math.round(rawVelocity * 127)));
       const onTick = Math.round(relT * PPQ);
-      const offTick = Math.round((relT + Math.max(0.05, ev.duration)) * PPQ);
+      const rawDuration = Number.isFinite(ev.duration) ? ev.duration : 0.25;
+      const offTick = Math.max(
+        onTick + 1,
+        Math.round((relT + Math.max(1 / PPQ, rawDuration)) * PPQ),
+      );
 
       notes.push({ onTick, offTick, midiNote, velocity, channel });
     }
   }
 
-  notes.sort((a, b) => a.onTick - b.onTick);
-  return notes;
+  notes.sort((a, b) =>
+    a.channel - b.channel || a.midiNote - b.midiNote || a.onTick - b.onTick,
+  );
+
+  // Collapse exact duplicate attacks and shorten a prior same-pitch note to
+  // the next attack. Without this, an earlier note-off can silence a newer
+  // overlapping note in many DAWs and hardware synths.
+  const normalized: MidiNote[] = [];
+  for (const note of notes) {
+    const previous = normalized[normalized.length - 1];
+    if (
+      previous &&
+      previous.channel === note.channel &&
+      previous.midiNote === note.midiNote
+    ) {
+      if (previous.onTick === note.onTick) {
+        previous.velocity = Math.max(previous.velocity, note.velocity);
+        previous.offTick = Math.max(previous.offTick, note.offTick);
+        continue;
+      }
+      if (previous.offTick > note.onTick) {
+        previous.offTick = Math.max(previous.onTick + 1, note.onTick);
+      }
+    }
+    normalized.push({ ...note });
+  }
+
+  return normalized.sort((a, b) => a.onTick - b.onTick);
 }
 
 function buildTrackChunk(notes: MidiNote[], trackName: string): number[] {
-  type Ev = { tick: number; bytes: number[] };
+  type Ev = { tick: number; order: number; bytes: number[] };
   const events: Ev[] = [];
+
+  const nameBytes = writeUtf8(trackName);
 
   events.push({
     tick: 0,
-    bytes: [0xff, 0x03, trackName.length, ...writeString(trackName)],
+    order: 0,
+    bytes: [0xff, 0x03, ...writeVlq(nameBytes.length), ...nameBytes],
   });
 
   for (const n of notes) {
-    events.push({ tick: n.onTick, bytes: [0x90 | n.channel, n.midiNote, n.velocity] });
-    events.push({ tick: n.offTick, bytes: [0x80 | n.channel, n.midiNote, 0] });
+    events.push({
+      tick: n.onTick,
+      order: 2,
+      bytes: [0x90 | n.channel, n.midiNote, n.velocity],
+    });
+    events.push({
+      tick: n.offTick,
+      order: 1,
+      bytes: [0x80 | n.channel, n.midiNote, 0],
+    });
   }
 
-  events.sort((a, b) => a.tick - b.tick);
-  events.push({ tick: (events[events.length - 1]?.tick ?? 0) + 1, bytes: [0xff, 0x2f, 0x00] });
+  events.sort((a, b) => a.tick - b.tick || a.order - b.order);
+  events.push({
+    tick: (events[events.length - 1]?.tick ?? 0) + 1,
+    order: 3,
+    bytes: [0xff, 0x2f, 0x00],
+  });
 
   let curTick = 0;
   const trackData: number[] = [];
@@ -137,7 +190,7 @@ function buildTrackChunk(notes: MidiNote[], trackName: string): number[] {
   }
 
   return [
-    ...writeString("MTrk"),
+    ...writeAscii("MTrk"),
     ...writeUint32(trackData.length),
     ...trackData,
   ];
@@ -148,18 +201,30 @@ export interface MidiExportOptions {
   endBeat?: number;
 }
 
+function exportRange(project: Project, options: MidiExportOptions): [number, number] {
+  const projectEnd = Math.max(1, Number(project.bars) * 4 || 4);
+  const requestedStart = Number(options.startBeat ?? 0);
+  const startBeat = Number.isFinite(requestedStart)
+    ? Math.max(0, Math.min(projectEnd, requestedStart))
+    : 0;
+  const requestedEnd = Number(options.endBeat ?? projectEnd);
+  const endBeat = Number.isFinite(requestedEnd) && requestedEnd > startBeat
+    ? Math.min(projectEnd, requestedEnd)
+    : projectEnd;
+  return [startBeat, Math.max(startBeat + 1 / PPQ, endBeat)];
+}
+
 export function encodeMidiFile(
   project: Project,
   tracks: Track[],
   options: MidiExportOptions = {},
 ): Uint8Array {
-  const startBeat = options.startBeat ?? 0;
-  const endBeat = options.endBeat ?? project.bars * 4;
+  const [startBeat, endBeat] = exportRange(project, options);
 
   const melodicTracks = tracks.filter((t) => t.kind !== "vocals");
 
   const header: number[] = [
-    ...writeString("MThd"),
+    ...writeAscii("MThd"),
     ...writeUint32(6),
     ...writeUint16(1),
     ...writeUint16(1 + melodicTracks.length),
@@ -184,11 +249,10 @@ export function encodeSingleTrackMidi(
   track: Track,
   options: MidiExportOptions = {},
 ): Uint8Array {
-  const startBeat = options.startBeat ?? 0;
-  const endBeat = options.endBeat ?? project.bars * 4;
+  const [startBeat, endBeat] = exportRange(project, options);
 
   const header: number[] = [
-    ...writeString("MThd"),
+    ...writeAscii("MThd"),
     ...writeUint32(6),
     ...writeUint16(1),
     ...writeUint16(2),

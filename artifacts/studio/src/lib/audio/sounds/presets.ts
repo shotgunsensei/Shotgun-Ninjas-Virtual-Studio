@@ -6,18 +6,15 @@ import type {
   MelodicSynthRecipe,
 } from "./types";
 import { Mono808Voice, PolyPluck, type MelodicVoice } from "../voices";
-import { tryLoadMelodicSampler } from "./samples";
+import type { SoundParams } from "../../../types";
 
 /**
  * Melodic preset library, authored as data.
  *
  * Each preset has a synth recipe plus an optional sample-layers array.
- * `buildPresetVoice` probes the declared layers against the static
- * server; when at least one file is reachable it returns a sample-
- * based voice (Tone.Sampler), otherwise it falls back to the recipe's
- * synth engine. No sample assets ship in this build yet, so users
- * currently hear the synth fallback unless they drop WAV/MP3 files
- * into `public/samples/` matching the preset's layer urls.
+ * `buildPresetVoice` returns an immediate offline model. AudioEngine may
+ * replace it with a decoded local sample bank when a preset declares layers;
+ * unavailable layers always leave the playable model intact.
  */
 
 const synth = (partial: Partial<MelodicSynthRecipe> & { engine: MelodicEngine }): MelodicSynthRecipe => ({
@@ -46,7 +43,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     id: "keys.grand-piano",
     name: "Grand Piano",
     category: "Keys",
-    description: "Sampled Salamander grand. Warm hall reverb.",
+    description: "Offline modeled grand with a warm hall send and responsive dynamics.",
     compatibleWith: ["piano"],
     synth: synth({
       engine: "sampler",
@@ -101,6 +98,45 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       cutoff: 0.6,
       resonance: 0.3,
       width: 0.5,
+    }),
+  },
+  {
+    id: "keys.neon-glass",
+    name: "Neon Glass Keys",
+    category: "Keys",
+    description: "Bright FM tine keys with wide chorus and a clean delayed tail.",
+    compatibleWith: ["piano"],
+    synth: synth({
+      engine: "fmkeys",
+      attack: 0.008,
+      decay: 0.42,
+      sustain: 0.28,
+      release: 0.68,
+      cutoff: 0.82,
+      resonance: 0.12,
+      chorusSend: 0.38,
+      width: 0.72,
+      delaySend: 0.14,
+      reverbSend: 0.2,
+    }),
+  },
+  {
+    id: "keys.tape-upright",
+    name: "Tape Upright",
+    category: "Keys",
+    description: "Muted upright-style model with slow tape softness and short room tone.",
+    compatibleWith: ["piano"],
+    synth: synth({
+      engine: "softkeys",
+      attack: 0.035,
+      decay: 0.52,
+      sustain: 0.3,
+      release: 0.5,
+      cutoff: 0.42,
+      resonance: 0.08,
+      drive: 0.09,
+      width: 0.4,
+      reverbSend: 0.22,
     }),
   },
 
@@ -163,6 +199,68 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       octave: -1,
     }),
   },
+  {
+    id: "bass.reese",
+    name: "Ronin Reese",
+    category: "Bass",
+    description: "Wide detuned saw bass with a dark filter and controlled drive.",
+    compatibleWith: ["bass", "piano"],
+    synth: synth({
+      engine: "polysaw",
+      attack: 0.012,
+      decay: 0.34,
+      sustain: 0.72,
+      release: 0.38,
+      cutoff: 0.38,
+      resonance: 0.32,
+      width: 0.78,
+      drive: 0.28,
+      octave: -1,
+    }),
+  },
+  {
+    id: "bass.acid",
+    name: "Acid Circuit",
+    category: "Bass",
+    description: "Resonant mono bass for sliding sequences and tight sixteenth-note lines.",
+    compatibleWith: ["bass", "piano"],
+    synth: synth({
+      engine: "monosaw",
+      attack: 0.002,
+      decay: 0.24,
+      sustain: 0.38,
+      release: 0.18,
+      cutoff: 0.5,
+      resonance: 0.78,
+      drive: 0.32,
+      glide: 0.055,
+      mono: true,
+      octave: -1,
+      delaySend: 0.06,
+    }),
+  },
+  {
+    id: "bass.short-808",
+    name: "Tactical 808",
+    category: "Bass",
+    description: "Short controlled 808 with fast glide and a restrained pitch drop.",
+    compatibleWith: ["bass", "piano"],
+    synth: synth({
+      engine: "808",
+      attack: 0.002,
+      decay: 0.38,
+      sustain: 0.48,
+      release: 0.3,
+      cutoff: 0.52,
+      resonance: 0.12,
+      drive: 0.18,
+      glide: 0.045,
+      mono: true,
+      octave: -2,
+      pitchEnv: 3,
+      sidechain: 0.22,
+    }),
+  },
 
   // ---- Pluck ----
   {
@@ -214,6 +312,43 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       drive: 0.45,
     }),
   },
+  {
+    id: "pluck.koto-night",
+    name: "Koto Night",
+    category: "Pluck",
+    description: "Tight resonant string pluck with a dark room and a precise attack.",
+    compatibleWith: ["guitar", "piano"],
+    synth: synth({
+      engine: "pluck",
+      attack: 0.001,
+      decay: 0.34,
+      sustain: 0,
+      release: 0.42,
+      cutoff: 0.68,
+      resonance: 0.28,
+      width: 0.46,
+      reverbSend: 0.28,
+      delaySend: 0.08,
+    }),
+  },
+  {
+    id: "guitar.nylon",
+    name: "Nylon Ghost",
+    category: "Pluck",
+    description: "Soft nylon-like pluck for intimate chords and melodic finger patterns.",
+    compatibleWith: ["guitar", "piano"],
+    synth: synth({
+      engine: "pluck",
+      attack: 0.002,
+      decay: 0.56,
+      sustain: 0,
+      release: 0.74,
+      cutoff: 0.5,
+      resonance: 0.16,
+      width: 0.58,
+      reverbSend: 0.24,
+    }),
+  },
 
   // ---- Pad ----
   {
@@ -232,6 +367,45 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       resonance: 0.2,
       width: 0.8,
       reverbSend: 0.5,
+    }),
+  },
+  {
+    id: "pad.neon-air",
+    name: "Neon Air",
+    category: "Pad",
+    description: "Open stereo atmosphere with a slow bloom and long luminous tail.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "pad",
+      attack: 0.72,
+      decay: 0.82,
+      sustain: 0.88,
+      release: 0.94,
+      cutoff: 0.7,
+      resonance: 0.12,
+      width: 0.94,
+      chorusSend: 0.28,
+      reverbSend: 0.62,
+      delaySend: 0.1,
+    }),
+  },
+  {
+    id: "pad.choir-shadow",
+    name: "Choir Shadow",
+    category: "Pad",
+    description: "Dark harmonic bed for cinematic tension without external sample downloads.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "pad",
+      attack: 0.58,
+      decay: 0.68,
+      sustain: 0.82,
+      release: 0.9,
+      cutoff: 0.34,
+      resonance: 0.22,
+      width: 0.86,
+      drive: 0.06,
+      reverbSend: 0.7,
     }),
   },
 
@@ -256,6 +430,49 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       delaySend: 0.25,
     }),
   },
+  {
+    id: "lead.arcade-pulse",
+    name: "Arcade Pulse",
+    category: "Lead",
+    description: "Fast bright mono lead for retro hooks, arpeggios, and game-score lines.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "monosaw",
+      attack: 0.001,
+      decay: 0.2,
+      sustain: 0.62,
+      release: 0.22,
+      cutoff: 0.9,
+      resonance: 0.36,
+      drive: 0.2,
+      glide: 0.018,
+      mono: true,
+      delaySend: 0.18,
+      width: 0.42,
+    }),
+  },
+  {
+    id: "lead.silk",
+    name: "Silk Katana",
+    category: "Lead",
+    description: "Smooth expressive lead with longer glide and a spacious stereo echo.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "monosaw",
+      attack: 0.018,
+      decay: 0.32,
+      sustain: 0.76,
+      release: 0.52,
+      cutoff: 0.62,
+      resonance: 0.26,
+      drive: 0.12,
+      glide: 0.11,
+      mono: true,
+      width: 0.68,
+      delaySend: 0.34,
+      reverbSend: 0.16,
+    }),
+  },
 
   // ---- Bell ----
   {
@@ -272,6 +489,42 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       release: 1.0,
       cutoff: 0.85,
       reverbSend: 0.4,
+    }),
+  },
+  {
+    id: "bell.kalimba",
+    name: "Steel Kalimba",
+    category: "Bell",
+    description: "Dry thumb-piano-style pluck with clear mids and a compact decay.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "pluck",
+      attack: 0.001,
+      decay: 0.3,
+      sustain: 0,
+      release: 0.38,
+      cutoff: 0.78,
+      resonance: 0.2,
+      width: 0.36,
+      reverbSend: 0.16,
+    }),
+  },
+  {
+    id: "bell.crystal",
+    name: "Crystal Shrine",
+    category: "Bell",
+    description: "Long glass bell with a high, controlled shimmer and wide hall tail.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "bell",
+      attack: 0.001,
+      decay: 0.94,
+      sustain: 0,
+      release: 0.96,
+      cutoff: 0.94,
+      width: 0.8,
+      reverbSend: 0.68,
+      delaySend: 0.12,
     }),
   },
 
@@ -294,6 +547,25 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       glide: 0.06,
     }),
   },
+  {
+    id: "brass.short-stab",
+    name: "Shogun Brass Stab",
+    category: "Brass",
+    description: "Fast dark brass hit for accents, trailer rhythms, and section punches.",
+    compatibleWith: ["piano", "guitar"],
+    synth: synth({
+      engine: "brass",
+      attack: 0.035,
+      decay: 0.28,
+      sustain: 0.45,
+      release: 0.26,
+      cutoff: 0.56,
+      resonance: 0.18,
+      width: 0.66,
+      drive: 0.14,
+      reverbSend: 0.28,
+    }),
+  },
 ];
 
 export const MELODIC_CATEGORIES = [
@@ -312,28 +584,6 @@ export function findPreset(id: string | undefined): MelodicPresetDef | null {
 }
 
 // ---------------- Sample / synth resolution ----------------
-
-const SALAMANDER_BASE = "https://tonejs.github.io/audio/salamander/";
-const SALAMANDER_URLS: Record<string, string> = {
-  A1: "A1.mp3",
-  C2: "C2.mp3",
-  "D#2": "Ds2.mp3",
-  "F#2": "Fs2.mp3",
-  A2: "A2.mp3",
-  C3: "C3.mp3",
-  "D#3": "Ds3.mp3",
-  "F#3": "Fs3.mp3",
-  A3: "A3.mp3",
-  C4: "C4.mp3",
-  "D#4": "Ds4.mp3",
-  "F#4": "Fs4.mp3",
-  A4: "A4.mp3",
-  C5: "C5.mp3",
-  "D#5": "Ds5.mp3",
-  "F#5": "Fs5.mp3",
-  A5: "A5.mp3",
-  C6: "C6.mp3",
-};
 
 /**
  * Build a melodic voice from a preset recipe. Synthesis is returned
@@ -357,13 +607,24 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
   // is reachable — keeping this function focused on synth construction.
   switch (r.engine) {
     case "sampler":
-      firstPlayMark("audio-node:create", { kind: "sampler", presetId: def.id });
-      return markPresetVoice(def.id, started, new Tone.Sampler({
-        urls: SALAMANDER_URLS,
-        baseUrl: SALAMANDER_BASE,
-        release: secsFromNorm(r.release, 0, 2.0),
-        attack: secsFromNorm(r.attack, 0, 0.4),
-        volume: -8,
+      // A playable offline model is the synchronous fallback. Presets with
+      // licensed local layers are hot-swapped to a sampler by AudioEngine;
+      // this avoids the old 18-request third-party piano download on first
+      // play and makes the default project deterministic offline.
+      firstPlayMark("audio-node:create", { kind: "modeled-piano", presetId: def.id });
+      return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.FMSynth, {
+        harmonicity: 2.01,
+        modulationIndex: 1.8,
+        oscillator: { type: "triangle" },
+        envelope: adsr(r, 0.08, 1.1, 0.28, 2.0),
+        modulation: { type: "sine" },
+        modulationEnvelope: {
+          attack: 0.001,
+          decay: 0.32,
+          sustain: 0.03,
+          release: 0.7,
+        },
+        volume: -10,
       }));
     case "fmkeys":
       firstPlayMark("audio-node:create", { kind: "fmkeys", presetId: def.id });
@@ -505,6 +766,25 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
         volume: -12,
       }));
   }
+}
+
+/** The persisted/live sound controls represented by a preset recipe. */
+export function presetSoundParams(def: MelodicPresetDef): SoundParams {
+  const r = def.synth;
+  return {
+    attack: r.attack,
+    decay: r.decay,
+    sustain: r.sustain,
+    release: r.release,
+    cutoff: r.cutoff,
+    resonance: r.resonance,
+    reverbSend: r.reverbSend,
+    delaySend: r.delaySend,
+    chorusSend: r.chorusSend,
+    width: r.width,
+    drive: r.drive,
+    glide: r.glide,
+  };
 }
 
 function markPresetVoice<T extends MelodicVoice>(presetId: string, started: number, voice: T): T {

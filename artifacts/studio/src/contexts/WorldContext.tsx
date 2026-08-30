@@ -22,7 +22,7 @@ import {
   buildCustomWorld,
 } from "../lib/worlds";
 import { playWorldWelcome, startAmbientLoop, type AmbientLoop } from "../lib/worldAudio";
-import { getStore } from "../store";
+import { getStore, useStore } from "../store";
 import { audio } from "../lib/audio/engine";
 import type { DrumKitId } from "../types";
 import { firstPlayMark, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
@@ -57,6 +57,7 @@ function _prefersReducedAudio(): boolean {
 }
 
 export function WorldProvider({ children }: { children: React.ReactNode }) {
+  const panicRevision = useStore((state) => state.panicRevision);
   const [activeWorldId, setActiveWorldId] = useState<string>(getStoredWorldId);
   const [customWorldDefs, setCustomWorldDefs] = useState<CustomWorldDef[]>(
     loadCustomWorldDefs,
@@ -132,7 +133,12 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
               worldId,
               contextState: ctx.state,
             });
-            ambientLoopRef.current = startAmbientLoop(worldId, ctx, AMBIENT_VOLUME);
+            ambientLoopRef.current = startAmbientLoop(
+              worldId,
+              ctx,
+              AMBIENT_VOLUME,
+              audio.getMasterNativeInput(),
+            );
           } catch {
             // Non-critical
           }
@@ -176,6 +182,13 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
     };
   }, [_stopAmbient]);
 
+  // Panic is an absolute silence boundary, including optional world audio.
+  useEffect(() => {
+    if (panicRevision <= 0) return;
+    setAmbientEnabledState(false);
+    _stopAmbient();
+  }, [panicRevision, _stopAmbient]);
+
   const setWorld = useCallback(
     (id: string) => {
       const world = findWorld(id, customWorlds);
@@ -210,8 +223,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
           audio.setBpm(clampedBpm);
         }
         if (savedPrefs.kitId !== undefined && drumTrack) {
-          store.patchTrack(drumTrack.id, { kitId: savedPrefs.kitId as DrumKitId });
-          audio.setKit(drumTrack.id, savedPrefs.kitId as DrumKitId);
+          store.applyDrumKit(drumTrack.id, savedPrefs.kitId as DrumKitId);
         }
       }
 
@@ -247,7 +259,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
               worldId: id,
               contextState: ctx.state,
             });
-            playWorldWelcome(world, ctx);
+            playWorldWelcome(world, ctx, audio.getMasterNativeInput());
             // Start ambient after a short delay (let welcome cue breathe)
             ambientStartTimerRef.current = setTimeout(() => {
               ambientStartTimerRef.current = null;
@@ -264,7 +276,12 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
                   worldId: id,
                   contextState: audioCtx.state,
                 });
-                ambientLoopRef.current = startAmbientLoop(id, audioCtx, AMBIENT_VOLUME);
+                ambientLoopRef.current = startAmbientLoop(
+                  id,
+                  audioCtx,
+                  AMBIENT_VOLUME,
+                  audio.getMasterNativeInput(),
+                );
               } catch {
                 // Non-critical
               }

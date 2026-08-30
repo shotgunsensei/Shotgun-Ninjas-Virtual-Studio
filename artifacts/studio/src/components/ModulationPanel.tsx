@@ -9,6 +9,9 @@ import type {
 } from "../types";
 import { AUTOMATION_PARAM_LABELS, AUTOMATION_PARAM_IDS } from "../types";
 
+const EMPTY_MODULATION_SOURCES: ModulationSource[] = [];
+const EMPTY_MODULATION_ROUTINGS: ModulationRouting[] = [];
+
 // ---- type metadata ---------------------------------------------------------
 
 const SOURCE_TYPE_LABELS: Record<ModulationSourceType, string> = {
@@ -538,8 +541,12 @@ function AddRoutingForm({
 // ---- main panel ------------------------------------------------------------
 
 export function ModulationPanel() {
-  const sources = useStore((s) => s.project.modulationSources ?? []);
-  const routings = useStore((s) => s.project.modulationRoutings ?? []);
+  const sources = useStore(
+    (s) => s.project.modulationSources ?? EMPTY_MODULATION_SOURCES,
+  );
+  const routings = useStore(
+    (s) => s.project.modulationRoutings ?? EMPTY_MODULATION_ROUTINGS,
+  );
   const tracks = useStore((s) => s.project.tracks);
   const [addingSource, setAddingSource] = useState(false);
   const [addingRouting, setAddingRouting] = useState(false);

@@ -8,16 +8,18 @@ import {
 } from "../lib/audio/sounds/soundLibrary";
 import { DRUM_KITS } from "../lib/audio/sounds/kits";
 import { buildKit } from "../lib/audio/sounds/kits";
+import { findPreset } from "../lib/audio/sounds/presets";
 import { PackCoverArt } from "./PackCoverArt";
-import { getStore, useStore, flushMixToEngine } from "../store";
+import { getStore, useStore } from "../store";
 import type { DrumPiece } from "../lib/audio/voices";
+import { audio } from "../lib/audio/engine";
 
 const ALL_CATEGORY = "All" as const;
 type FilterCategory = typeof ALL_CATEGORY | PackCategory;
 
 /* ── Preview engine ──────────────────────────────────────────
-   Builds a temporary kit connected directly to Tone.Destination,
-   fires all pattern hits using absolute Tone.now() scheduling,
+   Builds a temporary kit routed through the studio master chain,
+   fires all pattern hits using absolute audio-clock scheduling,
    and disposes everything after the pattern completes.
    Never touches the project's track state.
 ──────────────────────────────────────────────────────────── */
@@ -31,10 +33,11 @@ async function startPreview(
   bpm: number,
   onStop: () => void,
 ): Promise<PreviewHandle> {
-  await Tone.start();
+  await audio.unlock();
 
   const kitDef = DRUM_KITS[pack.kitId];
-  const channel = new Tone.Channel({ volume: -3 }).toDestination();
+  const channel = new Tone.Channel({ volume: -3 });
+  audio.connectToMaster(channel);
   const reverb = new Tone.Freeverb({ roomSize: 0.4, dampening: 3000, wet: 0.15 });
   reverb.connect(channel);
   const kitVoice = buildKit(kitDef, channel, reverb, null);
@@ -44,7 +47,6 @@ async function startPreview(
   const steps = 16 * bars;
 
   const startTime = Tone.now() + 0.05;
-  const handles: ReturnType<typeof setTimeout>[] = [];
   let stopped = false;
 
   const pieces = Object.keys(pack.demoPattern) as DrumPiece[];
@@ -56,17 +58,14 @@ async function startPreview(
       const pv = kitVoice.pieces.get(piece);
       if (!pv) continue;
       const t = startTime + step * stepSec;
-      const delay = (t - Tone.now()) * 1000;
-      if (delay < 0) continue;
-      const h = setTimeout(() => {
-        if (stopped) return;
-        try {
-          pv.trigger(Tone.now(), 0.8);
-        } catch {
-          /* ignore */
-        }
-      }, delay);
-      handles.push(h);
+      try {
+        // Tone/Web Audio schedules against its own clock; queuing the hit now
+        // avoids one main-thread timeout per drum event and remains stable if
+        // React is busy while the preview is playing.
+        pv.trigger(t, 0.8);
+      } catch {
+        /* ignore a single preview hit */
+      }
     }
   }
 
@@ -85,7 +84,6 @@ async function startPreview(
     stop: () => {
       if (stopped) return;
       stopped = true;
-      for (const h of handles) clearTimeout(h);
       clearTimeout(finishHandle);
       kitVoice.dispose();
       channel.dispose();
@@ -99,6 +97,7 @@ async function startPreview(
 
 export function SoundLibraryPanel() {
   const project = useStore((s) => s.project);
+  const panicRevision = useStore((s) => s.panicRevision);
   const [filter, setFilter] = useState<FilterCategory>(ALL_CATEGORY);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const previewRef = useRef<PreviewHandle | null>(null);
@@ -124,6 +123,10 @@ export function SoundLibraryPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    if (panicRevision > 0) stopPreview();
+  }, [panicRevision, stopPreview]);
+
   const handlePreview = async (pack: SoundPack) => {
     if (previewingId === pack.id) {
       stopPreview();
@@ -146,18 +149,18 @@ export function SoundLibraryPanel() {
 
     const tracks = project.tracks;
     const drumTrack = tracks.find((t) => t.kind === "drums");
-    const melodicTrack = tracks.find(
-      (t) => t.kind === "piano" || t.kind === "bass" || t.kind === "guitar",
-    );
+    const preset = findPreset(pack.presetId);
+    const melodicTrack = preset
+      ? tracks.find((track) => preset.compatibleWith.includes(track.kind))
+      : undefined;
 
     if (drumTrack) {
-      getStore().patchTrack(drumTrack.id, { kitId: pack.kitId });
+      getStore().applyDrumKit(drumTrack.id, pack.kitId);
     }
     if (melodicTrack && pack.presetId) {
-      getStore().patchTrack(melodicTrack.id, { presetId: pack.presetId });
+      getStore().applyMelodicPreset(melodicTrack.id, pack.presetId);
     }
     getStore().patchProject({ soundPackId: pack.id });
-    flushMixToEngine(getStore().state.project);
     getStore().setStatus(`Pack loaded: ${pack.name}`, "info");
   };
 

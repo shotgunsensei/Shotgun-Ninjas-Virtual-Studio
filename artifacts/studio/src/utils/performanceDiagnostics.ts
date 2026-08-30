@@ -40,7 +40,7 @@ declare global {
   }
 }
 
-const DEV = import.meta.env.DEV;
+const DEV = import.meta.env?.DEV ?? false;
 const counters: Record<string, number> = {
   activeRafLoops: 0,
   activeIntervals: 0,

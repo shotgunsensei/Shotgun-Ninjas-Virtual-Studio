@@ -8,7 +8,7 @@ import type {
   TrackEq,
   TrackSends,
 } from "../../types";
-import { DEFAULT_MASTER_BUS } from "./master";
+import { DEFAULT_MASTER_BUS } from "./master-defaults";
 
 /**
  * Mix presets — pure functions that take a `Project` and return a

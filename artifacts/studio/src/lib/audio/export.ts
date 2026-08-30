@@ -1,5 +1,4 @@
 import * as Tone from "tone";
-import lamejs from "@breezystack/lamejs";
 import type {
   BassPreset,
   DrumsPreset,
@@ -26,6 +25,14 @@ import {
   trackAudioResource,
 } from "../../utils/performanceDiagnostics";
 import { recordExportTrace } from "../performance/exportTrace";
+import { safeFilename } from "../export/download";
+
+export {
+  downloadBlob,
+  safeFilename,
+  studioExportFilename,
+  studioProjectFilename,
+} from "../export/download";
 
 const SAMPLE_RATE = 44100;
 const CHANNELS = 2;
@@ -181,7 +188,7 @@ async function _renderProjectInner(
 
   onProgress?.({ phase: "encoding", progress: 0 });
   if (format === "mp3") {
-    const mp3 = encodeMp3(buffer, (p) =>
+    const mp3 = await encodeMp3(buffer, (p) =>
       onProgress?.({ phase: "encoding", progress: p }),
     );
     onProgress?.({ phase: "encoding", progress: 1 });
@@ -962,27 +969,33 @@ function writeString(view: DataView, offset: number, str: string) {
 
 // ---------- MP3 encoding ----------
 
-function encodeMp3(
+async function encodeMp3(
   buffer: AudioBuffer,
   onProgress?: (p: number) => void,
-): Uint8Array {
+): Promise<Uint8Array> {
+  const { default: lamejs } = await import("@breezystack/lamejs");
   const numChannels = Math.min(2, buffer.numberOfChannels);
   const sampleRate = buffer.sampleRate;
   const kbps = 192;
   const encoder = new lamejs.Mp3Encoder(numChannels, sampleRate, kbps);
 
-  const left = floatTo16(buffer.getChannelData(0));
-  const right =
-    numChannels > 1 ? floatTo16(buffer.getChannelData(1)) : left;
-
   const blockSize = 1152;
-  const numFrames = left.length;
+  const leftInput = buffer.getChannelData(0);
+  const rightInput = numChannels > 1 ? buffer.getChannelData(1) : leftInput;
+  const left = new Int16Array(blockSize);
+  const right = numChannels > 1 ? new Int16Array(blockSize) : left;
+  const numFrames = leftInput.length;
   const chunks: Uint8Array[] = [];
 
   for (let i = 0; i < numFrames; i += blockSize) {
     const end = Math.min(i + blockSize, numFrames);
-    const lChunk = left.subarray(i, end);
-    const rChunk = right.subarray(i, end);
+    const frameCount = end - i;
+    for (let frame = 0; frame < frameCount; frame++) {
+      left[frame] = floatSampleTo16(leftInput[i + frame]);
+      if (numChannels > 1) right[frame] = floatSampleTo16(rightInput[i + frame]);
+    }
+    const lChunk = left.subarray(0, frameCount);
+    const rChunk = right.subarray(0, frameCount);
     const mp3buf =
       numChannels > 1
         ? encoder.encodeBuffer(lChunk, rChunk)
@@ -990,6 +1003,7 @@ function encodeMp3(
     if (mp3buf.length > 0) chunks.push(mp3buf);
     if (onProgress && i % (blockSize * 64) === 0) {
       onProgress(Math.min(0.99, i / numFrames));
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
   }
   const flush = encoder.flush();
@@ -1007,63 +1021,9 @@ function encodeMp3(
   return out;
 }
 
-function floatTo16(input: Float32Array): Int16Array {
-  const out = new Int16Array(input.length);
-  for (let i = 0; i < input.length; i++) {
-    let s = input[i];
-    if (s > 1) s = 1;
-    else if (s < -1) s = -1;
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return out;
-}
-
-export function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-export function safeFilename(name: string): string {
-  return name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
-}
-
-/**
- * Standard filename for studio audio bounces:
- *   shotgun-ninjas-studio_<project-name>_<bpm>_<YYYY-MM-DD>.<ext>
- */
-export function studioExportFilename(
-  projectName: string,
-  bpm: number,
-  extension: string,
-): string {
-  const safe = safeFilename(projectName);
-  return `shotgun-ninjas-studio_${safe}_${Math.round(bpm)}_${dateStamp()}.${extension}`;
-}
-
-/**
- * Filename convention for re-importable project files:
- *   shotgun-ninjas-studio_<project-name>_YYYY-MM-DD.snproj.json
- *
- * The `.snproj.json` suffix keeps the file recognisable as JSON while
- * also flagging it as a Shotgun Ninjas Studio project to the OS.
- */
-export function studioProjectFilename(projectName: string): string {
-  const safe = safeFilename(projectName);
-  return `shotgun-ninjas-studio_${safe}_${dateStamp()}.snproj.json`;
-}
-
-function dateStamp(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function floatSampleTo16(sample: number): number {
+  const bounded = Math.max(-1, Math.min(1, sample));
+  return bounded < 0 ? bounded * 0x8000 : bounded * 0x7fff;
 }
 
 // ---------- Stems & DAW Pack export ----------

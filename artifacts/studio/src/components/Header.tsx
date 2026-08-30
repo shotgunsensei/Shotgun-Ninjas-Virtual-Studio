@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import {
   Save,
@@ -19,7 +19,7 @@ import {
   Tag,
   Home,
 } from "lucide-react";
-import { ShareCardModal, type ShareCardData } from "./ShareCardModal";
+import type { ShareCardData } from "./ShareCardModal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,9 +27,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { gather, checkBrowserCompat } from "./DiagnosticsDialog";
-import { ProjectInfoDialog } from "./ProjectInfoDialog";
-import { ImportSummaryDialog } from "./ImportSummaryDialog";
 import {
   canUseFileSystemAccess,
   canWebShare,
@@ -42,13 +39,7 @@ import {
 import type { ProjectImportSummary } from "../lib/storage/db";
 import { Logo } from "./Logo";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { ShortcutOverlay } from "./ShortcutOverlay";
-import { SettingsModal } from "./SettingsModal";
-import { AboutDialog } from "./AboutDialog";
 import { Tip } from "./Tip";
-import { GlossaryPanel } from "./GlossaryPanel";
-import { LessonsPanel } from "./LessonsPanel";
-import { ShortcutsPanel } from "./ShortcutsPanel";
 import {
   useSettings,
   getSettings,
@@ -65,18 +56,17 @@ import { Progress } from "@/components/ui/progress";
 import { useStore, getStore, resetStore, defaultProject, flushMixToEngine } from "../store";
 import { audio } from "../lib/audio/engine";
 import { DEMOS, loadDemo, remixDemo } from "../lib/demos";
+import type {
+  ExportFormat,
+  RenderOptions,
+  RenderProgress,
+  StemProgress,
+} from "../lib/audio/export";
 import {
-  renderProject,
   downloadBlob,
   studioExportFilename,
   studioProjectFilename,
-  exportStemsZip,
-  exportDawPack,
-  type ExportFormat,
-  type RenderOptions,
-  type RenderProgress,
-  type StemProgress,
-} from "../lib/audio/export";
+} from "../lib/export/download";
 import { encodeMidiFile, encodeSingleTrackMidi } from "../lib/export/midi";
 import { encodeMusicXml, hasMelodicTracks } from "../lib/export/musicxml";
 import { parseMidiFile, midiToTrackPartials } from "../lib/import/midi";
@@ -108,6 +98,35 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+
+const loadAudioExporter = () => import("../lib/audio/export");
+const ShortcutOverlay = lazy(() =>
+  import("./ShortcutOverlay").then((module) => ({ default: module.ShortcutOverlay })),
+);
+const SettingsModal = lazy(() =>
+  import("./SettingsModal").then((module) => ({ default: module.SettingsModal })),
+);
+const AboutDialog = lazy(() =>
+  import("./AboutDialog").then((module) => ({ default: module.AboutDialog })),
+);
+const GlossaryPanel = lazy(() =>
+  import("./GlossaryPanel").then((module) => ({ default: module.GlossaryPanel })),
+);
+const LessonsPanel = lazy(() =>
+  import("./LessonsPanel").then((module) => ({ default: module.LessonsPanel })),
+);
+const ShortcutsPanel = lazy(() =>
+  import("./ShortcutsPanel").then((module) => ({ default: module.ShortcutsPanel })),
+);
+const ProjectInfoDialog = lazy(() =>
+  import("./ProjectInfoDialog").then((module) => ({ default: module.ProjectInfoDialog })),
+);
+const ImportSummaryDialog = lazy(() =>
+  import("./ImportSummaryDialog").then((module) => ({ default: module.ImportSummaryDialog })),
+);
+const ShareCardModal = lazy(() =>
+  import("./ShareCardModal").then((module) => ({ default: module.ShareCardModal })),
+);
 
 export function Header() {
   const project = useStore((s) => s.project);
@@ -286,6 +305,7 @@ export function Header() {
 
   const onExportDiagnostics = async () => {
     try {
+      const { gather, checkBrowserCompat } = await import("./DiagnosticsDialog");
       const snap = await gather();
       const compat = checkBrowserCompat();
       const report = { ...snap, browserCompatibility: compat };
@@ -331,6 +351,7 @@ export function Header() {
               customEndBeat: customEndBar * 4,
             }
           : {};
+      const { renderProject } = await loadAudioExporter();
       const result = await renderProject(
         proj,
         format,
@@ -695,6 +716,7 @@ export function Header() {
     const endCriticalOperation = beginStorageCriticalOperation();
     try {
       const proj = getStore().state.project;
+      const { exportStemsZip } = await loadAudioExporter();
       const blob = await exportStemsZip(proj, options, (p) => setStemProgress(p));
       const safe = proj.name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "song";
       downloadBlob(blob, `${safe}_stems.zip`);
@@ -748,6 +770,7 @@ export function Header() {
         name: t.name,
         bytes: encodeSingleTrackMidi(proj, t, { startBeat, endBeat }),
       }));
+      const { exportDawPack } = await loadAudioExporter();
       const blob = await exportDawPack(proj, projectJson, midiFiles, { loopOnly: options.loopOnly }, (p) =>
         setDawPackProgress(p),
       );
@@ -1723,30 +1746,41 @@ export function Header() {
         </DialogContent>
       </Dialog>
 
-      <ShortcutOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-      <GlossaryPanel
-        open={glossaryOpen}
-        onOpenChange={setGlossaryOpen}
-        initialTerm={glossaryTerm}
-      />
-      <LessonsPanel open={lessonsOpen} onOpenChange={setLessonsOpen} />
-      <ShortcutsPanel open={shortcutsPanelOpen} onOpenChange={setShortcutsPanelOpen} />
-      <ProjectInfoDialog
-        open={projectInfoOpen}
-        onOpenChange={setProjectInfoOpen}
-      />
-      <ImportSummaryDialog
-        summary={importSummary}
-        onCancel={() => setImportSummary(null)}
-        onConfirm={confirmImport}
-      />
-      <ShareCardModal
-        open={shareCardOpen}
-        onOpenChange={setShareCardOpen}
-        data={shareCardData}
-      />
+      <Suspense fallback={null}>
+        {shortcutsOpen && (
+          <ShortcutOverlay open onOpenChange={setShortcutsOpen} />
+        )}
+        {settingsOpen && <SettingsModal open onOpenChange={setSettingsOpen} />}
+        {aboutOpen && <AboutDialog open onOpenChange={setAboutOpen} />}
+        {glossaryOpen && (
+          <GlossaryPanel
+            open
+            onOpenChange={setGlossaryOpen}
+            initialTerm={glossaryTerm}
+          />
+        )}
+        {lessonsOpen && <LessonsPanel open onOpenChange={setLessonsOpen} />}
+        {shortcutsPanelOpen && (
+          <ShortcutsPanel open onOpenChange={setShortcutsPanelOpen} />
+        )}
+        {projectInfoOpen && (
+          <ProjectInfoDialog open onOpenChange={setProjectInfoOpen} />
+        )}
+        {importSummary && (
+          <ImportSummaryDialog
+            summary={importSummary}
+            onCancel={() => setImportSummary(null)}
+            onConfirm={confirmImport}
+          />
+        )}
+        {shareCardOpen && shareCardData && (
+          <ShareCardModal
+            open
+            onOpenChange={setShareCardOpen}
+            data={shareCardData}
+          />
+        )}
+      </Suspense>
     </header>
   );
 }

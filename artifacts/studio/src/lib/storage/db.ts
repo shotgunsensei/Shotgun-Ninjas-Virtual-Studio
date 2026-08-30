@@ -37,14 +37,7 @@ type SerializedChopLab = Omit<ChopLabPersistedState, "sampleBlob">;
 interface SerializedProject extends Omit<Project, "tracks" | "samples" | "chopLab"> {
   tracks: Array<
     Omit<Project["tracks"][number], "audioClips"> & {
-      audioClips: Array<{
-        id: string;
-        start: number;
-        durationSec: number;
-        offsetSec?: number;
-        sourceDurationSec?: number;
-        blobKey?: string;
-      }>;
+      audioClips: Array<Omit<Project["tracks"][number]["audioClips"][number], "blob">>;
     }
   >;
   samples?: Array<Omit<SampleLibraryItem, "blob">>;
@@ -204,14 +197,9 @@ async function serializeAndFlushBlobs(
                 blobFpCache.set(blobKey, fp);
               }
             }
-            return {
-              id: c.id,
-              start: c.start,
-              durationSec: c.durationSec,
-              offsetSec: c.offsetSec,
-              sourceDurationSec: c.sourceDurationSec,
-              blobKey,
-            };
+            const { blob: _blob, ...persistedClip } = c;
+            void _blob;
+            return { ...persistedClip, blobKey };
           }),
         ),
       })),
@@ -503,7 +491,7 @@ interface ProjectJsonV1 {
    *  v2 = adds `brand`, optional embedded blobs gated on exportMode. */
   version: 1 | 2;
   brand?: ProjectJsonBrand;
-  project: Omit<Project, "tracks" | "samples"> & {
+  project: Omit<Project, "tracks" | "samples" | "chopLab"> & {
     tracks: Array<
       Omit<Project["tracks"][number], "audioClips"> & {
         audioClips: Array<{
@@ -519,6 +507,10 @@ interface ProjectJsonV1 {
       }
     >;
     samples?: Array<Omit<SampleLibraryItem, "blob"> & { mimeType?: string; base64?: string }>;
+    chopLab?: Omit<ChopLabPersistedState, "sampleBlob"> & {
+      mimeType?: string;
+      base64?: string;
+    };
   };
 }
 
@@ -612,6 +604,16 @@ export async function projectToJson(
         }
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
+    let chopLab: ProjectJsonV1["project"]["chopLab"];
+    if (project.chopLab) {
+      const { sampleBlob, ...persisted } = project.chopLab;
+      if (embed && sampleBlob) {
+        const encoded = await blobToBase64(sampleBlob);
+        chopLab = { ...persisted, ...encoded };
+      } else {
+        chopLab = persisted;
+      }
+    }
     const now = Date.now();
     const brand: ProjectJsonBrand = {
       createdWith: CREATED_WITH,
@@ -633,6 +635,7 @@ export async function projectToJson(
         updatedAt: now,
         tracks,
         samples,
+        chopLab,
       } as ProjectJsonV1["project"],
     };
     return JSON.stringify(payload, null, 2);
@@ -699,11 +702,14 @@ export function summarizeProjectJson(text: string): ProjectImportSummary {
     noteClipCount += Array.isArray(t.noteClips) ? t.noteClips.length : 0;
     audioClipCount += Array.isArray(t.audioClips) ? t.audioClips.length : 0;
     for (const c of t.audioClips ?? []) {
-      if (!c.base64 && !c.blobKey) missingSampleNames.push(`${t.name} clip`);
+      if (!c.base64) missingSampleNames.push(`${t.name} clip`);
     }
   }
   for (const s of data.project.samples ?? []) {
-    if (!s.base64 && !s.blobKey) missingSampleNames.push(s.name);
+    if (!s.base64) missingSampleNames.push(s.name);
+  }
+  if (data.project.chopLab?.sampleName && !data.project.chopLab.base64) {
+    missingSampleNames.push(`Chop Lab: ${data.project.chopLab.sampleName}`);
   }
   const isOlderAppVersion =
     !!data.brand && compareVersions(data.brand.appVersion, APP_VERSION) < 0;
@@ -758,12 +764,24 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
   const samples = (p.samples ?? []).map((s) => {
     const blob =
       hydrateBlobs && s.base64 && s.mimeType ? base64ToBlob(s.base64, s.mimeType) : undefined;
-    const blobKey = `${newId}:sample:${s.id}`;
+    const blobKey = blob ? `${newId}:sample:${s.id}` : undefined;
     const { base64: _b, mimeType: _m, ...rest } = s;
     void _b;
     void _m;
     return { ...rest, blob, blobKey } as SampleLibraryItem;
   });
+  let chopLab: ChopLabPersistedState | undefined;
+  if (p.chopLab) {
+    const sampleBlob =
+      hydrateBlobs && p.chopLab.base64 && p.chopLab.mimeType
+        ? base64ToBlob(p.chopLab.base64, p.chopLab.mimeType)
+        : undefined;
+    const sampleBlobKey = sampleBlob ? `${newId}:choplab` : undefined;
+    const { base64: _base64, mimeType: _mimeType, ...persisted } = p.chopLab;
+    void _base64;
+    void _mimeType;
+    chopLab = { ...persisted, sampleBlob, sampleBlobKey };
+  }
   // Funnel imported JSON through the migrator so old exports get the
   // same defaults / schema stamp as IndexedDB loads.
   const migrated = migrateProject({
@@ -771,6 +789,7 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
     id: newId,
     tracks,
     samples,
+    chopLab,
     updatedAt: Date.now(),
   }).project;
   return migrated;

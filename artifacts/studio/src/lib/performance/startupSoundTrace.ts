@@ -14,13 +14,18 @@ const STORAGE_KEY = "sn:startupSoundTrace";
 const QUERY_KEY = "snStartupSoundTrace";
 const MAX_EVENTS = 500;
 const events: StartupSoundEvent[] = [];
+let cachedTraceEnabled: boolean | null = null;
 
 function shouldTrace(): boolean {
+  if (cachedTraceEnabled !== null) return cachedTraceEnabled;
   if (typeof window === "undefined") return false;
   try {
     const params = new URLSearchParams(window.location.search);
-    return params.get(QUERY_KEY) === "1" || window.localStorage.getItem(STORAGE_KEY) === "1";
+    cachedTraceEnabled =
+      params.get(QUERY_KEY) === "1" || window.localStorage.getItem(STORAGE_KEY) === "1";
+    return cachedTraceEnabled;
   } catch {
+    cachedTraceEnabled = false;
     return false;
   }
 }

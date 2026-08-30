@@ -6,8 +6,8 @@
  * `/public/samples/...` (mirrored as `/samples/...` at runtime by Vite).
  * This resolver:
  *
- *   1. Probes each declared URL with a `HEAD` request to detect which
- *      files actually exist in the current build.
+ *   1. Fetches and decodes each declared URL once, dropping unavailable
+ *      layers without a separate `HEAD` round trip.
  *   2. Loads the survivors as Tone.Player buffers (drums) or hands a
  *      `urls` map to Tone.Sampler (melodic).
  *   3. Picks the right voice per hit by velocity window AND round-robin
@@ -38,13 +38,18 @@ interface LoadedPlayer {
   player: Tone.Player;
 }
 
-/** Probe one URL via HEAD. Resolves to true when the asset exists. */
-async function probeUrl(url: string): Promise<boolean> {
+interface LoadedLayer {
+  layer: SampleLayer;
+  buffer: AudioBuffer;
+}
+
+/** Fetch and decode one layer. A failed layer never blocks synth fallback. */
+async function loadLayer(layer: SampleLayer): Promise<LoadedLayer | null> {
   try {
-    const res = await fetch(url, { method: "HEAD" });
-    return res.ok;
+    const buffer = await Tone.ToneAudioBuffer.load(layer.url);
+    return { layer, buffer };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -60,43 +65,29 @@ export async function tryLoadDrumSamples(
 ): Promise<DrumSampleBank | null> {
   if (!layers || layers.length === 0) return null;
 
-  // Probe all URLs in parallel; only keep the ones that exist.
-  const probes = await Promise.all(
-    layers.map(async (l) => ((await probeUrl(l.url)) ? l : null)),
+  // Fetch/decode in parallel. This replaces the old HEAD + GET path, which
+  // doubled requests and failed on static hosts that do not implement HEAD.
+  const decoded = (await Promise.all(layers.map(loadLayer))).filter(
+    (item): item is LoadedLayer => item !== null,
   );
-  const reachable = probes.filter((l): l is SampleLayer => l !== null);
-  if (reachable.length === 0) return null;
+  if (decoded.length === 0) return null;
 
   // Load the surviving samples into Tone.Players. If any decoding
   // fails, drop that layer and keep going — partial loads are useful.
   const loaded: LoadedPlayer[] = [];
   await Promise.all(
-    reachable.map(
-      (layer) =>
-        new Promise<void>((resolve) => {
-          try {
-            const player = new Tone.Player({
-              url: layer.url,
-              autostart: false,
-              onload: () => {
-                player.connect(dest);
-                loaded.push({ layer, player });
-                resolve();
-              },
-              onerror: () => {
-                try {
-                  player.dispose();
-                } catch {
-                  // ignore
-                }
-                resolve();
-              },
-            });
-          } catch {
-            resolve();
-          }
-        }),
-    ),
+    decoded.map(async ({ layer, buffer }) => {
+      try {
+        const player = new Tone.Player({
+          url: buffer,
+          autostart: false,
+        });
+        player.connect(dest);
+        loaded.push({ layer, player });
+      } catch {
+        // A single corrupt/incompatible layer must not discard the bank.
+      }
+    }),
   );
   if (loaded.length === 0) return null;
 
@@ -147,7 +138,7 @@ export async function tryLoadDrumSamples(
 }
 
 /**
- * Probe melodic preset layers and, when at least one file is reachable,
+ * Load melodic preset layers and, when at least one file is reachable,
  * build a Tone.Sampler from the survivors keyed by `rootNote`. Returns
  * `null` to signal "no layers available — use synth fallback".
  */
@@ -156,37 +147,29 @@ export async function tryLoadMelodicSampler(
   options: { release?: number; attack?: number; volume?: number } = {},
 ): Promise<Tone.Sampler | null> {
   if (!layers || layers.length === 0) return null;
-  const probes = await Promise.all(
-    layers.map(async (l) => ((await probeUrl(l.url)) ? l : null)),
+  const decoded = (await Promise.all(layers.map(loadLayer))).filter(
+    (item): item is LoadedLayer => item !== null,
   );
-  const reachable = probes.filter((l): l is SampleLayer => l !== null);
-  if (reachable.length === 0) return null;
+  if (decoded.length === 0) return null;
 
-  // Build a { note -> url } map. Layers without rootNote are ignored
+  // Build a { note -> decoded buffer } map. Layers without rootNote are ignored
   // because Tone.Sampler needs a base pitch to repitch from.
-  const urls: Record<string, string> = {};
-  for (const l of reachable) {
-    if (l.rootNote) urls[l.rootNote] = l.url;
+  const urls: Record<string, AudioBuffer> = {};
+  for (const { layer, buffer } of decoded) {
+    if (layer.rootNote) urls[layer.rootNote] = buffer;
   }
   if (Object.keys(urls).length === 0) return null;
 
-  return new Promise((resolve) => {
-    const sampler = new Tone.Sampler({
+  try {
+    return new Tone.Sampler({
       urls,
       release: options.release ?? 1,
       attack: options.attack ?? 0,
       volume: options.volume ?? -6,
-      onload: () => resolve(sampler),
-      onerror: () => {
-        try {
-          sampler.dispose();
-        } catch {
-          // ignore
-        }
-        resolve(null as unknown as Tone.Sampler);
-      },
     });
-  });
+  } catch {
+    return null;
+  }
 }
 
 function velocityToDb(v: number): number {

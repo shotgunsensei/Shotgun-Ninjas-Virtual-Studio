@@ -1,6 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Play, Pause, Square, Circle, Volume2, AlertOctagon, AlertTriangle, RadioTower, Gamepad2, Activity, History, Trash2, ExternalLink } from "lucide-react";
-import { WorldPickerButton } from "./WorldPicker";
 import { StereoMeter } from "./Meter";
 import { MasterScope } from "./MasterScope";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,6 @@ import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { useTransport } from "../hooks/useTransport";
 import { MidiLearnButton } from "./MidiLearnButton";
 import { Tip } from "./Tip";
-import { useSettings } from "../lib/settings";
 import { OfflineReadyIndicator } from "./PwaInstallControls";
 import { useMidi, useMidiEvents, midiNoteToName } from "../lib/midi/midi";
 import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
@@ -23,6 +21,9 @@ import { firstPlayMark } from "../lib/performance/firstPlayTrace";
 
 const AudioDiagnosticsPanel = lazy(() =>
   import("./AudioDiagnosticsPanel").then((m) => ({ default: m.AudioDiagnosticsPanel })),
+);
+const WorldPickerButton = lazy(() =>
+  import("./WorldPicker").then((m) => ({ default: m.WorldPickerButton })),
 );
 
 export function TransportBar() {
@@ -41,17 +42,7 @@ export function TransportBar() {
   const countInBeat = useStore((s) => s.countInBeat);
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const { play, pause, stop, record } = useTransport();
-  const metronomeVolume = useSettings((s) => s.metronomeVolume);
   const [diagOpen, setDiagOpen] = useState(false);
-
-  useEffect(() => { audio.setBpm(bpm); }, [bpm]);
-  useEffect(() => { audio.setMaster(masterVolume); }, [masterVolume]);
-  useEffect(() => {
-    audio.setLoop(loopEnabled, loopStartBeat, loopEndBeat);
-  }, [loopEnabled, loopStartBeat, loopEndBeat]);
-  useEffect(() => { audio.setMetronome(metronome); }, [metronome]);
-  useEffect(() => { audio.setMetronomeVolume(metronomeVolume); }, [metronomeVolume]);
-  useEffect(() => { audio.setSwing(globalSwing); }, [globalSwing]);
 
   return (
     <div className="relative">
@@ -271,7 +262,9 @@ export function TransportBar() {
       )}
 
       <PerformanceButton />
-      <WorldPickerButton />
+      <Suspense fallback={<div className="h-8 w-24" aria-hidden />}>
+        <WorldPickerButton />
+      </Suspense>
 
       <div className="flex-1" />
 

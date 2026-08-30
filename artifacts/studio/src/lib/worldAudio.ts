@@ -6,27 +6,31 @@ import type { WorldId } from "./worlds";
  * directly. No Tone.js dependency — just raw AudioContext so it works even
  * before the Tone engine is fully started.
  */
-export function playWorldWelcome(world: StudioWorld, ctx: AudioContext): void {
+export function playWorldWelcome(
+  world: StudioWorld,
+  ctx: AudioContext,
+  output: AudioNode = ctx.destination,
+): void {
   try {
     const { type, freq, duration } = world.welcomeSynth;
     switch (type) {
       case "percussive-strike":
-        _percussiveStrike(ctx, freq, duration);
+        _percussiveStrike(ctx, freq, duration, output);
         break;
       case "low-rumble":
-        _lowRumble(ctx, freq, duration);
+        _lowRumble(ctx, freq, duration, output);
         break;
       case "arpeggio":
-        _arpeggio(ctx, freq, duration);
+        _arpeggio(ctx, freq, duration, output);
         break;
       case "chord-stab":
-        _chordStab(ctx, freq, duration);
+        _chordStab(ctx, freq, duration, output);
         break;
       case "deep-gong":
-        _deepGong(ctx, freq, duration);
+        _deepGong(ctx, freq, duration, output);
         break;
       case "8bit-jingle":
-        _eightBitJingle(ctx, freq, duration);
+        _eightBitJingle(ctx, freq, duration, output);
         break;
     }
   } catch {
@@ -59,11 +63,12 @@ export function startAmbientLoop(
   worldId: WorldId,
   ctx: AudioContext,
   volume: number,
+  output: AudioNode = ctx.destination,
 ): AmbientLoop {
   const masterGain = ctx.createGain();
   masterGain.gain.setValueAtTime(0, ctx.currentTime);
   masterGain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 2.0);
-  masterGain.connect(ctx.destination);
+  masterGain.connect(output);
 
   let stopped = false;
   const stoppers: Array<() => void> = [];
@@ -626,10 +631,10 @@ function _noiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
 // Welcome cue internals (unchanged)
 // ---------------------------------------------------------------------------
 
-function _master(ctx: AudioContext, gain: number): GainNode {
+function _master(ctx: AudioContext, gain: number, output: AudioNode): GainNode {
   const g = ctx.createGain();
   g.gain.setValueAtTime(gain, ctx.currentTime);
-  g.connect(ctx.destination);
+  g.connect(output);
   return g;
 }
 
@@ -648,8 +653,13 @@ function _env(
 }
 
 /** Dojo Dark: sharp transient strike + reverb shimmer */
-function _percussiveStrike(ctx: AudioContext, freq: number, dur: number) {
-  const master = _master(ctx, 0.6);
+function _percussiveStrike(
+  ctx: AudioContext,
+  freq: number,
+  dur: number,
+  output: AudioNode,
+) {
+  const master = _master(ctx, 0.6, output);
   const t = ctx.currentTime;
 
   // Click body
@@ -694,8 +704,8 @@ function _percussiveStrike(ctx: AudioContext, freq: number, dur: number) {
 }
 
 /** Demon Truck Garage: low distorted rumble */
-function _lowRumble(ctx: AudioContext, freq: number, dur: number) {
-  const master = _master(ctx, 0.5);
+function _lowRumble(ctx: AudioContext, freq: number, dur: number, output: AudioNode) {
+  const master = _master(ctx, 0.5, output);
   const t = ctx.currentTime;
 
   const osc = ctx.createOscillator();
@@ -746,8 +756,8 @@ function _lowRumble(ctx: AudioContext, freq: number, dur: number) {
 }
 
 /** Neon Rooftop: bright arpeggiated synth blip */
-function _arpeggio(ctx: AudioContext, freq: number, dur: number) {
-  const master = _master(ctx, 0.45);
+function _arpeggio(ctx: AudioContext, freq: number, dur: number, output: AudioNode) {
+  const master = _master(ctx, 0.45, output);
   const t = ctx.currentTime;
   const notes = [freq, freq * 1.25, freq * 1.5, freq * 2, freq * 2.5];
   const stepDur = dur / notes.length;
@@ -776,8 +786,8 @@ function _arpeggio(ctx: AudioContext, freq: number, dur: number) {
 }
 
 /** Lo-Fi Smoke Room: warm filtered chord stab */
-function _chordStab(ctx: AudioContext, freq: number, dur: number) {
-  const master = _master(ctx, 0.4);
+function _chordStab(ctx: AudioContext, freq: number, dur: number, output: AudioNode) {
+  const master = _master(ctx, 0.4, output);
   const t = ctx.currentTime;
   const ratios = [1, 1.25, 1.5, 2]; // Major chord approx
 
@@ -810,8 +820,8 @@ function _chordStab(ctx: AudioContext, freq: number, dur: number) {
 }
 
 /** Cyber Temple: deep gong with shimmer */
-function _deepGong(ctx: AudioContext, freq: number, dur: number) {
-  const master = _master(ctx, 0.5);
+function _deepGong(ctx: AudioContext, freq: number, dur: number, output: AudioNode) {
+  const master = _master(ctx, 0.5, output);
   const t = ctx.currentTime;
 
   // Fundamental
@@ -853,8 +863,13 @@ function _deepGong(ctx: AudioContext, freq: number, dur: number) {
 }
 
 /** Arcade Alley: 8-bit coin/jingle */
-function _eightBitJingle(ctx: AudioContext, freq: number, dur: number) {
-  const master = _master(ctx, 0.5);
+function _eightBitJingle(
+  ctx: AudioContext,
+  freq: number,
+  dur: number,
+  output: AudioNode,
+) {
+  const master = _master(ctx, 0.5, output);
   const t = ctx.currentTime;
 
   // Classic coin sound: two notes up

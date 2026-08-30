@@ -3,9 +3,10 @@ import { audio } from "./lib/audio/engine";
 import { firstPlayMark, getFirstPlayFlags } from "./lib/performance/firstPlayTrace";
 import { trackListenerSubscription } from "./lib/performance/listenerTrace";
 import { startPerfTimer } from "./utils/performanceDiagnostics";
-import { DEFAULT_MASTER_BUS } from "./lib/audio/master";
+import { DEFAULT_MASTER_BUS } from "./lib/audio/master-defaults";
 import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
 import { wireTrackAutomationTargets } from "./lib/plugins/automation";
+import { findPreset, presetSoundParams } from "./lib/audio/sounds/presets";
 import type {
   AnyPreset,
   AutomationBreakpoint,
@@ -13,6 +14,7 @@ import type {
   AutomationLane,
   AutomationParamId,
   ChopLabPersistedState,
+  DrumKitId,
   FxModuleId,
   FxModuleSettings,
   InstrumentKind,
@@ -101,6 +103,39 @@ const DEFAULT_CHOP_LAB: ChopLabState = {
   sampleBpm: 120,
   syncToBpm: false,
 };
+
+/** Compare only fields captured by transport callbacks or used to construct a
+ * playable voice. Mixer/UI edits must not invalidate the arrangement, while
+ * same-count note edits, clip trims, kit/preset changes, and groove edits must. */
+function projectSchedulingChanged(previous: Project, next: Project): boolean {
+  if (previous === next) return false;
+  if (previous.bpm !== next.bpm || previous.globalGroove !== next.globalGroove) {
+    return true;
+  }
+  if (previous.tracks === next.tracks) return false;
+  if (previous.tracks.length !== next.tracks.length) return true;
+
+  for (let index = 0; index < previous.tracks.length; index++) {
+    const before = previous.tracks[index];
+    const after = next.tracks[index];
+    if (before === after) continue;
+    if (
+      before.id !== after.id ||
+      before.kind !== after.kind ||
+      before.preset !== after.preset ||
+      before.presetId !== after.presetId ||
+      before.kitId !== after.kitId ||
+      before.noteClips !== after.noteClips ||
+      before.audioClips !== after.audioClips ||
+      before.groove !== after.groove ||
+      before.sound !== after.sound ||
+      before.pieceSettings !== after.pieceSettings
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 class Store {
   private listeners = new Set<Listener>();
@@ -227,12 +262,17 @@ class Store {
       Object.prototype.hasOwnProperty.call(patch, "project") &&
       patch.project !== undefined &&
       patch.project !== this.state.project;
+    const scheduleChanged =
+      projectChanged && projectSchedulingChanged(this.state.project, patch.project!);
     this.state = {
       ...this.state,
       ...patch,
       projectRevision: projectChanged
         ? this.state.projectRevision + 1
         : patch.projectRevision ?? this.state.projectRevision,
+      transportScheduleRevision: scheduleChanged
+        ? this.state.transportScheduleRevision + 1
+        : patch.transportScheduleRevision ?? this.state.transportScheduleRevision,
     };
     this.listeners.forEach((l) => l());
   }
@@ -241,11 +281,16 @@ class Store {
     firstPlayMark("store.patchProject", {
       keys: Object.keys(patch),
     });
+    const project = { ...this.state.project, ...patch, updatedAt: Date.now() };
+    const scheduleChanged = projectSchedulingChanged(this.state.project, project);
     this.state = {
       ...this.state,
-      project: { ...this.state.project, ...patch, updatedAt: Date.now() },
+      project,
       projectRevision: this.state.projectRevision + 1,
+      transportScheduleRevision:
+        this.state.transportScheduleRevision + (scheduleChanged ? 1 : 0),
     };
+    if (patch.tracks) audio.setProjectTrackSnapshots(project.tracks);
     this.listeners.forEach((l) => l());
   }
 
@@ -254,6 +299,27 @@ class Store {
       t.id === trackId ? { ...t, ...patch } : t,
     );
     this.patchProject({ tracks });
+  }
+
+  /** Apply and persist a complete melodic preset in one authoritative path. */
+  applyMelodicPreset(trackId: string, presetId: string): boolean {
+    const track = this.state.project.tracks.find((item) => item.id === trackId);
+    const preset = findPreset(presetId);
+    if (!track || !preset || !preset.compatibleWith.includes(track.kind)) return false;
+    const sound = { ...(track.sound ?? {}), ...presetSoundParams(preset) };
+    this.patchTrack(trackId, { presetId, sound });
+    audio.setMelodicPreset(trackId, presetId);
+    audio.setSoundParams(trackId, sound);
+    return true;
+  }
+
+  /** Apply and persist a drum kit without waiting for the next transport run. */
+  applyDrumKit(trackId: string, kitId: DrumKitId): boolean {
+    const track = this.state.project.tracks.find((item) => item.id === trackId);
+    if (!track || track.kind !== "drums") return false;
+    this.patchTrack(trackId, { kitId });
+    audio.setKit(trackId, kitId);
+    return true;
   }
 
   // ---- v2 mixer ops ----
@@ -1204,7 +1270,7 @@ export function resetStore(project: Project) {
     tracks: project.tracks.length,
     name: project.name,
   });
-  audio.cancelAllProjectSchedules();
+  audio.replaceProject(project);
   try {
     const endStoreReplace = startPerfTimer("project.resetStore:replace", {
       tracks: project.tracks.length,

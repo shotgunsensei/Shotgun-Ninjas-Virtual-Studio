@@ -8,7 +8,7 @@
  *   3. Call `dispose()` when the panel unmounts.
  *
  * Audio chain per slice:
- *   Player → Gain (normalize) → Tone.Destination
+ *   Player → Gain (normalize) → shared output → AudioEngine master
  *
  * Pitch shift is done via `player.playbackRate` (2^(semis/12)).
  * Fade in/out use the player's built-in `fadeIn`/`fadeOut` fields.
@@ -43,16 +43,6 @@ interface SlotEntry {
   baseGain: number;
 }
 
-/** Compute peak amplitude of a Float32Array (channel data). */
-function peakAmplitude(data: Float32Array): number {
-  let peak = 0;
-  for (let i = 0; i < data.length; i++) {
-    const abs = Math.abs(data[i]);
-    if (abs > peak) peak = abs;
-  }
-  return peak;
-}
-
 /** Extract a mono-mixed slice from an AudioBuffer into a new AudioBuffer. */
 function extractSlice(
   ctx: AudioContext | OfflineAudioContext,
@@ -76,12 +66,31 @@ function extractSlice(
 
 export class ChopEngine {
   private slots: SlotEntry[] = [];
+  private output = new Tone.Gain(1);
   private sourceBuffer: AudioBuffer | null = null;
   private markers: number[] = [];
   private settings: ChopSliceSetting[] = [];
   private syncToBpm = false;
   private sampleBpm = 120;
   private projectBpm = 120;
+
+  /** Route every slice through the Studio master safety chain. */
+  setOutput(destination: Tone.InputNode) {
+    try {
+      this.output.disconnect();
+    } catch {
+      // first connection
+    }
+    this.output.connect(destination);
+  }
+
+  disconnectOutput() {
+    try {
+      this.output.disconnect();
+    } catch {
+      // already disconnected
+    }
+  }
 
   /** 
    * (Re)load the engine with a new source buffer + current markers + settings.
@@ -218,7 +227,7 @@ export class ChopEngine {
     // Up to 16 slices
     const count = Math.min(16, sorted.length);
 
-    // Use a plain AudioContext to extract sub-buffers.
+    // Use the active AudioContext to extract sub-buffers.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawCtx: AudioContext = (Tone.getContext().rawContext as any);
 
@@ -227,16 +236,10 @@ export class ChopEngine {
       const end = i + 1 < sorted.length ? sorted[i + 1] : duration;
       const sliceBuf = extractSlice(rawCtx, buf, start, end);
 
-      // Build ToneAudioBuffer supporting mono and stereo.
-      const channels: Float32Array[] = [];
-      for (let ch = 0; ch < sliceBuf.numberOfChannels; ch++) {
-        channels.push(sliceBuf.getChannelData(ch));
-      }
-      const toneBuf = new Tone.ToneAudioBuffer();
-      toneBuf.fromArray(channels.length === 1 ? channels[0] : channels);
-
-      const gain = new Tone.Gain(1).toDestination();
-      const player = new Tone.Player(toneBuf).connect(gain);
+      // Passing the AudioBuffer directly avoids a second full PCM copy through
+      // ToneAudioBuffer.fromArray for every slice.
+      const gain = new Tone.Gain(1).connect(this.output);
+      const player = new Tone.Player(sliceBuf).connect(gain);
 
       const s = this.settings[i] ?? DEFAULT_SLICE_SETTING;
       const entry: SlotEntry = { player, gain, sliceIndex: i, baseGain: 1 };
@@ -501,8 +504,31 @@ function audioBufferToWav(buf: AudioBuffer): ArrayBuffer {
 
 /** Shared singleton for the Chop Lab panel. */
 let _chopEngine: ChopEngine | null = null;
+let _chopOutput: Tone.InputNode | null = null;
+
+export function configureChopEngineOutput(destination: Tone.InputNode) {
+  _chopOutput = destination;
+  _chopEngine?.setOutput(destination);
+}
+
+export function stopChopEngine() {
+  _chopEngine?.stopAll();
+}
+
+export function disposeChopEngine() {
+  _chopEngine?.dispose();
+}
+
+export function disconnectChopEngineOutput() {
+  _chopOutput = null;
+  _chopEngine?.disconnectOutput();
+}
+
 export function getChopEngine(): ChopEngine {
-  if (!_chopEngine) _chopEngine = new ChopEngine();
+  if (!_chopEngine) {
+    _chopEngine = new ChopEngine();
+    if (_chopOutput) _chopEngine.setOutput(_chopOutput);
+  }
   return _chopEngine;
 }
 

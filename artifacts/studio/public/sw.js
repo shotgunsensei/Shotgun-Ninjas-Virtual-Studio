@@ -8,15 +8,13 @@ const SHELL_CACHE = `sn-studio-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `sn-studio-runtime-${CACHE_VERSION}`;
 const BASE = new URL(self.registration.scope).pathname;
 
-// Build-time injected: hashed JS/CSS chunks emitted by Vite. Precaching
-// these guarantees the studio boots offline after one successful load —
-// the initial page request often races the SW activation, so we cannot
-// rely on runtime fetch interception alone to seed shell-critical
-// assets. Patched by snVirtualStudioPwaPlugin in vite.config.ts.
+// Build-time injected: only the entry JS/CSS referenced by index.html. Lazy
+// Studio and panel chunks are cached on demand so visiting the landing page
+// does not download the complete DAW in the background.
 const BUILD_ASSETS = __SN_PRECACHE_URLS__;
 
 // Always-precached app shell.
-const SHELL_URLS = [
+const SHELL_URLS = Array.from(new Set([
   BASE,
   BASE + "index.html",
   BASE + "manifest.webmanifest",
@@ -24,24 +22,23 @@ const SHELL_URLS = [
   BASE + "pwa-icon.svg",
   BASE + "pwa-icon-maskable.svg",
   ...BUILD_ASSETS.map((p) => BASE + p),
-];
+]));
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(SHELL_CACHE);
-      // Use reload to bypass HTTP cache so we always seed a fresh shell.
-      await Promise.all(
+      // Treat the app shell atomically: an incomplete cache must not be
+      // reported as offline-ready. Lazy chunks remain runtime-cached on use.
+      const entries = await Promise.all(
         SHELL_URLS.map(async (url) => {
-          try {
-            const req = new Request(url, { cache: "reload" });
-            const res = await fetch(req);
-            if (res && res.ok) await cache.put(url, res);
-          } catch {
-            /* asset may be missing in dev; ignored */
-          }
+          const request = new Request(url, { cache: "reload" });
+          const response = await fetch(request);
+          if (!response.ok) throw new Error(`Failed to precache ${url}: ${response.status}`);
+          return [url, response];
         }),
       );
+      await Promise.all(entries.map(([url, response]) => cache.put(url, response)));
     })(),
   );
 });
@@ -151,6 +148,10 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     (async () => {
+      const shellCache = await caches.open(SHELL_CACHE);
+      const shellCached = await shellCache.match(request);
+      if (shellCached) return shellCached;
+
       const cache = await caches.open(RUNTIME_CACHE);
       const cached = await cache.match(request);
       const network = fetch(request)

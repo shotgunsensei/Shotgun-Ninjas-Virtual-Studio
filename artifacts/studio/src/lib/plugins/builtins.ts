@@ -238,7 +238,7 @@ export function registerBuiltins(): void {
     pluginRegistry.register(makeEffectManifest(def));
   }
 
-  if (import.meta.env.DEV) {
+  if (import.meta.env?.DEV ?? false) {
     console.log(
       `[PluginRegistry] Registered ${pluginRegistry.size} built-in plugins.`,
     );

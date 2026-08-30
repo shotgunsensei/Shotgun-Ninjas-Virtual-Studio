@@ -3,6 +3,9 @@ import type { MasterBusSettings, SendBusId } from "../../types";
 import { SEND_BUS_IDS } from "../../types";
 import { describeError, workletManager } from "./worklet-manager";
 import { trackInterval } from "../../utils/performanceDiagnostics";
+import { DEFAULT_MASTER_BUS } from "./master-defaults";
+
+export { DEFAULT_MASTER_BUS } from "./master-defaults";
 
 /**
  * Master safety chain (v2, Phase 6 upgrade).
@@ -32,19 +35,6 @@ export interface SendBusNode {
   fx: Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay;
 }
 
-export const DEFAULT_MASTER_BUS: MasterBusSettings = {
-  limiterThresholdDb: -0.6,
-  limiterGainDb: 0,
-  glueEnabled: true,
-  glueThresholdDb: -14,
-  glueRatio: 2,
-  glueAttack: 0.025,
-  glueRelease: 0.18,
-  softClip: false,
-  width: 1,
-  oversample: false,
-};
-
 export class MasterChain {
   readonly input: Tone.Channel;
   private glueComp: Tone.Compressor;
@@ -72,6 +62,7 @@ export class MasterChain {
   private limiterWorklet: AudioWorkletNode | null = null;
   private workletsActive = false;
   private workletParamTimer: number | null = null;
+  private disposed = false;
 
   constructor() {
     this.input = new Tone.Channel({ volume: 0 });
@@ -436,8 +427,11 @@ export class MasterChain {
   }
 
   dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
     if (this.clipCheckId !== null && typeof window !== "undefined") {
       window.clearInterval(this.clipCheckId);
+      this.clipCheckId = null;
       this.untrackClipCheckInterval?.();
       this.untrackClipCheckInterval = null;
     }
@@ -446,6 +440,43 @@ export class MasterChain {
       this.workletParamTimer = null;
     }
     this.cleanupFailedWorklets();
+    for (const bus of this.buses.values()) {
+      for (const node of [bus.input, bus.fx]) {
+        try {
+          node.disconnect();
+        } catch {
+          // already disconnected
+        }
+        try {
+          node.dispose();
+        } catch {
+          // best-effort teardown
+        }
+      }
+    }
+    this.buses.clear();
+    for (const node of [
+      this.input,
+      this.glueComp,
+      this.softClipper,
+      this.widener,
+      this.safetyComp,
+      this.limiter,
+      this.makeup,
+      this.meter,
+      this.peakMeter,
+    ]) {
+      try {
+        node.disconnect();
+      } catch {
+        // already disconnected
+      }
+      try {
+        node.dispose();
+      } catch {
+        // best-effort teardown
+      }
+    }
   }
 }
 

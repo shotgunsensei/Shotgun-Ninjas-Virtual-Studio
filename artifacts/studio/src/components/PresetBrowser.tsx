@@ -71,8 +71,7 @@ export function PresetBrowser({ track }: { track: Track }) {
   }, [track.kind, category, query, favs]);
 
   const load = (p: MelodicPresetDef) => {
-    audio.setMelodicPreset(track.id, p.id);
-    getStore().patchTrack(track.id, { presetId: p.id });
+    getStore().applyMelodicPreset(track.id, p.id);
     getStore().setStatus(`Loaded preset: ${p.name}`, "info");
   };
 

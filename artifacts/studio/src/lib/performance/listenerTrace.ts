@@ -44,6 +44,7 @@ declare global {
 }
 
 const STORAGE_KEY = "sn:listenerTrace";
+let cachedEnabled: boolean | null = null;
 const records = new Map<number, ListenerRecord>();
 let nextId = 1;
 let installed = false;
@@ -57,16 +58,22 @@ let originals:
   | null = null;
 
 function isEnabled(): boolean {
+  if (cachedEnabled !== null) return cachedEnabled;
   if (typeof window === "undefined") return false;
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("snListenerTrace") === "1") return true;
+    if (params.get("snListenerTrace") === "1") {
+      cachedEnabled = true;
+      return true;
+    }
   } catch {
     // ignore URL parsing failures
   }
   try {
-    return window.localStorage?.getItem(STORAGE_KEY) === "1";
+    cachedEnabled = window.localStorage?.getItem(STORAGE_KEY) === "1";
+    return cachedEnabled;
   } catch {
+    cachedEnabled = false;
     return false;
   }
 }

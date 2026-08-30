@@ -10,35 +10,43 @@ import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 function snVirtualStudioPwaPlugin(): Plugin {
   const version = `v${Date.now().toString(36)}`;
   let outDir = "";
+  let resolvedBase = "/";
   return {
     name: "sn-virtual-studio-pwa",
     apply: "build",
     configResolved(config) {
       outDir = config.build.outDir;
+      resolvedBase = config.base;
     },
     async closeBundle() {
       // Files under public/ are copied verbatim by Vite — they never
       // pass through the rollup bundle, so we patch the emitted sw.js
       // on disk after the build completes. We also inject a precache
-      // list of the hashed JS/CSS chunks so an offline first-launch
-      // (after one successful online load) has every shell-critical
-      // asset already in cache, not just the HTML.
+      // list containing only the JS/CSS referenced directly by index.html.
+      // Lazy Studio/panel chunks are cached on first use instead of being
+      // downloaded during service-worker installation.
       const fs = await import("node:fs/promises");
       const swPath = path.join(outDir, "sw.js");
       try {
-        const assetsDir = path.join(outDir, "assets");
         let precache: string[] = [];
         try {
-          const entries = await fs.readdir(assetsDir, { withFileTypes: true });
-          precache = entries
-            .filter(
-              (e) =>
-                e.isFile() &&
-                (e.name.endsWith(".js") || e.name.endsWith(".css")),
-            )
-            .map((e) => `assets/${e.name}`);
+          const indexHtml = await fs.readFile(path.join(outDir, "index.html"), "utf8");
+          const urls = Array.from(
+            indexHtml.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css))["']/g),
+            (match) => match[1],
+          );
+          precache = Array.from(
+            new Set(
+              urls.map((url) => {
+                const withoutBase = url.startsWith(resolvedBase)
+                  ? url.slice(resolvedBase.length)
+                  : url;
+                return withoutBase.replace(/^\.\//, "").replace(/^\//, "");
+              }),
+            ),
+          );
         } catch {
-          /* no assets dir — nothing to precache */
+          /* no emitted index yet — static shell files are still precached */
         }
         const src = await fs.readFile(swPath, "utf8");
         const patched = src
@@ -68,6 +76,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH ?? "/";
+const emitSourceMaps = process.env.STUDIO_BUILD_SOURCEMAP === "1";
 
 export default defineConfig({
   base: basePath,
@@ -101,7 +110,27 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
-    sourcemap: true,
+    manifest: true,
+    // Public source maps exposed more than 8 MB of original source and slowed
+    // production builds. Opt in for private diagnostics when explicitly needed.
+    sourcemap: emitSourceMaps ? "hidden" : false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replaceAll("\\", "/");
+          if (
+            normalized.includes("/node_modules/tone/") ||
+            normalized.includes("/node_modules/standardized-audio-context/")
+          ) {
+            // Tone is the largest stable dependency in the Studio route.
+            // Keeping it separate avoids reparsing/re-downloading it when app
+            // code changes and lets the browser compile it in parallel.
+            return "audio-vendor";
+          }
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     port,

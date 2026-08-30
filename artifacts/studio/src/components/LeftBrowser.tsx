@@ -5,7 +5,11 @@ import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
 import { listProjects, loadProject, relocateSampleBlob } from "../lib/storage/db";
 import { assertSampleImportAllowed, isLargeSample, formatBytes } from "../lib/storage/performanceGuards";
 import { flushMixToEngine } from "../store";
-import { SoundLibraryPanel } from "./SoundLibraryPanel";
+import type { SampleLibraryItem } from "../types";
+
+const SoundLibraryPanel = lazy(() =>
+  import("./SoundLibraryPanel").then((m) => ({ default: m.SoundLibraryPanel })),
+);
 
 const PluginBrowser = lazy(() =>
   import("./PluginBrowser").then((m) => ({ default: m.PluginBrowser })),
@@ -24,6 +28,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 const STORAGE_KEY = "studio.browser.tab";
+const EMPTY_SAMPLES: SampleLibraryItem[] = [];
 
 export function LeftBrowser() {
   const [tab, setTab] = useState<TabId>(() => {
@@ -59,7 +64,17 @@ export function LeftBrowser() {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
-        {tab === "library" && <SoundLibraryPanel />}
+        {tab === "library" && (
+          <Suspense
+            fallback={
+              <div className="p-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Loading sound library...
+              </div>
+            }
+          >
+            <SoundLibraryPanel />
+          </Suspense>
+        )}
         {tab === "tracks" && <TracksTab />}
         {tab === "kits" && <KitsTab />}
         {tab === "presets" && <PresetsTab />}
@@ -206,7 +221,7 @@ function PresetsTab() {
 }
 
 function SamplesTab() {
-  const samples = useStore((s) => s.project.samples ?? []);
+  const samples = useStore((s) => s.project.samples ?? EMPTY_SAMPLES);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingSampleIdRef = useRef<string | null>(null);
 

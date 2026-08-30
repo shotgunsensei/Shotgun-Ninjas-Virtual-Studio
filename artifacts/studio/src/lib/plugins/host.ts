@@ -1,13 +1,14 @@
 /**
- * Plugin Host — sandbox boundary for plugin factory calls.
+ * Plugin Host — error boundary for trusted plugin factory calls.
  *
  * Wraps every plugin factory in a try/catch so a broken plugin cannot
  * silence a track. On failure the host logs the error, marks the plugin
  * as "errored" in the provided callback, and returns null so the engine
  * can reconnect the chain without the failed node.
  *
- * This is a logical/routing sandbox, not a worker-process boundary.
- * AudioWorklet-based process isolation is deferred to a future phase.
+ * This does not provide a security sandbox. Only bundled/trusted factories may
+ * run here; remote code remains disabled until a separately isolated WAM host
+ * exists.
  */
 
 import { pluginRegistry } from "./registry";
@@ -19,7 +20,7 @@ export interface HostCreateResult<T> {
 }
 
 /**
- * Safely invoke a plugin's factory function inside a sandbox boundary.
+ * Safely invoke a trusted plugin's factory function inside an error boundary.
  *
  * @param pluginId  - The plugin id to instantiate.
  * @param onError   - Called with the error message when the factory throws.

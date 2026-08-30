@@ -297,6 +297,109 @@ export const SOUND_PACKS: SoundPack[] = [
       fx:      [0,0,0,0, 0,1,0,0, 0,0,0,0, 0,0,0,0].map(Boolean),
     },
   },
+
+  // 10 ────────────────────────────────────────────────────
+  {
+    id: "tape-alley",
+    name: "Tape Alley Sessions",
+    tagline: "Dust, pocket, and late-night keys.",
+    description:
+      "A compact lo-fi production pack pairing dusty drums with the offline Tape Upright preset for warm study beats and sample-free sketches.",
+    category: "Lo-Fi",
+    kitId: "lofi",
+    presetId: "keys.tape-upright",
+    coverArt: {
+      bg: "#171008",
+      accent: "#f59e0b",
+      accent2: "#713f12",
+      theme: "smoke-room",
+    },
+    demoBpm: 82,
+    demoPattern: {
+      kick:  [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0].map(Boolean),
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      hat:   [1,0,1,0, 1,0,0,1, 1,0,1,0, 0,1,0,1].map(Boolean),
+      fx:    [0,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0].map(Boolean),
+    },
+  },
+
+  // 11 ────────────────────────────────────────────────────
+  {
+    id: "subzero-drill",
+    name: "Subzero Drill",
+    tagline: "Cold hats. Controlled low end.",
+    description:
+      "A fast cyber-trap kit paired with the shorter Tactical 808 so dense slides stay powerful without smearing the entire mix.",
+    category: "808 & Bass",
+    kitId: "cybertrap",
+    presetId: "bass.short-808",
+    coverArt: {
+      bg: "#020617",
+      accent: "#38bdf8",
+      accent2: "#1d4ed8",
+      theme: "cyber",
+    },
+    demoBpm: 146,
+    demoPattern: {
+      kick:  [1,0,0,0, 0,0,1,0, 0,0,0,0, 1,0,0,1].map(Boolean),
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      hat:   [1,1,0,1, 1,0,1,1, 1,1,0,1, 0,1,1,1].map(Boolean),
+      ohat:  [0,0,0,0, 0,0,0,1, 0,0,0,0, 0,0,1,0].map(Boolean),
+    },
+  },
+
+  // 12 ────────────────────────────────────────────────────
+  {
+    id: "ronin-synthwave",
+    name: "Ronin Synthwave",
+    tagline: "Retro circuits under neon rain.",
+    description:
+      "Arcade percussion and the bright Arcade Pulse lead form a zero-download pack for retro hooks, trailers, and game-score sketches.",
+    category: "Retro",
+    kitId: "arcadeghosts",
+    presetId: "lead.arcade-pulse",
+    coverArt: {
+      bg: "#120021",
+      accent: "#f472b6",
+      accent2: "#7e22ce",
+      theme: "arcade",
+    },
+    demoBpm: 124,
+    demoPattern: {
+      kick:    [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0].map(Boolean),
+      snare:   [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      hat:     [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0].map(Boolean),
+      tomHigh: [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0].map(Boolean),
+      fx:      [0,0,0,1, 0,0,0,0, 0,0,0,1, 0,0,0,0].map(Boolean),
+    },
+  },
+
+  // 13 ────────────────────────────────────────────────────
+  {
+    id: "temple-air",
+    name: "Temple Air",
+    tagline: "Space between every strike.",
+    description:
+      "Neon Dojo percussion meets the wide Neon Air pad for meditative intros, ambient transitions, and cinematic beds.",
+    category: "World",
+    kitId: "neondojo",
+    presetId: "pad.neon-air",
+    coverArt: {
+      bg: "#07111f",
+      accent: "#2dd4bf",
+      accent2: "#4338ca",
+      theme: "neon-dojo",
+    },
+    demoBpm: 96,
+    demoPattern: {
+      kick:    [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0].map(Boolean),
+      snare:   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0].map(Boolean),
+      hat:     [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0].map(Boolean),
+      tomLow:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      tomHigh: [0,0,0,0, 0,1,0,0, 0,0,0,0, 0,1,0,0].map(Boolean),
+      crash:   [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0].map(Boolean),
+    },
+  },
 ];
 
 export const SOUND_PACK_CATEGORIES: PackCategory[] = [

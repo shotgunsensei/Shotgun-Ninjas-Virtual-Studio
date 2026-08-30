@@ -83,6 +83,7 @@ class LookaheadScheduler {
     const id = ++this._idCounter;
     this._events.push({ id, audioTime, callback, fired: false });
     this._updateCount();
+    this.start();
     return id;
   }
 
@@ -91,12 +92,14 @@ class LookaheadScheduler {
     const idx = this._events.findIndex((e) => e.id === id);
     if (idx !== -1) this._events.splice(idx, 1);
     this._updateCount();
+    if (this._events.length === 0) this.stop();
   }
 
   /** Cancel all pending events. */
   cancelAll(): void {
     this._events = [];
     this._updateCount();
+    this.stop();
   }
 
   // ── private ─────────────────────────────────────────────────────────────
@@ -139,6 +142,7 @@ class LookaheadScheduler {
       const staleThreshold = now - 0.5;
       this._events = this._events.filter((e) => e.audioTime >= staleThreshold);
       this._updateCount();
+      if (this._events.length === 0) this.stop();
     } catch {
       // Scheduler must never crash even if AudioContext is unavailable.
     }

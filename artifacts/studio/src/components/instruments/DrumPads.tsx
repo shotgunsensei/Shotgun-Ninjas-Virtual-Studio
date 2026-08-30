@@ -878,8 +878,7 @@ function Slider({
 function KitPicker({ track }: { track: Track }) {
   const current = track.kitId;
   const set = (id: DrumKitId) => {
-    audio.setKit(track.id, id);
-    getStore().patchTrack(track.id, { kitId: id });
+    getStore().applyDrumKit(track.id, id);
   };
   return (
     <div className="panel-inset rounded-md p-2 space-y-1">

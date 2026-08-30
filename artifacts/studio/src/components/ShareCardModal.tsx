@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Download, Share2, X } from "lucide-react";
-import { downloadBlob } from "../lib/audio/export";
+import { downloadBlob } from "../lib/export/download";
 import { shareCardBlob } from "../lib/share";
 
 export interface ShareCardData {

@@ -1,208 +1,125 @@
 # Performance Baseline
 
-Audit date: 2026-06-08
+Audit date: 2026-08-30
 
-Scope: static audit only. No application behavior was changed and no runtime profiling was performed in this pass.
+Scope: full repository oversight of Shotgun Ninjas Virtual Studio, with production-build, browser-runtime, audio-lifecycle, storage/export, dependency, and security verification. The app remains free; no account, billing, advertising, or usage gate was added.
 
-## Package Manager Detected
+## Environment
 
-- Required package manager: `pnpm`
-- Evidence:
-  - Root `package.json` has a `preinstall` guard that rejects non-pnpm installs.
-  - `pnpm-lock.yaml` and `pnpm-workspace.yaml` are present at the repo root.
-  - Studio package is `@workspace/studio` under `artifacts/studio`.
-- Current shell status: `pnpm --version` failed because `pnpm` is not recognized in this PowerShell session.
-
-## Available Scripts
-
-Root `package.json`:
-
-| Script | Command |
+| Item | Verified value |
 | --- | --- |
-| `preinstall` | Rejects npm/yarn lockfiles and requires pnpm user agent |
-| `build` | `pnpm run typecheck && pnpm -r --if-present run build` |
-| `typecheck:libs` | `tsc --build` |
-| `typecheck` | `pnpm run typecheck:libs && pnpm -r --filter "./artifacts/**" --filter "./scripts" --if-present run typecheck` |
+| Platform | Windows / PowerShell |
+| Node.js | 24.16.0 |
+| Package manager | pnpm 11.5.2 through Corepack |
+| Browser profiler | Chromium 148.0.7778.96 |
+| App stack | React 19, TypeScript, Vite, Tone.js, IndexedDB |
+| Install authority | Root `pnpm-lock.yaml`, frozen install |
+| Lint command | None exists in this repository |
 
-Studio `artifacts/studio/package.json`:
+## Build Baseline and Final Result
 
-| Script | Command |
+The pre-change build placed almost the entire application in one initial JavaScript payload and published source maps by default. The final build isolates the landing page, Tone.js, dialogs, instruments, editor panels, export encoders, and other opt-in features.
+
+| Measurement | Before | Final |
+| --- | ---: | ---: |
+| Monolithic main JS | 2,123.67 kB raw / 605.11 kB gzip | Replaced by route-aware chunks |
+| Landing initial JS | Included in monolith | 228.29 kB raw / 72.79 kB gzip |
+| Studio initial JS | Included in monolith | 1,156.63 kB raw / 331.00 kB gzip |
+| Main Studio `App` chunk | 2,123.67 kB raw / 605.11 kB gzip | 655.58 kB raw / 192.61 kB gzip |
+| Shared CSS | 153.13 kB raw | 153.13 kB raw / 22.79 kB gzip |
+| Public source map | 8,176.30 kB | Not emitted by default |
+| Largest lazy chunk | N/A | MP3 encoder, 58.39 kB gzip |
+
+Source maps remain available for an intentional diagnostic build with `STUDIO_BUILD_SOURCEMAP=1`.
+
+Automated bundle budgets now fail the check if the landing route, Studio route, CSS, lazy chunks, source-map policy, or service-worker precache regresses.
+
+## Runtime Baseline and Final Result
+
+Both sets were captured against production preview with the same repository profiler. Browser start and garbage collection introduce run-to-run variance; bundle size and pass/fail assertions are the more deterministic load indicators.
+
+| Scenario | Before | Final exact build |
+| --- | ---: | ---: |
+| First play: largest long task | 421 ms | 326 ms |
+| First play: total long tasks | 730 ms | 691 ms |
+| First play: heap delta | +19.43 MB | +22.64 MB |
+| Cold-load measured duration | 234 ms | 1,269 ms |
+| Audio startup / Panic / replay: largest long task | Not isolated | 117 ms |
+| Mixer stress | Not isolated | 56.98 sec, zero long tasks |
+| Visualizer + Performance Mode stress | Not isolated | 11.17 sec, zero long tasks |
+| Repeated preset switching | Not isolated | 10.42 sec, zero long tasks |
+| Repeated project replacement | 137 ms max / 3,351 ms total | 114 ms max / 3,051 ms total |
+| Save/load/autosave: largest long task | 111 ms | 97 ms |
+| WAV export: largest long task | 99 ms | 99 ms |
+
+The final cold-load sample and heap delta were slower despite a 45.3% smaller gzip startup payload. Earlier post-fix samples measured 678 and 916 ms, while first-play heap samples ranged from +16.44 to +22.64 MB. This is recorded as variability requiring field/device telemetry rather than hidden as a win.
+
+## Ten-Minute Release Gate
+
+Evidence: `runtime-profile/runtime-profile-1788061725807.json`
+
+- Continuous production playback plus stop, Panic, cleanup, and idle checks: **pass**.
+- Scenario duration: 616,899 ms.
+- Full requested playback duration reached: yes.
+- Page errors: 0.
+- Console messages: 0.
+- CDP/browser responsiveness after playback: pass.
+- Active scheduled audio players after cleanup: 0.
+- Active Tone transport events after cleanup: 0.
+- Active lean one-shot sources after cleanup: 0.
+- Active AudioWorklet nodes after cleanup: 0.
+- Six recorded long tasks occurred during startup/demo preparation; the longest was 327 ms and none occurred during the sustained playback window.
+
+## Final Production Matrix
+
+Evidence: `runtime-profile/runtime-profile-1788062994759.json`
+
+All 19 scenarios passed:
+
+- Seven first-play isolation/graph variants.
+- Cold load.
+- Audio startup, Panic, and replay.
+- Playback with mixer and scope.
+- 57-second mixer stress.
+- Visualizer and Performance Mode stress.
+- Repeated preset switching.
+- Repeated project load/unload.
+- Small and large sample import.
+- Save, load, and autosave.
+- Portable JSON export/import plus malformed JSON rejection.
+- Default/demo WAV export.
+- Service-worker cache/update simulation.
+
+## Commands and Results
+
+| Command | Result |
 | --- | --- |
-| `dev` | `vite --config vite.config.ts --host 0.0.0.0` |
-| `build` | `vite build --config vite.config.ts && vite build --config vite.ssr.config.ts && node scripts/prerender.mjs` |
-| `serve` | `vite preview --config vite.config.ts --host 0.0.0.0` |
-| `typecheck` | `tsc -p tsconfig.json --noEmit` |
-| `test` | `playwright test` |
-| `test:headed` | `playwright test --headed` |
-| `test:report` | `playwright show-report` |
+| `corepack pnpm install --frozen-lockfile` | Pass; lockfile current |
+| `corepack pnpm typecheck` (root) | Pass across libraries and four relevant workspaces |
+| `corepack pnpm build` (Studio) | Pass, including SSR/prerender |
+| `corepack pnpm test:unit` | Pass, 9/9 |
+| `corepack pnpm test:select-values` | Pass |
+| `corepack pnpm test:bundle` | Pass |
+| `corepack pnpm test` | Pass, Playwright 5/5 |
+| `corepack pnpm audit --prod` | Pass, no known vulnerabilities |
+| `node scripts/runtime-profile.mjs` | Pass, 19/19 production scenarios |
 
-## Script Availability
+## Manual Acceptance Boundary
 
-| Check | Exists? | Notes |
-| --- | --- | --- |
-| Install | Yes, via `pnpm install` | Blocked in current shell until pnpm is installed or on PATH. |
-| Build | Yes | Root and studio build scripts exist. |
-| Type-check | Yes | Root and studio typecheck scripts exist. |
-| Test | Yes | Studio Playwright test script exists. |
-| Lint | No | No root or studio `lint` script was found. |
-| Preview | Yes | Studio uses `serve`, not `preview`. |
+Headless automation verifies app load, audio unlock, keyboard transport controls, Stop/Panic state, demo load, long playback responsiveness, mixer/scope use, sample import, project persistence, JSON/WAV export, repeated replacement, Performance Mode, and service-worker behavior.
 
-## Dev Run Instructions
+Human/device checks still required before calling a public deployment fully accepted:
 
-From repo root after pnpm is available:
+- Listen for sound quality, clicks, distortion, balance, and preset character on headphones and speakers.
+- Test real MIDI hardware and microphone permissions/monitoring.
+- Test Safari/iOS and a lower-memory Android phone.
+- Confirm very large real-world sample edits and long/dense exports on target hardware.
 
-```bash
-pnpm install
-pnpm --filter @workspace/studio dev
+## Production Preview
+
+```powershell
+corepack pnpm --filter @workspace/studio build
+corepack pnpm --filter @workspace/studio serve
 ```
 
-Expected Vite app root: `artifacts/studio`.
-
-## Production Preview Instructions
-
-From repo root after pnpm is available:
-
-```bash
-pnpm --filter @workspace/studio build
-pnpm --filter @workspace/studio serve
-```
-
-Use production preview for performance acceptance. Dev mode adds Vite, React dev, and HMR overhead that can exaggerate render and scheduling problems.
-
-## Files Most Likely Involved In Crashes/Freezes
-
-| Area | Files |
-| --- | --- |
-| Audio graph lifecycle | `src/lib/audio/engine.ts`, `src/lib/audio/master.ts`, `src/lib/audio/voices.ts`, `src/lib/audio/sounds/kits.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/audio/sounds/presets.ts` |
-| Transport and scheduling | `src/hooks/useTransport.ts`, `src/lib/audio/engine.ts`, `src/lib/audio/lookahead-scheduler.ts`, `src/lib/performance/bassline.ts` |
-| Visual loops and meters | `src/lib/visualTicker.ts`, `src/components/Meter.tsx`, `src/components/TransportBar.tsx`, `src/components/MasterScope.tsx`, `src/components/AudioDiagnosticsPanel.tsx` |
-| Autosave and project persistence | `src/App.tsx`, `src/lib/storage/db.ts`, `src/components/Header.tsx` |
-| WAV/MP3/stem/DAW pack export | `src/lib/audio/export.ts`, `src/components/Header.tsx` |
-| Sample import/edit/chop | `src/components/SamplePreviewDialog.tsx`, `src/lib/audio/sampleEdits.ts`, `src/components/instruments/ChopLab.tsx`, `src/lib/audio/chopEngine.ts` |
-| Background visual cost | `src/components/BackgroundFx.tsx`, `src/index.css`, `src/lib/settings.ts` |
-| PWA caching | `src/lib/pwa.ts`, `public/sw.js` |
-| Secondary ambient audio lane | `src/contexts/WorldContext.tsx`, `src/lib/worldAudio.ts` |
-
-## Manual Reproduction Checklist
-
-Run these against production preview after pnpm/tooling is available:
-
-- App loads without console errors.
-- Enable Audio works.
-- Spacebar play/pause works.
-- Stop releases audio.
-- Panic stops all audio and count-in timers.
-- Demo project loads without freezing.
-- Playback runs 10 minutes without a page-unresponsive dialog.
-- Mixer opens during playback without freeze.
-- Visualizer opens during playback without freeze.
-- Normal sample import does not freeze page.
-- Chop Lab sample load, transient detection, slice export, and use-as-kit do not freeze page.
-- Project save does not freeze page.
-- Project load does not freeze page.
-- JSON export works in both project-only and project-with-samples modes.
-- WAV export works for short projects.
-- WAV export limitation is documented for long or dense projects.
-- Stem export and DAW Pack export do not stack exports or lock the UI indefinitely.
-- Autosave skips unchanged projects.
-- Hidden visual panels stop animation loops.
-- Repeated kit/instrument switching does not steadily leak memory.
-- Repeated project load/unload does not stack Tone.Transport events.
-- Performance Mode reduces visual load.
-- Service worker update flow does not serve stale bundles after a new build.
-
-## Baseline Hypothesis Table
-
-| Hypothesis | Current Evidence | Baseline Confidence |
-| --- | --- | --- |
-| `StereoMeter` causes frequent React state updates | Mostly addressed. `StereoMeter` draws to canvas via `visualTicker` and only uses React state for clip latch changes. | Low as current root cause |
-| `MasterClipBadge`, `PositionReadout`, `AudioDiagnosticsPanel` hot-loop too much | Mostly addressed. `ProjectClipBadge`, `MasterScope`, arrangement/piano-roll playheads, DrumPads active-step highlight, vocal input level, and master clip polling now use the shared visual ticker. Diagnostics polling is 1 Hz while open. | Low-medium |
-| Autosave serializes too often | Improved to 8 second draft debounce plus 15/30/60 sec real autosave, but each save/draft still serializes the whole project and may traverse all clips/samples. | Medium |
-| WAV export decodes too much at once | Decode is batched at 4 clips with yields, but full offline render and full WAV/MP3 encode are still memory-heavy. Stem and DAW Pack exports repeatedly render full passes. | High |
-| Background FX renders too many DOM elements | Performance Mode unmounts `BackgroundFx`, but normal mode still has 60 rain drops or 60 twinkle dots plus glows/blur/smoke. | Medium |
-| Tone/Web Audio disposal is incomplete | Track/kit/preset disposal exists, but async sampler hot-swap, secondary raw `AudioContext` ambient loops, and one-shot preview/dispose timers need runtime leak validation. | Medium |
-| Metronome `scheduleRepeat` is not cleared | Addressed. `setMetronome(false)` clears `metronomeId`. | Low |
-| CSS glow/shadow effects cause paint cost | Performance Mode strips several glows/animations, but normal mode still uses backdrop blur, box-shadow, animated particles, pulse LEDs, fixed gradients, and smoke blur. | Medium |
-| Missing real Performance Mode | Partially addressed in settings, `visualTicker`, `BackgroundFx`, CSS, and playback UI loops. It is still visual-only and does not reduce audio graph/scheduler/export work. | Medium |
-| Service worker stale cache | SW uses versioned caches and cache-first runtime assets with background refresh. Stale bundle risk remains until update UX is manually verified. | Medium |
-
-## Baseline Blockers
-
-- `pnpm` is available through Corepack (`corepack pnpm`), but direct `pnpm` is still not on PATH; the root `build` script calls bare `pnpm`.
-- Windows validation needs `C:\Program Files\Git\usr\bin` on PATH because the root `preinstall` script calls `sh`.
-- Studio package `npm run typecheck` passed on 2026-06-12.
-- Studio package `npm run build` passed on 2026-06-12 after allowing current-platform Windows native packages and fixing Windows env/default config issues.
-- Studio package `npm run test` passed on 2026-06-12 after installing Playwright Chromium and updating the stale `/` test route to `/studio?disableAudio=1`.
-- Production preview served `/` and `/studio` with HTTP 200 on 2026-06-12.
-- Root workspace recursive build remains blocked outside studio by `artifacts/mockup-sandbox` requiring `PORT`.
-- No Chrome Performance recording, heap snapshot, or 10-minute playback run has been captured yet.
-- Current performance findings are code-audit plus instrumentation findings, not measured runtime proof.
-
-## Final Verification Snapshot
-
-Verified on 2026-06-12 against `artifacts/studio`:
-
-- TypeScript: pass.
-- Production build: pass, with warnings for large main chunk, sourcemaps, and static/dynamic import overlap.
-- Playwright tests: 4 passed.
-- Production preview: pass.
-- Console smoke on `/studio`: no captured console errors/page errors.
-- Audio enable click: pass in headless Chromium.
-- Transport play/pause/stop/panic UI smoke: pass.
-- Demo load: pass.
-- Project-only JSON export: pass.
-- WAV export for default project: pass.
-- Performance Mode persisted setting applies `body[data-perf="true"]`: pass.
-- Service worker registers and controls page on preview: pass.
-
-Not fully verified:
-
-- 10-minute playback.
-- Normal sample import.
-- JSON import through File System Access.
-- Old-cache service worker update prompt.
-- Repeated kit switching and repeated project load/unload stress.
-
-## Diagnostics Baseline
-
-Development-only app-local diagnostics are now available through
-`src/utils/performanceDiagnostics.ts` and `window.__SN_PERF_DIAGNOSTICS__` in
-Vite dev mode.
-
-Use these commands in the browser dev console during manual reproduction:
-
-```js
-window.__SN_PERF_DIAGNOSTICS__.snapshot()
-window.__SN_PERF_DIAGNOSTICS__.enableLogs()
-window.__SN_PERF_DIAGNOSTICS__.disableLogs()
-window.__SN_PERF_DIAGNOSTICS__.reset()
-```
-
-The baseline manual checklist should capture the snapshot before and after:
-
-- App startup / Enable Audio
-- Demo project load
-- 10-minute playback
-- Mixer open during playback
-- Visualizer open during playback
-- Sample import and Chop Lab load
-- Project save/autosave
-- JSON export
-- WAV export
-- Repeated kit/instrument switching
-- Repeated project load/unload
-
-## Render-Storm Baseline Notes
-
-Current render-storm mitigation status:
-
-- Meters, transport position, master clip badge, project clip badge, master scope, arrangement playhead, piano-roll playhead, DrumPads active-step highlight, vocal input level, diagnostics dropped-frame monitor, and master strip clip polling now share `visualTicker` or write directly to DOM refs.
-- Normal visual cadence is capped by `visualTicker` at 25 FPS.
-- Performance Mode caps the same shared ticker at 15 FPS.
-- `AudioDiagnosticsPanel` polls at 1 Hz and skips hidden-tab polling.
-
-Remaining UI performance risks to profile:
-
-- Project-wide clip scanning still loops over every track meter while playback is running.
-- Automation and Chop Lab drag handlers still push store updates during pointer movement.
-- Gamepad polling remains a separate rAF loop because it is input polling, not a visual loop.
+Use production preview for performance acceptance. Development HMR and React development checks are not representative audio-performance measurements.

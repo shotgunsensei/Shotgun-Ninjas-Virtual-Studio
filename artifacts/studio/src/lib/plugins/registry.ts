@@ -18,7 +18,7 @@ class PluginRegistry {
    */
   register(manifest: PluginManifest): void {
     if (this.manifests.has(manifest.id)) {
-      if (import.meta.env.DEV) {
+      if (import.meta.env?.DEV ?? false) {
         console.warn(
           `[PluginRegistry] Duplicate plugin id "${manifest.id}" — ignoring re-registration.`,
         );

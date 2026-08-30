@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,9 +17,14 @@ import {
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { APP_NAME, APP_VERSION } from "../lib/version";
-import { ChangelogDialog } from "./ChangelogDialog";
-import { DiagnosticsDialog } from "./DiagnosticsDialog";
 import { getStore } from "../store";
+
+const ChangelogDialog = lazy(() =>
+  import("./ChangelogDialog").then((module) => ({ default: module.ChangelogDialog })),
+);
+const DiagnosticsDialog = lazy(() =>
+  import("./DiagnosticsDialog").then((module) => ({ default: module.DiagnosticsDialog })),
+);
 
 /**
  * About + brand-hooks dialog. Hosts links to the Shotgun Ninjas
@@ -151,8 +156,12 @@ export function AboutDialog({
         </DialogContent>
       </Dialog>
 
-      <ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} />
-      <DiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
+      <Suspense fallback={null}>
+        {changelogOpen && (
+          <ChangelogDialog open onOpenChange={setChangelogOpen} />
+        )}
+        {diagOpen && <DiagnosticsDialog open onOpenChange={setDiagOpen} />}
+      </Suspense>
     </>
   );
 }

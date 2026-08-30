@@ -1,7 +1,7 @@
 import { Switch, Route, useLocation } from "wouter";
 import { lazy, Suspense, useEffect } from "react";
-import App from "./App";
 
+const StudioApp = lazy(() => import("./App"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
 const ChangelogPage = lazy(() => import("./pages/ChangelogPage"));
 const CreditsPage = lazy(() => import("./pages/CreditsPage"));
@@ -34,7 +34,9 @@ export function AppRouter() {
         </Suspense>
       </Route>
       <Route path="/studio">
-        <App />
+        <Suspense fallback={<PageLoader />}>
+          <StudioApp />
+        </Suspense>
       </Route>
       <Route path="/changelog">
         <Suspense fallback={<PageLoader />}>

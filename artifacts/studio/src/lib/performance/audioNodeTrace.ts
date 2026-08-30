@@ -57,6 +57,7 @@ declare global {
 }
 
 const STORAGE_KEY = "sn:audioNodeTrace";
+let cachedEnabled: boolean | null = null;
 
 let installed = false;
 let nextId = 1;
@@ -96,15 +97,21 @@ const listenerRecords = new Map<string, number>();
 const violations: AudioNodeTraceSnapshot["violations"] = [];
 
 function isEnabled(): boolean {
+  if (cachedEnabled !== null) return cachedEnabled;
   if (typeof window === "undefined") return false;
   try {
-    if (new URLSearchParams(window.location.search).get("snAudioNodeTrace") === "1") return true;
+    if (new URLSearchParams(window.location.search).get("snAudioNodeTrace") === "1") {
+      cachedEnabled = true;
+      return true;
+    }
   } catch {
     // ignore
   }
   try {
-    return window.localStorage?.getItem(STORAGE_KEY) === "1";
+    cachedEnabled = window.localStorage?.getItem(STORAGE_KEY) === "1";
+    return cachedEnabled;
   } catch {
+    cachedEnabled = false;
     return false;
   }
 }

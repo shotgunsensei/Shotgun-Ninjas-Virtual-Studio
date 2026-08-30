@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { audio } from "../lib/audio/engine";
-import { DEFAULT_MASTER_BUS } from "../lib/audio/master";
+import { DEFAULT_MASTER_BUS } from "../lib/audio/master-defaults";
 import { MIX_PRESETS } from "../lib/audio/mixPresets";
 import { visualTicker } from "../lib/visualTicker";
 import { getStore, useStore } from "../store";
