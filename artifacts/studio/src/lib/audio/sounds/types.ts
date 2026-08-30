@@ -3,12 +3,11 @@
  *
  * Defines the data-driven schema for drum kits, melodic presets, and
  * sample layers. Kits and presets live as plain data in `kits.ts` and
- * `presets.ts`; the resolver in `samples.ts` probes the declared layer
+ * `presets.ts`; the resolver in `samples.ts` fetches declared local layer
  * URLs and, when at least one file is reachable, loads it via Tone.
  * When no files are reachable the engine falls back to Tone-based
- * synthesis from the recipe. No sample assets ship with the app yet,
- * so synthesis is what users hear until WAV/MP3 files are dropped
- * into `public/samples/` matching the layer urls.
+ * synthesis from the recipe. The factory VCSL instruments ship as local,
+ * lazy-loaded WAV assets; other definitions may remain synthesis-only.
  */
 
 import type { DrumPiece } from "../voices";
@@ -138,12 +137,26 @@ export interface MelodicSynthRecipe {
   sidechain?: number; // 0..1 simulated duck depth
 }
 
+/**
+ * Short, workflow-level guidance shown beside an instrument. This is kept
+ * as preset data so the browser can teach timbre and arrangement without a
+ * heavyweight tutorial runtime or generic AI-generated advice.
+ */
+export interface PresetLearningGuide {
+  family: string;
+  register: string;
+  character: string;
+  listeningCue: string;
+  creativeMove: string;
+}
+
 export interface MelodicPresetDef {
   id: string;
   name: string;
   category: MelodicPresetCategory;
   description: string;
   layers?: SampleLayer[];
+  guide?: PresetLearningGuide;
   synth: MelodicSynthRecipe;
   /** Kinds this preset is appropriate for. UI uses this to filter the
    * browser when the user is on a specific track kind. */

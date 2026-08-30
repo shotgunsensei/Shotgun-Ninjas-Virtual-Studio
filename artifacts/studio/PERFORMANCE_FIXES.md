@@ -37,10 +37,10 @@ Final bundle-budget measurements:
 
 | Budget | Final |
 | --- | ---: |
-| Landing initial JS | 228.29 kB raw / 72.79 kB gzip |
-| Studio initial JS | 1,156.63 kB raw / 331.00 kB gzip |
-| Core Studio App chunk | 655.58 kB raw / 192.61 kB gzip |
-| Shared CSS | 153.13 kB raw / 22.79 kB gzip |
+| Landing initial JS | 229.64 kB raw / 73.43 kB gzip |
+| Studio initial JS | 1,167.86 kB raw / 334.75 kB gzip |
+| Core Studio App chunk | 665.79 kB raw / 195.90 kB gzip |
+| Shared CSS | 153.54 kB raw / 22.82 kB gzip |
 | Largest lazy chunk | 58.39 kB gzip |
 
 Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `src/components/Footer.tsx`, `src/components/LeftBrowser.tsx`, `src/components/TransportBar.tsx`, `src/components/ChannelStrip.tsx`, `public/sw.js`, and `vite.config.ts`.
@@ -60,19 +60,35 @@ Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `sr
 
 Primary files: `src/lib/storage/migrate.ts`, `src/lib/storage/db.ts`, `src/App.tsx`, `src/components/Header.tsx`, `src/lib/audio/export.ts`, `src/lib/export/download.ts`, and `src/lib/audio/master-defaults.ts`.
 
-## Sound, Preset, Pack, and Extension Expansion
+## Sound, Preset, Pack, Extension, and Creative-Learning Expansion
 
-The expansion uses existing offline synthesis engines and does not add a network, licensing, or startup-size dependency.
+The first expansion used existing offline synthesis engines. The factory phase
+adds a pinned same-origin CC0 asset library while keeping all WAV files out of
+the startup module graph and service-worker shell precache.
 
-- Melodic preset count: **14 → 28**.
-- Sound-pack count: **9 → 13**.
-- New built-in instrument extensions: **14**, automatically registered from the new presets.
+- Melodic preset count: **14 → 34**.
+- Sound-pack count: **9 → 19**.
+- New built-in melodic instrument extensions: **20** total across both phases, automatically registered from the new presets.
 - Added presets: Neon Glass Keys, Tape Upright, Ronin Reese, Acid Circuit, Tactical 808, Koto Night, Nylon Ghost, Neon Air, Choir Shadow, Arcade Pulse, Silk Katana, Steel Kalimba, Crystal Shrine, and Shogun Brass Stab.
 - Added packs: Tape Alley Sessions, Subzero Drill, Ronin Synthwave, and Temple Air.
+- Added sampled presets: VCSL TX81Z Piano, Folk Harp, Vibraphone, Tanzanian Kalimba, Ocarina, and Tenor Sax Stabs.
+- Added sampled packs: VCSL Neon Keys, Harp Temple, Midnight Vibes, Kalimba Circuit, Ocarina Horizon, and Tenor Alley. Their previews schedule both drums and pitched phrases against the audio clock.
+- Added one expandable guide per sampled instrument: family, useful register, character, listening cue, and a concrete creative move.
+- Added three Creative Practice lessons: motif variation/call-and-response, arrangement by timbre/register, and Scale Lock/Chord Mode as harmony training.
 - Centralized full-recipe melodic preset and drum-kit application in the store so every browser/pad/world entry point applies and persists the same sound.
-- Added catalog tests for uniqueness, safe ranges, local-only URLs, valid kit/preset references, and 16-step grids.
+- Added catalog tests for uniqueness, safe ranges, local-only URLs, valid kit/preset references, 16-step grids, pitched preview phrases, and creative prompts.
 
-Primary files: `src/lib/audio/sounds/presets.ts`, `src/lib/audio/sounds/soundLibrary.ts`, `src/lib/audio/sounds/kits.ts`, `src/lib/plugins/builtins.ts`, `src/store.ts`, `src/components/PresetBrowser.tsx`, `src/components/PluginBrowser.tsx`, `src/components/SoundLibraryPanel.tsx`, and `src/components/instruments/DrumPads.tsx`.
+Factory-content controls:
+
+- 26 original PCM WAV zones, 25,236,041 bytes (24.07 MiB), from pinned VCSL commit `c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e`.
+- Reproducible fetch script verifies every upstream Git blob before writing; the shipped manifest records source paths, blob IDs, byte sizes, and SHA-256 hashes.
+- Factory integrity tests re-hash every asset, parse every RIFF/WAVE PCM header, validate the license, and prove every preset URL resolves to the manifest.
+- Same-origin zones load only on preview/load/export; the global queue allows three concurrent decodes, de-duplicates in-flight URLs, and bounds reusable decoded PCM to 64 MiB.
+- The service worker runtime-caches selected factory zones for offline reuse without eagerly downloading 24.07 MiB on installation.
+- Sampled preview cancellation is generation-safe; Panic and engine disposal stop active preview tails.
+- Native WAV export chooses the nearest sampled root, applies playback-rate transposition and a bounded envelope, and falls back to the model only if no zone decodes.
+
+Primary files: `src/lib/audio/sounds/factorySamples.ts`, `src/lib/audio/sounds/presets.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/audio/sounds/soundLibrary.ts`, `src/lib/audio/export.ts`, `src/lib/plugins/builtins.ts`, `src/components/PresetBrowser.tsx`, `src/components/SoundLibraryPanel.tsx`, `src/components/LessonsPanel.tsx`, `public/samples/factory/vcsl/*`, `public/sw.js`, and `scripts/fetch-vcsl-factory-samples.mjs`.
 
 ## MIDI, Plugins, Dependencies, and Tooling
 
@@ -93,14 +109,16 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 | Frozen pnpm install | Pass |
 | Root workspace typecheck | Pass |
 | Studio production + SSR/prerender build | Pass |
-| Focused unit tests | 9/9 pass |
+| Focused unit tests | 11/11 pass |
 | Select-value static guard | Pass |
 | Bundle budgets | Pass |
-| Playwright browser acceptance | 5/5 pass |
+| Playwright browser acceptance | 7/7 pass |
 | Production dependency audit | No known vulnerabilities |
 | Production runtime matrix | 19/19 pass |
 | Ten-minute playback/Panic/cleanup gate | Pass in 616.9 sec |
 | Diff whitespace validation | Pass before documentation update; rerun at handoff |
+| Factory sample integrity | 26/26 hashes and PCM headers pass; license/manifest/preset links pass |
+| Factory browser path | 4/4 zones, max 3 concurrent, guide/preview/load and sampled WAV pass |
 
 ## Required Manual Checklist Status
 
@@ -114,14 +132,15 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 | Normal and large sample import responsiveness | Automated pass |
 | Project save/load and unchanged autosave behavior | Automated pass |
 | JSON export/import | Automated pass |
-| WAV export | Automated pass for default/demo projects |
+| WAV export | Automated pass for default/demo projects and a sampled tenor-sax preset |
 | Repeated preset and project replacement cleanup | Automated pass |
 | Performance Mode reduction | Automated pass |
 | Service-worker update/cache path | Automated production-preview pass |
 | Audible sound-quality review | Human check required |
 | Real microphone and MIDI device | Hardware check required |
 | Safari/iOS, Android, low-memory hardware | Device check required |
-| Very long/dense export and licensed multisample assets | Remaining product/performance work |
+| Factory instrument request/decode/export path | Automated pass |
+| Very long/dense sampled export | Remaining product/performance work |
 
 ## Rollback Notes
 
@@ -129,3 +148,5 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 - Remote WAM loading can only be restored after an isolated host exists; reverting to page-origin dynamic import would reintroduce the security issue.
 - The audio scheduling ownership change should be reverted as a unit with its `TransportProvider` wiring, not piecemeal.
 - New presets/packs are data additions using existing engines and can be removed without migrating saved projects; unknown preset IDs already fall back safely.
+- Factory assets are additive static files. Remove their preset definitions and packs before deleting files; retained saved preset IDs will still fail safely to the normal model.
+- Keep the service-worker factory-path exception and cache-budget changes together. Removing only one can either break offline reuse or accidentally broaden sample caching.

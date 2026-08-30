@@ -23,10 +23,10 @@ The pre-change build placed almost the entire application in one initial JavaScr
 | Measurement | Before | Final |
 | --- | ---: | ---: |
 | Monolithic main JS | 2,123.67 kB raw / 605.11 kB gzip | Replaced by route-aware chunks |
-| Landing initial JS | Included in monolith | 228.29 kB raw / 72.79 kB gzip |
-| Studio initial JS | Included in monolith | 1,156.63 kB raw / 331.00 kB gzip |
-| Main Studio `App` chunk | 2,123.67 kB raw / 605.11 kB gzip | 655.58 kB raw / 192.61 kB gzip |
-| Shared CSS | 153.13 kB raw | 153.13 kB raw / 22.79 kB gzip |
+| Landing initial JS | Included in monolith | 229.64 kB raw / 73.43 kB gzip |
+| Studio initial JS | Included in monolith | 1,167.86 kB raw / 334.75 kB gzip |
+| Main Studio `App` chunk | 2,123.67 kB raw / 605.11 kB gzip | 665.79 kB raw / 195.90 kB gzip |
+| Shared CSS | 153.13 kB raw | 153.54 kB raw / 22.82 kB gzip |
 | Public source map | 8,176.30 kB | Not emitted by default |
 | Largest lazy chunk | N/A | MP3 encoder, 58.39 kB gzip |
 
@@ -34,25 +34,47 @@ Source maps remain available for an intentional diagnostic build with `STUDIO_BU
 
 Automated bundle budgets now fail the check if the landing route, Studio route, CSS, lazy chunks, source-map policy, or service-worker precache regresses.
 
+## Factory Instrument Payload
+
+The creative-content phase adds 26 unmodified PCM WAV zones from six VCSL
+instruments. Audio totals 25,236,041 bytes (24.07 MiB), but none of it is part
+of the landing/Studio JavaScript totals, startup graph, or shell precache.
+Zones are fetched from the app's own origin only when a user previews, loads,
+or exports that instrument, then stored in the versioned runtime cache for
+offline reuse.
+
+Runtime decode behavior is bounded independently of transfer size:
+
+- Maximum simultaneous fetch/decode jobs: 3.
+- Shared decoded-buffer LRU ceiling: 64 MiB.
+- In-flight requests are de-duplicated by URL.
+- Failed zones fall back to the preset's playable model.
+- Native WAV export reuses decoded zones and selects/repitches the nearest
+  chromatic root rather than exporting the modeled approximation.
+
 ## Runtime Baseline and Final Result
 
 Both sets were captured against production preview with the same repository profiler. Browser start and garbage collection introduce run-to-run variance; bundle size and pass/fail assertions are the more deterministic load indicators.
 
 | Scenario | Before | Final exact build |
 | --- | ---: | ---: |
-| First play: largest long task | 421 ms | 326 ms |
-| First play: total long tasks | 730 ms | 691 ms |
-| First play: heap delta | +19.43 MB | +22.64 MB |
-| Cold-load measured duration | 234 ms | 1,269 ms |
-| Audio startup / Panic / replay: largest long task | Not isolated | 117 ms |
-| Mixer stress | Not isolated | 56.98 sec, zero long tasks |
-| Visualizer + Performance Mode stress | Not isolated | 11.17 sec, zero long tasks |
-| Repeated preset switching | Not isolated | 10.42 sec, zero long tasks |
-| Repeated project replacement | 137 ms max / 3,351 ms total | 114 ms max / 3,051 ms total |
-| Save/load/autosave: largest long task | 111 ms | 97 ms |
-| WAV export: largest long task | 99 ms | 99 ms |
+| First play: largest long task | 421 ms | 321 ms |
+| First play: total long tasks | 730 ms | 676 ms |
+| First play: heap delta | +19.43 MB | +16.34 MB |
+| Cold-load measured duration | 234 ms | 920 ms |
+| Audio startup / Panic / replay: largest long task | Not isolated | 111 ms |
+| Mixer stress | Not isolated | 56.86 sec, zero long tasks |
+| Visualizer + Performance Mode stress | Not isolated | 11.49 sec, zero long tasks |
+| Repeated preset switching | Not isolated | 10.00 sec / 53 ms max long task |
+| Repeated project replacement | 137 ms max / 3,351 ms total | 104 ms max / 2,925 ms total |
+| Save/load/autosave: largest long task | 111 ms | 99 ms |
+| WAV export: largest long task | 99 ms | 92 ms |
 
-The final cold-load sample and heap delta were slower despite a 45.3% smaller gzip startup payload. Earlier post-fix samples measured 678 and 916 ms, while first-play heap samples ranged from +16.44 to +22.64 MB. This is recorded as variability requiring field/device telemetry rather than hidden as a win.
+The final cold-load wall time remained slower than the initial sample despite a
+44.7% smaller gzip Studio startup payload; earlier post-fix samples measured
+678, 916, and 1,269 ms. First-play heap samples ranged from +16.34 to +23.95
+MB across graph variants. This variability remains a field/device telemetry
+requirement rather than being hidden as a deterministic runtime win.
 
 ## Ten-Minute Release Gate
 
@@ -72,7 +94,7 @@ Evidence: `runtime-profile/runtime-profile-1788061725807.json`
 
 ## Final Production Matrix
 
-Evidence: `runtime-profile/runtime-profile-1788062994759.json`
+Evidence: `runtime-profile/runtime-profile-1788072902071.json`
 
 All 19 scenarios passed:
 
@@ -90,6 +112,11 @@ All 19 scenarios passed:
 - Default/demo WAV export.
 - Service-worker cache/update simulation.
 
+The profile contains zero page errors and zero console warnings/errors. A
+follow-up matrix-only run after repairing the Windows profiler exit path also
+passed 7/7 first-play variants and exited normally with code 0; evidence:
+`runtime-profile/runtime-profile-1788073285093.json`.
+
 ## Commands and Results
 
 | Command | Result |
@@ -97,12 +124,13 @@ All 19 scenarios passed:
 | `corepack pnpm install --frozen-lockfile` | Pass; lockfile current |
 | `corepack pnpm typecheck` (root) | Pass across libraries and four relevant workspaces |
 | `corepack pnpm build` (Studio) | Pass, including SSR/prerender |
-| `corepack pnpm test:unit` | Pass, 9/9 |
+| `corepack pnpm test:unit` | Pass, 11/11, including all factory hashes/WAV headers/catalog references |
 | `corepack pnpm test:select-values` | Pass |
 | `corepack pnpm test:bundle` | Pass |
-| `corepack pnpm test` | Pass, Playwright 5/5 |
+| `corepack pnpm test` | Pass, Playwright 7/7 |
 | `corepack pnpm audit --prod` | Pass, no known vulnerabilities |
 | `node scripts/runtime-profile.mjs` | Pass, 19/19 production scenarios |
+| Focused factory browser gate | Pass: guide, 4/4 local zones, max 3 concurrent, sampled preview/load, native WAV |
 
 ## Manual Acceptance Boundary
 
@@ -114,6 +142,8 @@ Human/device checks still required before calling a public deployment fully acce
 - Test real MIDI hardware and microphone permissions/monitoring.
 - Test Safari/iOS and a lower-memory Android phone.
 - Confirm very large real-world sample edits and long/dense exports on target hardware.
+- Audibly compare each factory instrument and its bounced WAV on monitors and
+  headphones; headless automation proves routing/data, not aesthetic quality.
 
 ## Production Preview
 

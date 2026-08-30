@@ -4,7 +4,7 @@
  * Bumped manually as each Phase 3 task lands. Surfaced in the footer,
  * the About dialog, and any future PWA update toast.
  */
-export const APP_VERSION = "4.0.0-launch";
+export const APP_VERSION = "4.1.0-factory";
 export const APP_NAME = "Shotgun Ninjas Virtual Studio";
 /** Canonical landing URL stamped on exported projects so a JSON file
  *  always tells you where it came from. The browser preview rewrites
@@ -26,6 +26,29 @@ export interface ChangelogEntry {
  * Newest entry first.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "4.1.0-factory",
+    date: "2026-08-30",
+    highlights: [
+      "Six original-quality CC0 factory instruments with 26 local chromatic sample zones.",
+      "Nineteen sound packs, including six drum-and-instrument VCSL previews with composition prompts.",
+      "Learn cards explain instrument family, useful register, listening cues, and a practical creative move.",
+      "Three new Creative Practice lessons cover motif development, arrangement by timbre, and guided harmony.",
+      "Bounded sample decoding, same-origin lazy loading, modeled fallbacks, and sampled offline WAV rendering.",
+    ],
+  },
+  {
+    version: "4.0.0-launch",
+    date: "2026-05-20",
+    highlights: [
+      "Public landing page with hero, feature cards, tutorial steps, and Install App prompt.",
+      "URL-based routing — /studio, /changelog, /credits, /press.",
+      "Open Graph and Twitter Card metadata with a 1200×630 share image.",
+      "Made with SN Studio share card generated after exports.",
+      "Changelog, Credits, and Press kit pages linked from the landing footer.",
+      "PWA manifest start URL points directly to /studio.",
+    ],
+  },
   {
     version: "3.2.0-share",
     date: "2026-05-20",

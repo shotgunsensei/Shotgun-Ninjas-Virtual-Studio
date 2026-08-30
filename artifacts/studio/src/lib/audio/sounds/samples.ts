@@ -7,7 +7,8 @@
  * This resolver:
  *
  *   1. Fetches and decodes each declared URL once, dropping unavailable
- *      layers without a separate `HEAD` round trip.
+ *      layers without a separate `HEAD` round trip. A global three-job
+ *      decode queue protects the audio/UI thread from large parallel bursts.
  *   2. Loads the survivors as Tone.Player buffers (drums) or hands a
  *      `urls` map to Tone.Sampler (melodic).
  *   3. Picks the right voice per hit by velocity window AND round-robin
@@ -15,10 +16,9 @@
  *      through layered variations.
  *
  * If no layers exist OR no files are reachable, the resolver yields
- * `null` and the caller keeps its synthesized fallback path. This is
- * the path the project ships on today — the resolver is wired and
- * active, but no sample assets are bundled yet, so synthesis is what
- * users hear until samples are dropped into `public/samples/`.
+ * `null` and the caller keeps its synthesized fallback path. Factory
+ * instruments are bundled locally and loaded only when selected; the
+ * default project and synthesis-only presets do not fetch sample assets.
  */
 
 import * as Tone from "tone";
@@ -38,19 +38,141 @@ interface LoadedPlayer {
   player: Tone.Player;
 }
 
-interface LoadedLayer {
+export interface DecodedSampleLayer {
   layer: SampleLayer;
   buffer: AudioBuffer;
 }
 
-/** Fetch and decode one layer. A failed layer never blocks synth fallback. */
-async function loadLayer(layer: SampleLayer): Promise<LoadedLayer | null> {
+interface DecodedCacheEntry {
+  promise: Promise<AudioBuffer>;
+  buffer?: AudioBuffer;
+  bytes: number;
+  lastUsed: number;
+}
+
+const MAX_CONCURRENT_DECODES = 3;
+const MAX_DECODED_CACHE_BYTES = 64 * 1024 * 1024;
+const decodedBufferCache = new Map<string, DecodedCacheEntry>();
+const decodeWaiters: Array<() => void> = [];
+let activeDecodes = 0;
+let decodedCacheBytes = 0;
+let cacheClock = 0;
+
+async function acquireDecodeSlot(): Promise<void> {
+  if (activeDecodes < MAX_CONCURRENT_DECODES) {
+    activeDecodes += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => decodeWaiters.push(resolve));
+}
+
+function releaseDecodeSlot(): void {
+  const next = decodeWaiters.shift();
+  if (next) {
+    // Transfer the existing permit directly to the oldest waiter.
+    next();
+    return;
+  }
+  activeDecodes = Math.max(0, activeDecodes - 1);
+}
+
+async function withDecodeSlot<T>(job: () => Promise<T>): Promise<T> {
+  await acquireDecodeSlot();
   try {
-    const buffer = await Tone.ToneAudioBuffer.load(layer.url);
+    return await job();
+  } finally {
+    releaseDecodeSlot();
+  }
+}
+
+function estimateDecodedBytes(buffer: AudioBuffer): number {
+  return buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
+}
+
+function evictDecodedBuffers(): void {
+  if (decodedCacheBytes <= MAX_DECODED_CACHE_BYTES) return;
+  const resolved = Array.from(decodedBufferCache.entries())
+    .filter(([, entry]) => entry.buffer !== undefined)
+    .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+  for (const [url, entry] of resolved) {
+    if (decodedCacheBytes <= MAX_DECODED_CACHE_BYTES) break;
+    if (!decodedBufferCache.delete(url)) continue;
+    decodedCacheBytes = Math.max(0, decodedCacheBytes - entry.bytes);
+  }
+}
+
+/**
+ * De-duplicate in-flight fetch/decode work and retain a bounded LRU of
+ * decoded PCM. Active Tone players/samplers keep their own references, while
+ * discarded instruments can be collected instead of growing an unbounded
+ * process-wide cache.
+ */
+function loadDecodedBuffer(url: string): Promise<AudioBuffer> {
+  const existing = decodedBufferCache.get(url);
+  if (existing) {
+    existing.lastUsed = ++cacheClock;
+    return existing.promise;
+  }
+
+  let entry: DecodedCacheEntry;
+  const promise = withDecodeSlot(() => Tone.ToneAudioBuffer.load(url)).then(
+    (buffer) => {
+      if (decodedBufferCache.get(url) === entry) {
+        entry.buffer = buffer;
+        entry.bytes = estimateDecodedBytes(buffer);
+        entry.lastUsed = ++cacheClock;
+        decodedCacheBytes += entry.bytes;
+        evictDecodedBuffers();
+      }
+      return buffer;
+    },
+    (error: unknown) => {
+      if (decodedBufferCache.get(url) === entry) {
+        decodedBufferCache.delete(url);
+      }
+      throw error;
+    },
+  );
+  entry = { promise, bytes: 0, lastUsed: ++cacheClock };
+  decodedBufferCache.set(url, entry);
+  return promise;
+}
+
+export function getSampleCacheStats() {
+  let inFlight = 0;
+  let decodedBuffers = 0;
+  for (const entry of decodedBufferCache.values()) {
+    if (entry.buffer) decodedBuffers += 1;
+    else inFlight += 1;
+  }
+  return {
+    activeDecodes,
+    inFlight,
+    decodedBuffers,
+    decodedBytes: decodedCacheBytes,
+    maxDecodedBytes: MAX_DECODED_CACHE_BYTES,
+    maxConcurrentDecodes: MAX_CONCURRENT_DECODES,
+  } as const;
+}
+
+/** Fetch and decode one layer. A failed layer never blocks synth fallback. */
+async function loadLayer(layer: SampleLayer): Promise<DecodedSampleLayer | null> {
+  try {
+    const buffer = await loadDecodedBuffer(layer.url);
     return { layer, buffer };
   } catch {
     return null;
   }
+}
+
+/** Decode the reachable subset of a layer declaration through the shared queue/cache. */
+export async function loadSampleLayers(
+  layers: SampleLayer[] | undefined,
+): Promise<DecodedSampleLayer[]> {
+  if (!layers?.length) return [];
+  return (await Promise.all(layers.map(loadLayer))).filter(
+    (item): item is DecodedSampleLayer => item !== null,
+  );
 }
 
 /**
@@ -65,11 +187,9 @@ export async function tryLoadDrumSamples(
 ): Promise<DrumSampleBank | null> {
   if (!layers || layers.length === 0) return null;
 
-  // Fetch/decode in parallel. This replaces the old HEAD + GET path, which
+  // Queue fetch/decode work. This replaces the old HEAD + GET path, which
   // doubled requests and failed on static hosts that do not implement HEAD.
-  const decoded = (await Promise.all(layers.map(loadLayer))).filter(
-    (item): item is LoadedLayer => item !== null,
-  );
+  const decoded = await loadSampleLayers(layers);
   if (decoded.length === 0) return null;
 
   // Load the surviving samples into Tone.Players. If any decoding
@@ -147,9 +267,7 @@ export async function tryLoadMelodicSampler(
   options: { release?: number; attack?: number; volume?: number } = {},
 ): Promise<Tone.Sampler | null> {
   if (!layers || layers.length === 0) return null;
-  const decoded = (await Promise.all(layers.map(loadLayer))).filter(
-    (item): item is LoadedLayer => item !== null,
-  );
+  const decoded = await loadSampleLayers(layers);
   if (decoded.length === 0) return null;
 
   // Build a { note -> decoded buffer } map. Layers without rootNote are ignored

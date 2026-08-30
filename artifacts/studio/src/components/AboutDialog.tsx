@@ -18,6 +18,7 @@ import {
 import { Logo } from "./Logo";
 import { APP_NAME, APP_VERSION } from "../lib/version";
 import { getStore } from "../store";
+import { FACTORY_SAMPLE_SOURCE } from "../lib/audio/sounds/factorySamples";
 
 const ChangelogDialog = lazy(() =>
   import("./ChangelogDialog").then((module) => ({ default: module.ChangelogDialog })),
@@ -121,6 +122,33 @@ export function AboutDialog({
                 Share studio
               </span>
             </button>
+          </div>
+
+          <div className="rounded-md border border-border bg-background/60 p-2 text-[10px] leading-relaxed text-muted-foreground">
+            <div className="font-mono text-[9px] uppercase tracking-widest text-foreground mb-1">
+              Open factory sounds
+            </div>
+            Six high-quality sampled instruments come from the public-domain
+            Versilian Community Sample Library and are served by the app itself.
+            {" "}
+            <a
+              href={FACTORY_SAMPLE_SOURCE.repository}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              VCSL source
+            </a>
+            {" · "}
+            <a
+              href={FACTORY_SAMPLE_SOURCE.manifestUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              exact file manifest
+            </a>
+            {" · "}{FACTORY_SAMPLE_SOURCE.license}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border">

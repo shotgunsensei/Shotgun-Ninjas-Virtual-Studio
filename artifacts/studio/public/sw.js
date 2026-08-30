@@ -82,13 +82,21 @@ function isUncacheable(request, url) {
   if (url.pathname.includes("/@vite/") || url.pathname.includes("/@react-refresh"))
     return true;
   if (url.pathname.endsWith(".hot-update.json")) return true;
-  // Audio worklets / range requests for big media should pass through.
+  // Range requests should pass through. Factory instruments are immutable
+  // build assets and may be runtime-cached after first use; user/imported
+  // samples remain IndexedDB/network-owned and never enter Cache Storage.
   if (request.headers.get("range")) return true;
+  if (isFactorySample(url)) return false;
+  // Other audio/video requests and worklets should pass through.
   if (request.destination === "audio" || request.destination === "video") return true;
   if (url.pathname.includes("/api/")) return true;
   if (url.pathname.includes("/samples/") || url.pathname.includes("/user-samples/"))
     return true;
   return false;
+}
+
+function isFactorySample(url) {
+  return url.pathname.includes("/samples/factory/vcsl/");
 }
 
 function normalizedPath(url) {
@@ -102,6 +110,9 @@ function isShellUrl(url) {
 
 function isStaticAsset(request, url) {
   if (isShellUrl(url)) return true;
+  if (isFactorySample(url)) {
+    return request.destination === "" || request.destination === "audio";
+  }
   const assetRoot = BASE + "assets/";
   if (url.pathname.startsWith(assetRoot)) {
     return ["script", "style", "worker", "font", "image", ""].includes(request.destination);

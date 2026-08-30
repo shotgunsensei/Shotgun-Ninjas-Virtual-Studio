@@ -21,6 +21,11 @@ import {
 import { findKit, buildKit, type KitVoice } from "./sounds/kits";
 import { findPreset, buildPresetVoice } from "./sounds/presets";
 import {
+  loadSampleLayers,
+  tryLoadMelodicSampler,
+  type DecodedSampleLayer,
+} from "./sounds/samples";
+import {
   startPerfTimer,
   trackAudioResource,
 } from "../../utils/performanceDiagnostics";
@@ -171,14 +176,15 @@ async function _renderProjectInner(
 
   onProgress?.({ phase: "decoding", progress: 0 });
   const decoded = await decodeAudioClips(project, (p) =>
-    onProgress?.({ phase: "decoding", progress: p }),
+    onProgress?.({ phase: "decoding", progress: p * 0.5 }),
   );
+  const nativeSampleBanks = await decodeNativeSampleBanks(plan.audibleTracks);
   onProgress?.({ phase: "decoding", progress: 1 });
 
   recordExportTrace("route", { format, route: plan.route });
   const buffer =
     format === "wav"
-      ? await renderNativeWav(project, decoded, plan, (p) =>
+      ? await renderNativeWav(project, decoded, nativeSampleBanks, plan, (p) =>
           onProgress?.({ phase: "rendering", progress: p }),
         )
       : await renderOffline(project, decoded, plan.renderSec, plan.startBeat, plan.endBeat, (p) =>
@@ -238,7 +244,14 @@ function createExportPlan(
 
   for (const track of audibleTracks) {
     let trackNeedsToneFidelity = false;
-    if (format === "wav" && track.kind !== "drums" && track.noteClips.some((clip) => clip.notes.length > 0)) {
+    const preset = findPreset(track.presetId);
+    const hasDecodedPresetPath = Boolean(preset?.layers?.length);
+    if (
+      format === "wav" &&
+      track.kind !== "drums" &&
+      !hasDecodedPresetPath &&
+      track.noteClips.some((clip) => clip.notes.length > 0)
+    ) {
       trackNeedsToneFidelity = true;
     }
     if (track.fxRack && Object.values(track.fxRack).some((fx) => fx?.enabled)) {
@@ -363,6 +376,68 @@ async function decodeAudioClips(
   return out;
 }
 
+interface NativeSampleZone {
+  buffer: AudioBuffer;
+  rootNote: string;
+  minVelocity: number;
+  maxVelocity: number;
+}
+
+interface NativeSampleBank {
+  presetId: string;
+  attackSec: number;
+  releaseSec: number;
+  zones: NativeSampleZone[];
+}
+
+type NativeSampleBanks = Map<string, NativeSampleBank>;
+
+/**
+ * Decode each audible sampled preset once before the OfflineAudioContext is
+ * created. The shared resolver de-duplicates live-preview/export work and
+ * limits decode concurrency; AudioBuffers can then be attached directly to
+ * native offline buffer sources without routing WAV export through Tone.
+ */
+async function decodeNativeSampleBanks(tracks: Track[]): Promise<NativeSampleBanks> {
+  const banks: NativeSampleBanks = new Map();
+  const presets = new Map(
+    tracks
+      .map((track) => findPreset(track.presetId))
+      .filter((preset): preset is NonNullable<ReturnType<typeof findPreset>> =>
+        Boolean(preset?.layers?.length),
+      )
+      .map((preset) => [preset.id, preset]),
+  );
+
+  await Promise.all(
+    Array.from(presets.values()).map(async (preset) => {
+      const decoded: DecodedSampleLayer[] = await loadSampleLayers(preset.layers);
+      const zones = decoded.flatMap(({ layer, buffer }) =>
+        layer.rootNote
+          ? [{
+              buffer,
+              rootNote: layer.rootNote,
+              minVelocity: layer.minVelocity,
+              maxVelocity: layer.maxVelocity,
+            }]
+          : [],
+      );
+      if (!zones.length) return;
+      banks.set(preset.id, {
+        presetId: preset.id,
+        attackSec: Math.max(0.002, preset.synth.attack * 0.4),
+        releaseSec: Math.max(0.08, preset.synth.release * 2),
+        zones,
+      });
+      recordExportTrace("native-sample-bank", {
+        presetId: preset.id,
+        zones: zones.length,
+      });
+    }),
+  );
+  return banks;
+}
+
 interface NativeTrackGraph {
   input: GainNode;
   pan: StereoPannerNode;
@@ -396,6 +471,7 @@ const DRUM_DECAY: Record<string, number> = {
 async function renderNativeWav(
   project: Project,
   audioBuffers: Map<string, AudioBuffer>,
+  nativeSampleBanks: NativeSampleBanks,
   plan: ExportPlan,
   onProgress: (p: number) => void,
 ): Promise<AudioBuffer> {
@@ -425,7 +501,16 @@ async function renderNativeWav(
           if (track.kind === "drums") {
             scheduleNativeDrumHit(ctx, graph.input, noiseBuffer, ev.note, time, velocity);
           } else {
-            scheduleNativeMelodicNote(ctx, graph.input, track, ev, time, project.bpm, velocity);
+            scheduleNativeMelodicNote(
+              ctx,
+              graph.input,
+              track,
+              ev,
+              time,
+              project.bpm,
+              velocity,
+              track.presetId ? nativeSampleBanks.get(track.presetId) : undefined,
+            );
           }
           scheduled += 1;
           recordExportTrace("native-note", { trackId: track.id, kind: track.kind });
@@ -565,8 +650,13 @@ function scheduleNativeMelodicNote(
   time: number,
   bpm: number,
   velocity: number,
+  sampleBank?: NativeSampleBank,
 ): void {
   const dur = Math.max(0.05, (ev.duration * 60) / bpm);
+  if (sampleBank?.zones.length) {
+    scheduleNativeSampledNote(ctx, destination, sampleBank, ev.note, time, dur, velocity);
+    return;
+  }
   const freq = noteToFrequency(ev.note);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -580,6 +670,60 @@ function scheduleNativeMelodicNote(
   osc.start(time);
   osc.stop(time + dur + nativeReleaseSeconds(track));
   recordExportTrace("native-source", { kind: "OscillatorNode", trackKind: track.kind });
+}
+
+function scheduleNativeSampledNote(
+  ctx: OfflineAudioContext,
+  destination: AudioNode,
+  bank: NativeSampleBank,
+  note: string,
+  time: number,
+  durationSec: number,
+  velocity: number,
+): void {
+  const targetFrequency = noteToFrequency(note);
+  const eligible = bank.zones.filter(
+    (zone) => velocity >= zone.minVelocity && velocity <= zone.maxVelocity,
+  );
+  const candidates = eligible.length ? eligible : bank.zones;
+  const zone = candidates.reduce((nearest, candidate) => {
+    const nearestDistance = Math.abs(
+      Math.log2(targetFrequency / noteToFrequency(nearest.rootNote)),
+    );
+    const candidateDistance = Math.abs(
+      Math.log2(targetFrequency / noteToFrequency(candidate.rootNote)),
+    );
+    return candidateDistance < nearestDistance ? candidate : nearest;
+  });
+  const rootFrequency = noteToFrequency(zone.rootNote);
+  const playbackRate = Math.max(0.125, Math.min(8, targetFrequency / rootFrequency));
+  const naturalDuration = zone.buffer.duration / playbackRate;
+  const audibleDuration = Math.max(
+    0.03,
+    Math.min(naturalDuration, durationSec + bank.releaseSec),
+  );
+  const attack = Math.min(bank.attackSec, audibleDuration * 0.2);
+  const release = Math.min(bank.releaseSec, Math.max(0.01, audibleDuration * 0.4));
+  const fadeAt = Math.max(time + attack, time + audibleDuration - release);
+
+  const source = ctx.createBufferSource();
+  const gain = ctx.createGain();
+  source.buffer = zone.buffer;
+  source.playbackRate.setValueAtTime(playbackRate, time);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(Math.max(0.0001, velocity * 0.8), time + attack);
+  gain.gain.setValueAtTime(Math.max(0.0001, velocity * 0.8), fadeAt);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + audibleDuration);
+  source.connect(gain);
+  gain.connect(destination);
+  source.start(time);
+  source.stop(time + audibleDuration);
+  recordExportTrace("native-source", {
+    kind: "SampledAudioBufferSourceNode",
+    presetId: bank.presetId,
+    rootNote: zone.rootNote,
+    note,
+  });
 }
 
 function scheduleNativeAudioClip(
@@ -700,7 +844,7 @@ async function renderOffline(
       const audible = !track.muted && (!anySolo || track.solo);
       if (!audible) continue;
 
-      const v = buildVoice(track);
+      const v = await buildVoice(track);
       // Tone.Freeverb is instantaneous (algorithmic) — no .ready wait needed.
 
       v.reverb.wet.value = clamp01(track.fx.reverb);
@@ -778,7 +922,7 @@ async function renderOffline(
   }
 }
 
-function buildVoice(track: Track): RenderVoice {
+async function buildVoice(track: Track): Promise<RenderVoice> {
   const channel = new Tone.Channel({ volume: 0 }).toDestination();
   const reverb = new Tone.Freeverb({ roomSize: 0.65, dampening: 3000, wet: 0 });
   const delay = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.35, wet: 0 });
@@ -788,14 +932,14 @@ function buildVoice(track: Track): RenderVoice {
   reverb.connect(channel);
 
   const v: RenderVoice = { channel, reverb, delay, filter };
-  attachInstrument(v, track);
+  await attachInstrument(v, track);
   if (track.kind === "vocals") {
     applyVocalPreset(v, track.preset as VocalsPreset);
   }
   return v;
 }
 
-function attachInstrument(v: RenderVoice, track: Track) {
+async function attachInstrument(v: RenderVoice, track: Track): Promise<void> {
   // v2 path — honor explicit kit/preset selection so exports match playback.
   if (track.kind === "drums" && track.kitId) {
     const def = findKit(track.kitId);
@@ -810,7 +954,11 @@ function attachInstrument(v: RenderVoice, track: Track) {
   ) {
     const def = findPreset(track.presetId);
     if (def) {
-      v.poly = buildPresetVoice(def);
+      v.poly = (await tryLoadMelodicSampler(def.layers, {
+        release: Math.max(0.1, def.synth.release * 2),
+        attack: Math.max(0, def.synth.attack * 0.4),
+        volume: -8,
+      })) ?? buildPresetVoice(def);
       v.poly.connect(v.filter);
       return;
     }

@@ -18,7 +18,7 @@ interface LessonStep {
 interface Lesson {
   title: string;
   summary: string;
-  category: "beginner" | "intermediate";
+  category: "beginner" | "intermediate" | "creative";
   steps: LessonStep[];
 }
 
@@ -350,6 +350,93 @@ const LESSONS: Lesson[] = [
       },
     ],
   },
+  {
+    title: "Motif Alchemy: Repeat, Vary, Answer",
+    summary: "Turn three notes into a memorable phrase instead of chasing random notes.",
+    category: "creative",
+    steps: [
+      {
+        instruction:
+          "Select a piano or guitar track and open its Preset Browser. Choose an HQ factory instrument, preview it, then open Learn. Its range and listening cue tell you where that sound naturally speaks.",
+        highlight: "[data-testid='preset-browser']",
+        highlightLabel: "Preset Browser",
+      },
+      {
+        instruction:
+          "Choose only three pitches for your motif. In C minor, try C, E-flat, and G. A small pitch vocabulary makes rhythm and contour easier to recognize.",
+      },
+      {
+        instruction:
+          "Write a one-bar phrase with those notes, including at least one rest. Repeat it in bar 2 exactly. Repetition teaches the listener what matters.",
+      },
+      {
+        instruction:
+          "In bar 3, change one dimension only: move the last note, lengthen the first note, or shift one accent. Keeping the other dimensions fixed makes the variation feel intentional.",
+      },
+      {
+        instruction:
+          "Use bar 4 as an answer: reverse part of the rhythm and end on C. You now have a four-bar idea with identity, development, and resolution—three foundations of musical form.",
+      },
+    ],
+  },
+  {
+    title: "Compose With Timbre & Register",
+    summary: "Give each instrument a role so the arrangement stays clear and expressive.",
+    category: "creative",
+    steps: [
+      {
+        instruction:
+          "Preview the VCSL TX81Z Piano, Ocarina, and Tanzanian Kalimba. Do not ask only which is 'best.' Listen for attack, sustain, noise, and decay—those traits determine what musical job each sound can perform.",
+        highlight: "[data-testid='preset-browser']",
+        highlightLabel: "HQ instrument guides",
+      },
+      {
+        instruction:
+          "Assign roles before writing: one sound carries harmony, one carries the main phrase, and one supplies a repeating texture. Role separation prevents every track from competing for attention.",
+      },
+      {
+        instruction:
+          "Separate registers. Keep harmony around C3–C4, place the melody above it, and leave the bottom octave for bass. If two parts still blur together, move one an octave before reaching for EQ.",
+      },
+      {
+        instruction:
+          "Match rhythm to envelope: short kalimba or sax notes can define the groove; sustained ocarina notes should breathe across it; harp and vibraphone need rests so their natural tails stay intelligible.",
+      },
+      {
+        instruction:
+          "Mute each part in turn. If the song loses no clear function, simplify or remove that part. Good arranging is not maximum activity—it is every sound earning its space.",
+      },
+    ],
+  },
+  {
+    title: "Harmony Without Wrong Notes",
+    summary: "Use Scale Lock and Chord Mode as training wheels for expressive harmony.",
+    category: "creative",
+    steps: [
+      {
+        instruction:
+          "Open Performance Mode from the transport bar. Turn on Scale Lock, choose D as the root, and select Pentatonic Minor. Incoming keyboard, MIDI, or pad notes will be pulled into that pitch collection.",
+        highlight: "[aria-label*='Performance Mode']",
+        highlightLabel: "Performance Mode",
+      },
+      {
+        instruction:
+          "Play one note at a time and listen for the scale's five-note color. Create a short rhythm first; let Scale Lock remove pitch anxiety while your ear learns which notes feel settled or tense.",
+      },
+      {
+        instruction:
+          "Turn on Chord Mode and choose Minor 7th. A single input now produces a four-note chord. Hold fewer chords for longer than you think—the extensions need time to register.",
+      },
+      {
+        instruction:
+          "Alternate between D and a note a fourth higher. Change the bass note while keeping the chord rhythm steady. You are hearing harmonic motion without needing to construct every voicing manually.",
+      },
+      {
+        instruction:
+          "Finally, turn Chord Mode off and rebuild one chord by ear in the piano roll. The tool has done its job when it helps you recognize and recreate the sound yourself.",
+      },
+    ],
+  },
 ];
 
 const STORAGE_KEY = "lessons-completed-v1";
@@ -380,6 +467,7 @@ interface LessonsPanelProps {
 const CATEGORY_LABEL: Record<Lesson["category"], string> = {
   beginner: "Beginner",
   intermediate: "Intermediate",
+  creative: "Creative Practice",
 };
 
 export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
@@ -470,6 +558,7 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
 
   const beginnerLessons = LESSONS.filter((l) => l.category === "beginner");
   const intermediateLessons = LESSONS.filter((l) => l.category === "intermediate");
+  const creativeLessons = LESSONS.filter((l) => l.category === "creative");
   const totalCompleted = LESSONS.filter((l) => completed.has(l.title)).length;
 
   return (
@@ -484,7 +573,7 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
             Lessons
           </DialogTitle>
           <DialogDescription className="flex items-center justify-between">
-            <span>Short interactive guides to get you up and running.</span>
+            <span>Guided technique, listening, and creative practice.</span>
             {totalCompleted > 0 && (
               <span className="font-mono text-[10px] text-muted-foreground">
                 {totalCompleted}/{LESSONS.length} done
@@ -500,6 +589,7 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
               [
                 { label: "Beginner", items: beginnerLessons },
                 { label: "Intermediate", items: intermediateLessons },
+                { label: CATEGORY_LABEL.creative, items: creativeLessons },
               ] as const
             ).map(({ label, items }) => (
               <div key={label}>

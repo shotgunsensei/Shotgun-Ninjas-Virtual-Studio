@@ -10,6 +10,8 @@ const KEY_FEATURES = [
   "IndexedDB project persistence, JSON import/export, draft recovery",
   "PWA-installable, works offline after first load",
   "MIDI controller support via Web MIDI API",
+  "34 melodic instruments and 19 sound packs, including six local CC0 sampled instruments",
+  "Instrument listening guides, creative prompts, and guided musical practice lessons",
   "Mobile-responsive layout with drawer panels",
   "Free and open — no accounts, no paywalls, no ads",
 ];

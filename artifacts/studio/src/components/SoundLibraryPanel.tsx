@@ -8,7 +8,8 @@ import {
 } from "../lib/audio/sounds/soundLibrary";
 import { DRUM_KITS } from "../lib/audio/sounds/kits";
 import { buildKit } from "../lib/audio/sounds/kits";
-import { findPreset } from "../lib/audio/sounds/presets";
+import { buildPresetVoice, findPreset } from "../lib/audio/sounds/presets";
+import { tryLoadMelodicSampler } from "../lib/audio/sounds/samples";
 import { PackCoverArt } from "./PackCoverArt";
 import { getStore, useStore } from "../store";
 import type { DrumPiece } from "../lib/audio/voices";
@@ -18,8 +19,8 @@ const ALL_CATEGORY = "All" as const;
 type FilterCategory = typeof ALL_CATEGORY | PackCategory;
 
 /* ── Preview engine ──────────────────────────────────────────
-   Builds a temporary kit routed through the studio master chain,
-   fires all pattern hits using absolute audio-clock scheduling,
+   Builds a temporary kit and optional melodic voice routed through the
+   studio master chain, fires all hits using absolute audio-clock scheduling,
    and disposes everything after the pattern completes.
    Never touches the project's track state.
 ──────────────────────────────────────────────────────────── */
@@ -41,6 +42,15 @@ async function startPreview(
   const reverb = new Tone.Freeverb({ roomSize: 0.4, dampening: 3000, wet: 0.15 });
   reverb.connect(channel);
   const kitVoice = buildKit(kitDef, channel, reverb, null);
+  const preset = findPreset(pack.presetId);
+  const melodicVoice = preset && pack.demoMelody?.length
+    ? (await tryLoadMelodicSampler(preset.layers, {
+        attack: Math.max(0, preset.synth.attack * 0.4),
+        release: Math.max(0.15, preset.synth.release * 2),
+        volume: -9,
+      })) ?? buildPresetVoice(preset)
+    : null;
+  melodicVoice?.connect(channel);
 
   const stepSec = 60 / bpm / 4; // 1/16 note duration in seconds
   const bars = 2;
@@ -69,13 +79,39 @@ async function startPreview(
     }
   }
 
+  if (melodicVoice && pack.demoMelody) {
+    const offsets = pack.demoMelody.some((event) => event.step >= 16)
+      ? [0]
+      : [0, 16];
+    for (const offset of offsets) {
+      for (const event of pack.demoMelody) {
+        if (event.step + offset >= steps) continue;
+        try {
+          melodicVoice.triggerAttackRelease(
+            event.note,
+            Math.max(stepSec, event.lengthSteps * stepSec * 0.94),
+            startTime + (event.step + offset) * stepSec,
+            event.velocity ?? 0.72,
+          );
+        } catch {
+          /* ignore a single melodic preview event */
+        }
+      }
+    }
+  }
+
+  const disposePreview = () => {
+    try { melodicVoice?.dispose(); } catch { /* ignore */ }
+    try { kitVoice.dispose(); } catch { /* ignore */ }
+    try { channel.dispose(); } catch { /* ignore */ }
+    try { reverb.dispose(); } catch { /* ignore */ }
+  };
+
   const totalMs = steps * stepSec * 1000 + 2000;
   const finishHandle = setTimeout(() => {
     if (!stopped) {
       stopped = true;
-      kitVoice.dispose();
-      channel.dispose();
-      reverb.dispose();
+      disposePreview();
       onStop();
     }
   }, totalMs);
@@ -85,9 +121,7 @@ async function startPreview(
       if (stopped) return;
       stopped = true;
       clearTimeout(finishHandle);
-      kitVoice.dispose();
-      channel.dispose();
-      reverb.dispose();
+      disposePreview();
       onStop();
     },
   };
@@ -101,6 +135,7 @@ export function SoundLibraryPanel() {
   const [filter, setFilter] = useState<FilterCategory>(ALL_CATEGORY);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const previewRef = useRef<PreviewHandle | null>(null);
+  const previewGenerationRef = useRef(0);
 
   const activePack = project.soundPackId ?? "core-kit";
 
@@ -110,6 +145,7 @@ export function SoundLibraryPanel() {
       : SOUND_PACKS.filter((p) => p.category === filter);
 
   const stopPreview = useCallback(() => {
+    previewGenerationRef.current += 1;
     if (previewRef.current) {
       previewRef.current.stop();
       previewRef.current = null;
@@ -119,6 +155,7 @@ export function SoundLibraryPanel() {
 
   useEffect(() => {
     return () => {
+      previewGenerationRef.current += 1;
       previewRef.current?.stop();
     };
   }, []);
@@ -133,14 +170,23 @@ export function SoundLibraryPanel() {
       return;
     }
     stopPreview();
+    const generation = previewGenerationRef.current;
     setPreviewingId(pack.id);
     const bpm = pack.demoBpm ?? project.bpm ?? 120;
     try {
-      previewRef.current = await startPreview(pack, bpm, () => {
-        setPreviewingId(null);
+      const handle = await startPreview(pack, bpm, () => {
+        if (previewGenerationRef.current === generation) {
+          setPreviewingId(null);
+          previewRef.current = null;
+        }
       });
+      if (previewGenerationRef.current !== generation) {
+        handle.stop();
+        return;
+      }
+      previewRef.current = handle;
     } catch {
-      setPreviewingId(null);
+      if (previewGenerationRef.current === generation) setPreviewingId(null);
     }
   };
 
@@ -261,9 +307,25 @@ function PackCard({ pack, isActive, isPreviewing, onPreview, onLoad }: PackCardP
                 {pack.demoBpm} BPM
               </span>
             )}
+            {pack.demoMelody?.length ? (
+              <span className="font-mono text-[8px] uppercase tracking-widest text-primary border border-primary/35 rounded px-1 py-0.5 leading-none">
+                Drums + instrument
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
+
+      {pack.creativePrompt ? (
+        <div className="mx-2 mb-2 rounded border border-primary/20 bg-primary/5 px-2 py-1.5">
+          <div className="font-mono text-[8px] uppercase tracking-widest text-primary/80 mb-0.5">
+            Creative move
+          </div>
+          <p className="text-[9px] leading-relaxed text-muted-foreground">
+            {pack.creativePrompt}
+          </p>
+        </div>
+      ) : null}
 
       {/* Action row */}
       <div className="flex gap-1 px-2 pb-2">

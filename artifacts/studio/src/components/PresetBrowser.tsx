@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { audio } from "../lib/audio/engine";
 import { getStore } from "../store";
 import {
@@ -10,6 +10,7 @@ import type {
   MelodicPresetCategory,
   MelodicPresetDef,
 } from "../lib/audio/sounds/types";
+import { FACTORY_SAMPLE_SOURCE } from "../lib/audio/sounds/factorySamples";
 
 /**
  * Preset Browser — filter / search / favorite / preview / load.
@@ -49,6 +50,9 @@ export function PresetBrowser({ track }: { track: Track }) {
     "All",
   );
   const [query, setQuery] = useState("");
+  const [guidePresetId, setGuidePresetId] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const previewGenerationRef = useRef(0);
   const [favs, toggleFav] = useFavorites();
 
   const filtered = useMemo(() => {
@@ -72,16 +76,45 @@ export function PresetBrowser({ track }: { track: Track }) {
 
   const load = (p: MelodicPresetDef) => {
     getStore().applyMelodicPreset(track.id, p.id);
-    getStore().setStatus(`Loaded preset: ${p.name}`, "info");
+    getStore().setStatus(
+      p.layers?.length
+        ? `Loaded ${p.name}; HQ zones are decoding in the background.`
+        : `Loaded preset: ${p.name}`,
+      "info",
+    );
   };
 
-  const preview = (p: MelodicPresetDef) => {
-    audio.unlock().catch(() => {});
-    audio.previewPresetNote(p.id, p.category === "Bass" ? "A2" : "C4", 0.7);
+  const preview = async (p: MelodicPresetDef) => {
+    const generation = ++previewGenerationRef.current;
+    setPreviewingId(p.id);
+    if (p.layers?.length) {
+      getStore().setStatus(`Loading HQ preview: ${p.name}…`, "info");
+    }
+    try {
+      await audio.unlock();
+      const source = await audio.previewPresetNote(
+        p.id,
+        p.category === "Bass" ? "A2" : "C4",
+        0.7,
+      );
+      if (generation !== previewGenerationRef.current || !source) return;
+      getStore().setStatus(
+        source === "sampled"
+          ? `Previewing ${p.name} · local CC0 samples`
+          : `Previewing ${p.name} · modeled fallback`,
+        "info",
+      );
+    } catch {
+      if (generation === previewGenerationRef.current) {
+        getStore().setStatus(`Could not preview ${p.name}.`, "error");
+      }
+    } finally {
+      if (generation === previewGenerationRef.current) setPreviewingId(null);
+    }
   };
 
   return (
-    <div className="panel-inset rounded-md p-2 space-y-2">
+    <div className="panel-inset rounded-md p-2 space-y-2" data-testid="preset-browser">
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           Preset Browser
@@ -115,44 +148,92 @@ export function PresetBrowser({ track }: { track: Track }) {
         {filtered.map((p) => {
           const active = track.presetId === p.id;
           const fav = favs.includes(p.id);
+          const showGuide = guidePresetId === p.id && p.guide;
           return (
             <div
               key={p.id}
-              className={`flex items-center justify-between gap-1 px-1.5 py-1 rounded border ${
+              data-testid={`preset-row-${p.id}`}
+              className={`px-1.5 py-1 rounded border ${
                 active ? "border-primary/60" : "border-border/60"
               } hover:border-primary/60`}
             >
-              <div className="flex-1 min-w-0">
-                <div className="font-mono text-[11px] truncate">{p.name}</div>
-                <div className="font-mono text-[9px] text-muted-foreground truncate">
-                  {p.category} · {p.description}
+              <div className="flex items-center justify-between gap-1">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="font-mono text-[11px] truncate">{p.name}</span>
+                    {p.layers?.length ? (
+                      <span className="shrink-0 rounded border border-primary/35 px-1 py-0.5 font-mono text-[7px] uppercase tracking-wider text-primary">
+                        HQ · {p.layers.length} zones
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="font-mono text-[9px] text-muted-foreground truncate">
+                    {p.category} · {p.description}
+                  </div>
                 </div>
+                {p.guide ? (
+                  <button
+                    type="button"
+                    onClick={() => setGuidePresetId(showGuide ? null : p.id)}
+                    aria-expanded={Boolean(showGuide)}
+                    aria-label={`${showGuide ? "Hide" : "Show"} creative guide for ${p.name}`}
+                    className={`text-[8px] font-mono px-1 py-0.5 border rounded ${
+                      showGuide
+                        ? "border-primary text-primary"
+                        : "border-border text-muted-foreground hover:border-primary/60"
+                    }`}
+                  >
+                    Learn
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => toggleFav(p.id)}
+                  title={fav ? "Unfavorite" : "Favorite"}
+                  aria-label={`${fav ? "Unfavorite" : "Favorite"} ${p.name}`}
+                  className={`text-[10px] px-1 ${
+                    fav ? "text-primary" : "text-muted-foreground"
+                  }`}
+                >
+                  {fav ? "★" : "☆"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void preview(p)}
+                  aria-label={`Preview ${p.name}`}
+                  className="text-[9px] font-mono px-1 py-0.5 border border-border rounded hover:border-primary/60"
+                >
+                  {previewingId === p.id ? "…" : "▶"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => load(p)}
+                  className={`text-[9px] font-mono px-1.5 py-0.5 border rounded ${
+                    active
+                      ? "border-primary text-primary"
+                      : "border-border hover:border-primary/60"
+                  }`}
+                >
+                  {active ? "Loaded" : "Load"}
+                </button>
               </div>
-              <button
-                onClick={() => toggleFav(p.id)}
-                title={fav ? "Unfavorite" : "Favorite"}
-                className={`text-[10px] px-1 ${
-                  fav ? "text-primary" : "text-muted-foreground"
-                }`}
-              >
-                {fav ? "★" : "☆"}
-              </button>
-              <button
-                onClick={() => preview(p)}
-                className="text-[9px] font-mono px-1 py-0.5 border border-border rounded hover:border-primary/60"
-              >
-                ▶
-              </button>
-              <button
-                onClick={() => load(p)}
-                className={`text-[9px] font-mono px-1.5 py-0.5 border rounded ${
-                  active
-                    ? "border-primary text-primary"
-                    : "border-border hover:border-primary/60"
-                }`}
-              >
-                {active ? "Loaded" : "Load"}
-              </button>
+              {showGuide ? (
+                <div className="mt-1.5 rounded border border-primary/20 bg-primary/5 p-2 text-[9px] leading-relaxed">
+                  <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1">
+                    <span className="font-mono uppercase tracking-wider text-primary">Family</span>
+                    <span className="text-muted-foreground">{p.guide!.family}</span>
+                    <span className="font-mono uppercase tracking-wider text-primary">Range</span>
+                    <span className="text-muted-foreground">{p.guide!.register}</span>
+                    <span className="font-mono uppercase tracking-wider text-primary">Hear</span>
+                    <span className="text-muted-foreground">{p.guide!.listeningCue}</span>
+                    <span className="font-mono uppercase tracking-wider text-primary">Try</span>
+                    <span className="text-foreground">{p.guide!.creativeMove}</span>
+                  </div>
+                  <div className="mt-1.5 border-t border-border/60 pt-1 text-[8px] text-muted-foreground">
+                    {p.guide!.character} · {FACTORY_SAMPLE_SOURCE.license}
+                  </div>
+                </div>
+              ) : null}
             </div>
           );
         })}

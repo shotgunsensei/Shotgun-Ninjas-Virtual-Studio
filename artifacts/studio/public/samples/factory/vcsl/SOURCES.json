@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 1,
+  "sourceName": "Versilian Community Sample Library (VCSL)",
+  "sourceRepository": "https://github.com/sgossner/VCSL",
+  "sourceCommit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+  "license": "CC0-1.0",
+  "licenseFile": "LICENSE-CC0-1.0.txt",
+  "licenseSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+  "licenseSourceBlobSha1": "0e259d42c996742e9e3cba14c677129b2c1b6311",
+  "selectionPolicy": "Compact chromatic factory subset; original PCM WAV files are unmodified.",
+  "totalBytes": 25236041,
+  "samples": [
+    {
+      "instrument": "tx81z-piano",
+      "rootNote": "C1",
+      "file": "tx81z-piano/c1.wav",
+      "bytes": 567754,
+      "sha256": "f93b125f492d1d0def7d4df2d36b5a271639daa6a00a1fee38151f1ae3adf9d2",
+      "sourcePath": "Electrophones/TX81Z/Piano 1/Piano 1_C1_vl2.wav",
+      "sourceBlobSha1": "ca1fec535245278a946b32e6593cea97b676fa45"
+    },
+    {
+      "instrument": "tx81z-piano",
+      "rootNote": "C2",
+      "file": "tx81z-piano/c2.wav",
+      "bytes": 550057,
+      "sha256": "325d5affe1b71b0173997f0c23d002cdfcd926ea7a162576a6fd4ee7cfd9e94a",
+      "sourcePath": "Electrophones/TX81Z/Piano 1/Piano 1_C2_vl2.wav",
+      "sourceBlobSha1": "f6aa254b39d225b221acba74163162b61fa5c173"
+    },
+    {
+      "instrument": "tx81z-piano",
+      "rootNote": "C3",
+      "file": "tx81z-piano/c3.wav",
+      "bytes": 669646,
+      "sha256": "1da89b072a2530dad77040be261f8acd862fd049b3bd32fed2035995a54b6156",
+      "sourcePath": "Electrophones/TX81Z/Piano 1/Piano 1_C3_vl2.wav",
+      "sourceBlobSha1": "0b0fb00300ac4475e352265b39e2d99aad46e399"
+    },
+    {
+      "instrument": "tx81z-piano",
+      "rootNote": "C4",
+      "file": "tx81z-piano/c4.wav",
+      "bytes": 596533,
+      "sha256": "53bf3e8afb38e0523dba41c450766e5da3de1de9d49371ea686c79d4b33304b3",
+      "sourcePath": "Electrophones/TX81Z/Piano 1/Piano 1_C4_vl2.wav",
+      "sourceBlobSha1": "934b9bc821dd2a98932f4e06ecbcbcbae40d787f"
+    },
+    {
+      "instrument": "tx81z-piano",
+      "rootNote": "C5",
+      "file": "tx81z-piano/c5.wav",
+      "bytes": 597349,
+      "sha256": "74cc7c070c6d1c81eff152f98219f6ba81ad2280cc7ce34908767cb0df025607",
+      "sourcePath": "Electrophones/TX81Z/Piano 1/Piano 1_C5_vl2.wav",
+      "sourceBlobSha1": "026c1d3732d1149569579c19076d97d4e9022c45"
+    },
+    {
+      "instrument": "tx81z-piano",
+      "rootNote": "C6",
+      "file": "tx81z-piano/c6.wav",
+      "bytes": 478222,
+      "sha256": "bd0403af524278d327c0aafa0584b5271c423d127904fe56d611bb479cc0d577",
+      "sourcePath": "Electrophones/TX81Z/Piano 1/Piano 1_C6_vl2.wav",
+      "sourceBlobSha1": "60b435e452dbb74442b27417fe07c11ed055ef15"
+    },
+    {
+      "instrument": "folk-harp",
+      "rootNote": "C2",
+      "file": "folk-harp/c2.wav",
+      "bytes": 1807522,
+      "sha256": "086c0b5fcc3e41bee173e53620d38f21a7dee4f59dfd75d8c8bbdf409ecbc5ee",
+      "sourcePath": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C2_v2_RR1.wav",
+      "sourceBlobSha1": "086a2c7ffc1097a4809cdc3ec100075d2530a231"
+    },
+    {
+      "instrument": "folk-harp",
+      "rootNote": "C3",
+      "file": "folk-harp/c3.wav",
+      "bytes": 1382798,
+      "sha256": "bfc5a2cae93793ac46bfe50c1b71d1e64e29eba34e71164c47c29e67488abd96",
+      "sourcePath": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C3_v2_RR1.wav",
+      "sourceBlobSha1": "3ac7ac020fc58cf16430fc249e5776d9c4a71702"
+    },
+    {
+      "instrument": "folk-harp",
+      "rootNote": "C4",
+      "file": "folk-harp/c4.wav",
+      "bytes": 775134,
+      "sha256": "79774644727f61bd535e4b49f7eae0c31b0cac4d2714d33d8f6cd84e5db081d3",
+      "sourcePath": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C4_v2_RR1.wav",
+      "sourceBlobSha1": "7118eaa188436970e23b28019b5b6e7fe6a1b5ef"
+    },
+    {
+      "instrument": "folk-harp",
+      "rootNote": "C5",
+      "file": "folk-harp/c5.wav",
+      "bytes": 366550,
+      "sha256": "75ce02fddc09d6c8c258a5c1ff79a901c5c60e434eaadc98b9dc67a741105c55",
+      "sourcePath": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C5_v2_RR1.wav",
+      "sourceBlobSha1": "b70f08e86b506b0f9df03a47a6ba34669e41328b"
+    },
+    {
+      "instrument": "vibraphone",
+      "rootNote": "F2",
+      "file": "vibraphone/f2.wav",
+      "bytes": 701588,
+      "sha256": "5b58cb88a7989ec67428943473e5e9053b5f05507881b8ddee107867f557a28d",
+      "sourcePath": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_F2_v2_rr1_Main.wav",
+      "sourceBlobSha1": "64850722b8a33ec142bc565ed211747ec5da8d5c"
+    },
+    {
+      "instrument": "vibraphone",
+      "rootNote": "C3",
+      "file": "vibraphone/c3.wav",
+      "bytes": 1903984,
+      "sha256": "26082761ea9b12fbe06d38bd4ea2826143958c29786948e50649e0478041b0fc",
+      "sourcePath": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_C3_v2_rr1_Main.wav",
+      "sourceBlobSha1": "a64d53d2379e9f74b772fea58154e2b28c75915a"
+    },
+    {
+      "instrument": "vibraphone",
+      "rootNote": "D4",
+      "file": "vibraphone/d4.wav",
+      "bytes": 2431644,
+      "sha256": "a0ff7c922a24fde71a675c57c69c222d619feaa4c91c25bdf6830e0dc1108a74",
+      "sourcePath": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_D4_v2_rr1_Main.wav",
+      "sourceBlobSha1": "608c881830b1e7887054cff275de3ce9e98f8581"
+    },
+    {
+      "instrument": "vibraphone",
+      "rootNote": "C5",
+      "file": "vibraphone/c5.wav",
+      "bytes": 971204,
+      "sha256": "774705f0da1e9c6299baa0343d1c12f82647f528f954096fdf9a75ba5694a2b1",
+      "sourcePath": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_C5_v2_rr1_Main.wav",
+      "sourceBlobSha1": "4477796d52b9bac86c9c9e47c33d085bd7d4581c"
+    },
+    {
+      "instrument": "tanzanian-kalimba",
+      "rootNote": "C#2",
+      "file": "tanzanian-kalimba/cs2.wav",
+      "bytes": 1720294,
+      "sha256": "b83ae7fbeec7691e6b6dbfe3c753bca1e21dc79cc7b3379b2d3756e55846e400",
+      "sourcePath": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#2_k10_50_100_rr2.wav",
+      "sourceBlobSha1": "3d3582a2ac15ad9e7386e3d6a079e92c93ae43a4"
+    },
+    {
+      "instrument": "tanzanian-kalimba",
+      "rootNote": "C#3",
+      "file": "tanzanian-kalimba/cs3.wav",
+      "bytes": 925192,
+      "sha256": "8bf3cbb5812176bd37529babb994123667fa410a837159549795e573e59b8906",
+      "sourcePath": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#3_k16_50_100_rr2.wav",
+      "sourceBlobSha1": "2f54d3673ff420cf68a3e033852794cc4198d938"
+    },
+    {
+      "instrument": "tanzanian-kalimba",
+      "rootNote": "C#4",
+      "file": "tanzanian-kalimba/cs4.wav",
+      "bytes": 716518,
+      "sha256": "2d2be2152d784f8013ded81ff863f4d0c5775d546bc1d61723d0c04f25426e45",
+      "sourcePath": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#4_k5_50_100_rr2.wav",
+      "sourceBlobSha1": "d5609bd3ca8d16fff82e4c380c189122a0d00484"
+    },
+    {
+      "instrument": "tanzanian-kalimba",
+      "rootNote": "C#5",
+      "file": "tanzanian-kalimba/cs5.wav",
+      "bytes": 566284,
+      "sha256": "81cad929b42f5177bbe5d09da860725d2cf5304d2d0fe32443523ef09e508ef3",
+      "sourcePath": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#5_k24_50_100_rr2.wav",
+      "sourceBlobSha1": "af397239194031376122e9115b184336e6820709"
+    },
+    {
+      "instrument": "ocarina",
+      "rootNote": "A3",
+      "file": "ocarina/a3.wav",
+      "bytes": 1730756,
+      "sha256": "983184cc710f3b82deb225664994031c107c0e841cf404f7085e4a0b72374b4b",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_A3.wav",
+      "sourceBlobSha1": "125b995839f7b562e6ade1f1398682ba5ef5c85b"
+    },
+    {
+      "instrument": "ocarina",
+      "rootNote": "C#4",
+      "file": "ocarina/cs4.wav",
+      "bytes": 1734950,
+      "sha256": "aa1223b8feaa75778ad24b5ef7826f7b42c931d61dbd7324137375e4e98d3614",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_C#4.wav",
+      "sourceBlobSha1": "746b7ac46d2943ac829e194aca2ced4914a89a0c"
+    },
+    {
+      "instrument": "ocarina",
+      "rootNote": "E4",
+      "file": "ocarina/e4.wav",
+      "bytes": 1718132,
+      "sha256": "c9b797eb447b6f02a60cd3fcdda79e25a5e80e3a2efc1a751937d194f1dbf4e3",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_E4.wav",
+      "sourceBlobSha1": "dc938241a8c5f00ec53ce79c1ed0b9e77dc16db0"
+    },
+    {
+      "instrument": "ocarina",
+      "rootNote": "C5",
+      "file": "ocarina/c5.wav",
+      "bytes": 1710374,
+      "sha256": "a6bc6aaaeba00596e5607de1ce9a1e63ebd2eca36a5856ce6c6118fdc42bf618",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus/StdOcarina_Sus_C5.wav",
+      "sourceBlobSha1": "7568769951199353ab174baaab3491c41f43bf06"
+    },
+    {
+      "instrument": "tenor-sax-staccato",
+      "rootNote": "C2",
+      "file": "tenor-sax-staccato/c2.wav",
+      "bytes": 159206,
+      "sha256": "40b8e77a074fc9ea524837da05e554d01b27f739f1af565f7a81d26d153bc57b",
+      "sourcePath": "Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_C2_vl2_rr1.wav",
+      "sourceBlobSha1": "6932419ba341344205e720c7ca2495cf597b2a71"
+    },
+    {
+      "instrument": "tenor-sax-staccato",
+      "rootNote": "C3",
+      "file": "tenor-sax-staccato/c3.wav",
+      "bytes": 152162,
+      "sha256": "0984039ad9542a4feee2ae34cf817042e7e2aa17330b1e7d595a513535e4d62d",
+      "sourcePath": "Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_C3_vl2_rr4.wav",
+      "sourceBlobSha1": "0a8dbc8c545a2ad82e821dfca9b8b99572aefbef"
+    },
+    {
+      "instrument": "tenor-sax-staccato",
+      "rootNote": "C4",
+      "file": "tenor-sax-staccato/c4.wav",
+      "bytes": 157160,
+      "sha256": "ac031056028134f678e82661dc25f09df6287c537f74e2f43e7a36051fb7bd35",
+      "sourcePath": "Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_C4_vl2_rr3.wav",
+      "sourceBlobSha1": "02b89a0716e256d165744acadbee26b29e17ce44"
+    },
+    {
+      "instrument": "tenor-sax-staccato",
+      "rootNote": "C5",
+      "file": "tenor-sax-staccato/c5.wav",
+      "bytes": 145028,
+      "sha256": "78a0150b71e93260e25e3a849f6746e252b268d3e342c1e31c86e08e97a13b63",
+      "sourcePath": "Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_C5_vl2_rr1.wav",
+      "sourceBlobSha1": "7ab94d38a686b809fabb575f1e0d11c549500976"
+    }
+  ]
+}

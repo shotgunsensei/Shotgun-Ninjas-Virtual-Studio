@@ -1361,7 +1361,15 @@ async function main() {
   if (failed.length) process.exitCode = 1;
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    // Playwright/CDP can retain a Windows pipe handle after browser.close(),
+    // leaving an otherwise complete profile process alive indefinitely. All
+    // artifacts above use synchronous writes, so terminate explicitly with
+    // the scenario-derived exit code once cleanup has finished.
+    process.exit(process.exitCode ?? 0);
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

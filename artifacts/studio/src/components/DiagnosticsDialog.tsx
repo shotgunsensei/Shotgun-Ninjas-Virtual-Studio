@@ -10,6 +10,7 @@ import {
 import { Copy, Download, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
 import { APP_VERSION, APP_NAME } from "../lib/version";
 import { listProjects } from "../lib/storage/db";
+import { getSampleCacheStats } from "../lib/audio/sounds/samples";
 
 interface DiagnosticsSnapshot {
   appVersion: string;
@@ -27,6 +28,10 @@ interface DiagnosticsSnapshot {
   savedProjects: number | "unavailable";
   storageUsageMb: number | "unavailable";
   storageQuotaMb: number | "unavailable";
+  decodedSampleBuffers: number;
+  decodedSampleCacheMb: number;
+  sampleDecodesActive: number;
+  sampleDecodesInFlight: number;
 }
 
 interface CompatResult {
@@ -86,6 +91,7 @@ export async function gather(): Promise<DiagnosticsSnapshot> {
       return "unknown";
     }
   })();
+  const sampleCache = getSampleCacheStats();
 
   return {
     appVersion: APP_VERSION,
@@ -111,6 +117,11 @@ export async function gather(): Promise<DiagnosticsSnapshot> {
     savedProjects,
     storageUsageMb,
     storageQuotaMb,
+    decodedSampleBuffers: sampleCache.decodedBuffers,
+    decodedSampleCacheMb:
+      Math.round((sampleCache.decodedBytes / (1024 * 1024)) * 10) / 10,
+    sampleDecodesActive: sampleCache.activeDecodes,
+    sampleDecodesInFlight: sampleCache.inFlight,
   };
 }
 
@@ -295,6 +306,14 @@ export function DiagnosticsDialog({
                     ? "—"
                     : `${snap.storageQuotaMb} MB`
                 }
+              />
+              <Row
+                label="Sample cache"
+                value={`${snap.decodedSampleBuffers} buffers · ${snap.decodedSampleCacheMb} MB`}
+              />
+              <Row
+                label="Sample decode"
+                value={`${snap.sampleDecodesActive} active · ${snap.sampleDecodesInFlight} in flight`}
               />
               <div className="pt-2 text-[10px] text-muted-foreground break-words">
                 {snap.userAgent}

@@ -20,6 +20,16 @@ const FEATURES = [
     desc: "Draw notes or record live from a MIDI controller. Supports velocity, groove swing, and clip-based arrangement.",
   },
   {
+    icon: "🎷",
+    title: "34 instruments, 19 packs",
+    desc: "Six HQ CC0 sampled instruments join the modeled synth catalog, with local lazy loading and export-ready sound.",
+  },
+  {
+    icon: "🧠",
+    title: "Learn by creating",
+    desc: "Instrument listening guides, composition prompts, and creative-practice lessons teach ideas inside the workflow.",
+  },
+  {
     icon: "⚡",
     title: "Free forever",
     desc: "No accounts, no paywalls, no ads. Your projects live in your browser. Export WAV or MP3 anytime.",
@@ -194,7 +204,7 @@ export default function LandingPage() {
       {/* Features */}
       <section className="px-6 py-16 max-w-5xl mx-auto w-full">
         <h2 className="font-display text-3xl tracking-wide text-center mb-10">Everything you need to make music</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {FEATURES.map((f) => (
             <div
               key={f.title}

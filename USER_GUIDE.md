@@ -37,7 +37,30 @@ then press **Space** again to resume.
 Drum tracks have a step sequencer — click pads in the grid, or play the
 pads live with **Q W E R / A S D F**.
 
-## 3. Save a project
+## 3. Explore sounds and learn by creating
+
+Open the **Sounds** browser to explore 34 melodic presets and 19 complete
+sound packs. The **HQ** badge marks an instrument recorded from the included
+CC0 factory library. Its zones download only when you first preview, load, or
+export that instrument, then remain available to the app's offline cache.
+
+A fast creative workflow:
+
+1. Preview a sound pack to hear its drum groove and pitched phrase together.
+2. Read its creative prompt, load it, and press **Space** to hear the editable
+   arrangement.
+3. On an HQ preset, open **Learn this sound**. Listen for the stated cue, then
+   try the suggested register or playing technique.
+4. Open **Lessons · Creative Practice** for short exercises on motif
+   variation, call-and-response, timbre/register, and harmony tools.
+5. Record a two-bar idea, duplicate it, and change only its last few notes.
+   Repetition makes the idea recognizable; the small variation creates motion.
+
+These are practice prompts, not rules. Use **Scale Lock** when you want to
+focus on rhythm and phrasing, then turn it off to explore notes outside the
+scale. Use **Chord Mode** to hear how one note can imply a fuller harmony.
+
+## 4. Save a project
 
 Projects autosave to your browser's IndexedDB every ~1.5 seconds, so
 just keep working. To force a save: press **S** (or **Ctrl/Cmd + S**),
@@ -48,7 +71,7 @@ To load, duplicate, or delete a saved project, click **Load** in the
 header. Loading replaces the current project — save first if you have
 unsaved changes you care about.
 
-## 4. Export a WAV
+## 5. Export a WAV
 
 1. Click **Export** in the header (or press **B**).
 2. Pick a format: **WAV** for highest quality, **MP3** for smaller files,
@@ -58,37 +81,43 @@ unsaved changes you care about.
    you'll get a clipping warning so you can pull masters down and re-export.
 4. The file downloads as `shotgun-ninjas-<project-name>-<timestamp>.<ext>`.
 
-The full master bus, effects, and sends are rendered exactly as you hear
-them, at the project sample rate.
+Factory-sampled instruments retain their recorded source timbre in WAV export.
+Modeled Tone-only voices and advanced effects use stable native approximations,
+so critically audition the downloaded mix before publishing it. WAV is the
+recommended reliability path; MP3 uses the heavier Tone offline renderer.
 
-## 5. Import a sample
+## 6. Import a sample
 
 Drag any audio file (WAV, MP3, OGG, FLAC, M4A) onto the studio. A
 preview dialog opens with a waveform; trim and name it, then drop it
 onto a vocal track to add it as a clip, or save it to the sample
 library for later. You can also click **Import sample** from the header.
 
-## 6. Use demo projects
+## 7. Use demo projects
 
 Open **Load** in the header and switch to the **Demos** tab. Each demo
 loads instantly and is a fully editable project — change presets, mute
 tracks, swap kits, rearrange clips, record over them. Demos won't
 overwrite the project you currently have open until you click Load.
 
-## 7. Install as a PWA
+## 8. Install as a PWA
 
-When the PWA shell is enabled (Phase 3), supported browsers will show an
-**Install** prompt in the address bar. Installing gives you:
+Supported browsers can show an **Install** prompt in the address bar.
+Installing gives you:
 
 - a standalone window with no browser chrome,
 - an app icon you can launch from your dock / home screen,
 - offline access to the app shell so the studio loads even without
   a network connection (your projects already live offline in IndexedDB).
 
+Factory instruments become available offline after their zones have been used
+once. The 24.07 MiB library is intentionally not downloaded with the initial
+app shell.
+
 If the prompt doesn't appear, the browser may need you to interact with
 the app first; reload after a few minutes of use.
 
-## 8. Use a MIDI controller
+## 9. Use a MIDI controller
 
 Plug in your MIDI keyboard or pad controller before loading the page
 (or after — the device picker refreshes). Open the **MIDI** panel on
@@ -135,5 +164,5 @@ Web MIDI works best in Chromium browsers. Firefox and Safari will show
   with the crash trace for bug reports.
 - **Diagnostics** — open the **About** dialog from the header footer to
   see the app version, browser, AudioContext state, sample rate, saved
-  projects count, Web MIDI support, and storage estimate. Helpful when
-  reporting a bug.
+  projects count, Web MIDI support, storage estimate, and decoded sample-cache
+  activity. Helpful when reporting a bug.

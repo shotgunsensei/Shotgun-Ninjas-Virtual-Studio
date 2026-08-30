@@ -1,24 +1,6 @@
 import { Logo } from "../components/Logo";
 import { CHANGELOG } from "../lib/version";
 
-const EXTRA_ENTRIES = [
-  {
-    version: "4.0.0-launch",
-    date: "2026-05-20",
-    highlights: [
-      "Public landing page with hero, feature cards, tutorial steps, and Install App prompt.",
-      "URL-based routing — /studio, /changelog, /credits, /press.",
-      "Open Graph & Twitter Card meta tags with a 1200×630 OG image.",
-      "Made with SN Studio share card — Canvas-generated image after every export.",
-      "Changelog, Credits, and Press kit pages linked from landing footer.",
-      "Studio header now links back to the landing page.",
-      "PWA manifest updated with correct start_url pointing to /studio.",
-    ],
-  },
-];
-
-const ALL_ENTRIES = [...EXTRA_ENTRIES, ...CHANGELOG];
-
 export default function ChangelogPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -50,7 +32,7 @@ export default function ChangelogPage() {
         </div>
 
         <div className="space-y-5">
-          {ALL_ENTRIES.map((entry) => (
+          {CHANGELOG.map((entry) => (
             <div
               key={entry.version}
               className="border border-border rounded-xl bg-graphite/40 p-6"

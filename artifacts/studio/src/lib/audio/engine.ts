@@ -239,6 +239,9 @@ class AudioEngine {
 
   private firstQwertyShown = false;
   private firstMidiShown = false;
+  private presetPreviewGeneration = 0;
+  private activePresetPreview: MelodicVoice | null = null;
+  private presetPreviewTimeout: number | null = null;
   /** Track id that currently has the Chop Lab kit active as its drum voice. */
   private chopKitTrackId: string | null = null;
 
@@ -427,6 +430,7 @@ class AudioEngine {
     } catch {
       // ignore
     }
+    this.cancelPresetPreview();
     try {
       this.masterAnalyser?.dispose();
     } catch {
@@ -904,6 +908,7 @@ class AudioEngine {
       this.clearMetronomeSchedule();
       this.stopAutomationScheduler();
       this.stopScheduledAudioPlayers(true);
+      this.cancelPresetPreview();
       for (const v of this.voices.values()) {
         releaseAllNotes(v.poly);
         if (v.mic && v.micOn) {
@@ -1841,27 +1846,74 @@ class AudioEngine {
     return getGroove(track.groove, this.globalGroove);
   }
 
-  /** Trigger one note from a melodic preset preview (used by the browser UI). */
-  previewPresetNote(presetId: string, note = "C4", durationSec = 0.6) {
+  /**
+   * Trigger one note from a melodic preset preview. Sampled instruments wait
+   * for their local zones and report which path sounded; missing/corrupt files
+   * fall back to the preset model. A generation guard prevents a slow decode
+   * from sounding after the user has already auditioned something else.
+   */
+  async previewPresetNote(
+    presetId: string,
+    note = "C4",
+    durationSec = 0.6,
+  ): Promise<"sampled" | "modeled" | null> {
     const def = findPreset(presetId);
-    if (!def) return;
-    // Build a one-shot preview voice on the master bus so it doesn't
-    // disturb any track's settings. Disposed shortly after the note.
-    const voice = buildPresetVoice(def);
+    if (!def || this.noAudio || this.disposed) return null;
+    this.cancelPresetPreview();
+    const generation = this.presetPreviewGeneration;
+
+    let voice: MelodicVoice | null = null;
+    let source: "sampled" | "modeled" = "modeled";
+    if (def.layers?.length) {
+      try {
+        voice = await tryLoadMelodicSampler(def.layers, {
+          release: Math.max(0.1, def.synth.release * 2),
+          attack: Math.max(0, def.synth.attack * 0.4),
+          volume: -8,
+        });
+        if (voice) source = "sampled";
+      } catch {
+        // The modeled voice below remains a deterministic fallback.
+      }
+    }
+    voice ??= buildPresetVoice(def);
+
+    if (generation !== this.presetPreviewGeneration || this.disposed) {
+      try { voice.dispose(); } catch { /* ignore */ }
+      return null;
+    }
+
+    // Build a one-shot preview voice on the master bus so it doesn't disturb
+    // any track settings. The next preview, Panic, or lifecycle disposal can
+    // cancel this tail immediately.
+    this.activePresetPreview = voice;
     voice.connect(this.masterChain.input);
     try {
       voice.triggerAttackRelease(note, durationSec, undefined, 0.85);
     } catch {
       // ignore — preset preview is best-effort
     }
-    // Dispose after note + tail.
-    window.setTimeout(() => {
-      try {
-        voice.dispose();
-      } catch {
-        // ignore
-      }
-    }, Math.ceil((durationSec + 2.0) * 1000));
+    const tailSec = Math.max(2, def.synth.release * 3);
+    this.presetPreviewTimeout = window.setTimeout(() => {
+      if (this.activePresetPreview === voice) this.cancelPresetPreview();
+    }, Math.ceil((durationSec + tailSec) * 1000));
+    return source;
+  }
+
+  private cancelPresetPreview() {
+    this.presetPreviewGeneration += 1;
+    if (this.presetPreviewTimeout !== null) {
+      window.clearTimeout(this.presetPreviewTimeout);
+      this.presetPreviewTimeout = null;
+    }
+    const voice = this.activePresetPreview;
+    this.activePresetPreview = null;
+    if (!voice) return;
+    try { releaseAllNotes(voice); } catch { /* ignore */ }
+    try {
+      (voice as unknown as { disconnect?: () => void }).disconnect?.();
+    } catch { /* ignore */ }
+    try { voice.dispose(); } catch { /* ignore */ }
   }
 
   /** Internal: dispose whichever instrument(s) are attached. */

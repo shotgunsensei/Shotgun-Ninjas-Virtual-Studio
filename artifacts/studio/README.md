@@ -1,16 +1,20 @@
 # Shotgun Ninjas Virtual Studio
 
-A browser-based, multi-track DAW MVP. No fake controls — every visible knob, slider,
-button, and pad is wired to real audio.
+A free browser-based, multi-track DAW and guided creative lab. No fake controls —
+every visible knob, slider, button, and pad is wired to real audio.
 
 ## Features
 
-- **5 instrument types**, each with 3 audibly-distinct presets:
-  - **Piano**: Grand · Electric · Synth
-  - **Guitar**: Clean · Crunch · Acoustic
-  - **Drums**: Acoustic · Electronic · Trap (8-piece kit)
-  - **Bass**: Finger · Synth · Sub
-  - **Vocals**: Clean · Warm · Lo-Fi (real microphone capture)
+- **34 melodic presets and 19 sound packs**, including modeled piano, guitar,
+  bass, synth, orchestral/world colors, multi-kit drums, and real microphone
+  vocals.
+- **Six sampled factory instruments** built from 26 same-origin CC0 zones:
+  TX81Z piano, folk harp, vibraphone, Tanzanian kalimba, ocarina, and tenor sax
+  stabs. Zones load on demand and are cached for offline reuse instead of being
+  added to the startup bundle.
+- **Creative practice tools** with instrument listening guides, pack prompts,
+  melodic preview phrases, and lessons on motifs, timbre/register,
+  call-and-response, and harmony.
 - **Transport** — Play / Pause / Stop / Record, BPM (40–240), metronome,
   4-beat count-in, loop region, master volume.
 - **Multitrack timeline** with per-track clip rendering for both note clips and
@@ -26,6 +30,8 @@ button, and pad is wired to real audio.
 - **Local persistence** in IndexedDB — projects (including vocal blobs)
   autosaved every 1.5s and reloaded on next visit.
 - **Cyber-ninja branding** — dark graphite + red primary + neon-blue accent.
+- **Performance controls** — bounded sample decoding/cache, lazy-loaded panels,
+  Performance Mode, Panic, diagnostics, and a native WAV render path.
 
 ## Keyboard shortcuts
 
@@ -48,3 +54,7 @@ for IndexedDB.
   **Tap to Enable Audio** (or press Space) once per session.
 - Web MIDI requires Chrome / Edge. Firefox / Safari will show "unsupported".
 - Microphone access requires HTTPS and an explicit permission grant.
+- Factory sample provenance, hashes, pinned source commit, and CC0 license are
+  recorded in `public/samples/factory/vcsl/SOURCES.json` and the adjacent
+  license/readme files. Rebuild the exact subset from the repo root with
+  `node scripts/fetch-vcsl-factory-samples.mjs`.

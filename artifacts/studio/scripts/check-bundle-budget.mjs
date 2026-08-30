@@ -110,6 +110,12 @@ for (const forbidden of ["App-", "audio-vendor-", "lamejs-", "jszip.min-"]) {
     throw new Error(`Service worker eagerly precaches lazy chunk pattern: ${forbidden}`);
   }
 }
+if (serviceWorker.includes(".wav")) {
+  throw new Error("Service worker must not eagerly list factory WAV files in its shell precache.");
+}
+if (!serviceWorker.includes('/samples/factory/vcsl/')) {
+  throw new Error("Service worker is missing on-demand factory instrument caching.");
+}
 
 console.log("Bundle budgets passed");
 console.log(`  Landing initial JS: ${kb(landingJs.raw)} raw / ${kb(landingJs.gzip)} gzip`);

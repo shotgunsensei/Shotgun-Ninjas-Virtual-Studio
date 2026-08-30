@@ -1,7 +1,7 @@
 /**
  * Shotgun Ninjas Sound Library
  *
- * Defines the 9 signature packs with metadata, cover art config,
+ * Defines the signature packs with metadata, cover art config,
  * associated kit/preset ids, and demo patterns.
  *
  * A "demo pattern" is a 16-step boolean grid per drum piece (index 0=beat 1,
@@ -58,6 +58,15 @@ export interface SoundPack {
   demoPattern: Partial<Record<DrumPiece, StepGrid>>;
   /** Beats per minute hint for the preview. */
   demoBpm?: number;
+  /** Optional pitched phrase layered over the two-bar drum preview. */
+  demoMelody?: Array<{
+    step: number;
+    note: string;
+    lengthSteps: number;
+    velocity?: number;
+  }>;
+  /** A compact composition challenge shown on the pack card. */
+  creativePrompt?: string;
 }
 
 export const SOUND_PACKS: SoundPack[] = [
@@ -398,6 +407,218 @@ export const SOUND_PACKS: SoundPack[] = [
       tomLow:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
       tomHigh: [0,0,0,0, 0,1,0,0, 0,0,0,0, 0,1,0,0].map(Boolean),
       crash:   [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0].map(Boolean),
+    },
+  },
+
+  // 14 ────────────────────────────────────────────────────
+  {
+    id: "vcsl-neon-keys",
+    name: "VCSL Neon Keys",
+    tagline: "Digital glass over arcade steel.",
+    description:
+      "CC0 TX81Z piano zones paired with Arcade Ghosts drums for clear synthwave chords and sharp melodic answers.",
+    category: "Retro",
+    kitId: "arcadeghosts",
+    presetId: "keys.vcsl-tx81z-piano",
+    coverArt: {
+      bg: "#10051f",
+      accent: "#22d3ee",
+      accent2: "#f472b6",
+      theme: "arcade",
+    },
+    demoBpm: 118,
+    creativePrompt: "Keep the left hand to two notes; let the top voice move and tell the story.",
+    demoMelody: [
+      { step: 0, note: "A3", lengthSteps: 4, velocity: 0.78 },
+      { step: 0, note: "C4", lengthSteps: 4, velocity: 0.66 },
+      { step: 4, note: "G3", lengthSteps: 4, velocity: 0.72 },
+      { step: 4, note: "B3", lengthSteps: 4, velocity: 0.64 },
+      { step: 8, note: "F3", lengthSteps: 4, velocity: 0.72 },
+      { step: 8, note: "A3", lengthSteps: 4, velocity: 0.64 },
+      { step: 12, note: "E3", lengthSteps: 4, velocity: 0.74 },
+      { step: 12, note: "G3", lengthSteps: 4, velocity: 0.64 },
+    ],
+    demoPattern: {
+      kick:  [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0].map(Boolean),
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      hat:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,1].map(Boolean),
+      fx:    [0,0,0,1, 0,0,0,0, 0,0,0,1, 0,0,0,0].map(Boolean),
+    },
+  },
+
+  // 15 ────────────────────────────────────────────────────
+  {
+    id: "vcsl-harp-temple",
+    name: "VCSL Harp Temple",
+    tagline: "Strings, air, and deliberate silence.",
+    description:
+      "Natural folk-harp samples and Neon Dojo percussion for reflective arpeggios, fantasy cues, and spacious hooks.",
+    category: "World",
+    kitId: "neondojo",
+    presetId: "pluck.vcsl-folk-harp",
+    coverArt: {
+      bg: "#071410",
+      accent: "#fbbf24",
+      accent2: "#2dd4bf",
+      theme: "neon-dojo",
+    },
+    demoBpm: 92,
+    creativePrompt: "Repeat one arpeggio three times; change only its final note on the fourth.",
+    demoMelody: [
+      { step: 0, note: "D3", lengthSteps: 3 },
+      { step: 2, note: "A3", lengthSteps: 3 },
+      { step: 4, note: "D4", lengthSteps: 3 },
+      { step: 6, note: "F4", lengthSteps: 4 },
+      { step: 8, note: "C3", lengthSteps: 3 },
+      { step: 10, note: "G3", lengthSteps: 3 },
+      { step: 12, note: "C4", lengthSteps: 3 },
+      { step: 14, note: "E4", lengthSteps: 4 },
+    ],
+    demoPattern: {
+      kick:    [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0].map(Boolean),
+      snare:   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0].map(Boolean),
+      hat:     [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0].map(Boolean),
+      tomLow:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+    },
+  },
+
+  // 16 ────────────────────────────────────────────────────
+  {
+    id: "vcsl-midnight-vibes",
+    name: "VCSL Midnight Vibes",
+    tagline: "Mallet light through a smoke-room pocket.",
+    description:
+      "Hard-mallet vibraphone and lo-fi drums for late-night harmony, jazz fragments, and warm sample-style loops.",
+    category: "Lo-Fi",
+    kitId: "lofi",
+    presetId: "bell.vcsl-vibraphone",
+    coverArt: {
+      bg: "#100f16",
+      accent: "#a78bfa",
+      accent2: "#f59e0b",
+      theme: "smoke-room",
+    },
+    demoBpm: 84,
+    creativePrompt: "Put chords behind the snare, not on every downbeat, and let the metal tails become glue.",
+    demoMelody: [
+      { step: 2, note: "C4", lengthSteps: 5, velocity: 0.7 },
+      { step: 2, note: "E4", lengthSteps: 5, velocity: 0.62 },
+      { step: 6, note: "B3", lengthSteps: 5, velocity: 0.7 },
+      { step: 6, note: "D4", lengthSteps: 5, velocity: 0.62 },
+      { step: 10, note: "A3", lengthSteps: 5, velocity: 0.7 },
+      { step: 10, note: "C4", lengthSteps: 5, velocity: 0.62 },
+      { step: 14, note: "G3", lengthSteps: 5, velocity: 0.72 },
+      { step: 14, note: "B3", lengthSteps: 5, velocity: 0.64 },
+    ],
+    demoPattern: {
+      kick:  [1,0,0,0, 0,0,1,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,1, 1,0,0,0].map(Boolean),
+      hat:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0].map(Boolean),
+      tomHigh: [0,0,0,1, 0,0,0,0, 0,1,0,0, 0,0,0,1].map(Boolean),
+    },
+  },
+
+  // 17 ────────────────────────────────────────────────────
+  {
+    id: "vcsl-kalimba-circuit",
+    name: "VCSL Kalimba Circuit",
+    tagline: "Thumb steel inside a neon pulse.",
+    description:
+      "Tanzanian kalimba samples against Cyber Trap drums for interlocking ostinatos and bright rhythmic counterpoint.",
+    category: "Electronic",
+    kitId: "cybertrap",
+    presetId: "bell.vcsl-tanzanian-kalimba",
+    coverArt: {
+      bg: "#07130f",
+      accent: "#4ade80",
+      accent2: "#22d3ee",
+      theme: "cyber",
+    },
+    demoBpm: 112,
+    creativePrompt: "Loop three notes over four beats; accents will keep shifting even when the pitches stay fixed.",
+    demoMelody: [
+      { step: 0, note: "C#4", lengthSteps: 2 },
+      { step: 3, note: "E4", lengthSteps: 2 },
+      { step: 6, note: "G#4", lengthSteps: 2 },
+      { step: 9, note: "C#4", lengthSteps: 2 },
+      { step: 12, note: "E4", lengthSteps: 2 },
+      { step: 15, note: "G#4", lengthSteps: 2 },
+    ],
+    demoPattern: {
+      kick:  [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0].map(Boolean),
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      hat:   [1,1,0,1, 1,0,1,1, 1,1,0,1, 1,0,1,1].map(Boolean),
+      fx:    [0,0,0,0, 0,0,0,1, 0,0,0,0, 0,0,0,1].map(Boolean),
+    },
+  },
+
+  // 18 ────────────────────────────────────────────────────
+  {
+    id: "vcsl-ocarina-horizon",
+    name: "VCSL Ocarina Horizon",
+    tagline: "One breath across a wide frame.",
+    description:
+      "Organic ocarina sustains over cinematic percussion for game cues, meditative leads, and memorable call-and-response.",
+    category: "Cinematic",
+    kitId: "cinematic",
+    presetId: "lead.vcsl-ocarina",
+    coverArt: {
+      bg: "#07121e",
+      accent: "#7dd3fc",
+      accent2: "#c084fc",
+      theme: "trailer",
+    },
+    demoBpm: 76,
+    creativePrompt: "Treat silence as a note: leave room after every phrase for the listener to answer internally.",
+    demoMelody: [
+      { step: 0, note: "A3", lengthSteps: 5, velocity: 0.72 },
+      { step: 5, note: "C4", lengthSteps: 3, velocity: 0.68 },
+      { step: 9, note: "E4", lengthSteps: 5, velocity: 0.76 },
+      { step: 16, note: "C4", lengthSteps: 4, velocity: 0.7 },
+      { step: 21, note: "A3", lengthSteps: 3, velocity: 0.66 },
+      { step: 25, note: "G3", lengthSteps: 6, velocity: 0.72 },
+    ],
+    demoPattern: {
+      kick:    [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0].map(Boolean),
+      snare:   [0,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0].map(Boolean),
+      tomLow:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 0,0,1,0].map(Boolean),
+      crash:   [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0].map(Boolean),
+    },
+  },
+
+  // 19 ────────────────────────────────────────────────────
+  {
+    id: "vcsl-tenor-alley",
+    name: "VCSL Tenor Alley",
+    tagline: "Reed bite against live-room grit.",
+    description:
+      "Tenor sax staccatos and Garage Band drums for punchy horn answers, breakbeat sketches, and raw funk punctuation.",
+    category: "Live",
+    kitId: "garageband",
+    presetId: "brass.vcsl-tenor-sax-stabs",
+    coverArt: {
+      bg: "#170d08",
+      accent: "#fb923c",
+      accent2: "#facc15",
+      theme: "garage",
+    },
+    demoBpm: 106,
+    creativePrompt: "Answer the snare with two short notes; vary the second pitch while keeping the rhythm recognizable.",
+    demoMelody: [
+      { step: 5, note: "C3", lengthSteps: 2, velocity: 0.82 },
+      { step: 7, note: "F3", lengthSteps: 2, velocity: 0.72 },
+      { step: 13, note: "C3", lengthSteps: 2, velocity: 0.84 },
+      { step: 15, note: "G3", lengthSteps: 2, velocity: 0.76 },
+      { step: 21, note: "C3", lengthSteps: 2, velocity: 0.82 },
+      { step: 23, note: "F3", lengthSteps: 2, velocity: 0.72 },
+      { step: 29, note: "A#2", lengthSteps: 2, velocity: 0.84 },
+      { step: 31, note: "C3", lengthSteps: 2, velocity: 0.78 },
+    ],
+    demoPattern: {
+      kick:  [1,0,0,0, 0,0,1,0, 0,0,0,0, 1,0,0,1].map(Boolean),
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
+      hat:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,1,0,1].map(Boolean),
+      clap:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0].map(Boolean),
     },
   },
 ];

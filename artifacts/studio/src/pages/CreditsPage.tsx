@@ -36,6 +36,18 @@ const SOUND_CREDITS = [
     ],
   },
   {
+    category: "CC0 Factory Instruments",
+    items: [
+      "VCSL TX81Z Piano 1 — six sampled zones",
+      "VCSL Folk Harp — four sampled zones",
+      "VCSL Vibraphone (hard mallets) — four sampled zones",
+      "VCSL Tanzanian Kalimba — four sampled zones",
+      "VCSL Ocarina (sustain) — four sampled zones",
+      "VCSL Tenor Saxophone (staccato) — four sampled zones",
+      "Versilian Community Sample Library — CC0 1.0 public-domain dedication",
+    ],
+  },
+  {
     category: "Synthesized Instruments",
     items: [
       "Grand Piano — Tone.js Sampler with internal synthesis fallback",
@@ -115,6 +127,28 @@ export default function CreditsPage() {
             </div>
           </section>
         ))}
+
+        <section className="rounded-xl border border-primary/25 bg-primary/5 p-5 text-sm leading-relaxed text-foreground/70">
+          Factory audio is pinned to a specific upstream revision and kept in
+          its original PCM WAV form. Review the{" "}
+          <a
+            href="https://github.com/sgossner/VCSL"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            official VCSL source
+          </a>
+          {" · "}
+          <a
+            href="/samples/factory/vcsl/SOURCES.json"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            exact local manifest and hashes
+          </a>
+        </section>
 
         {/* OSS */}
         <section>

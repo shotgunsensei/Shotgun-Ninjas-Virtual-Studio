@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import { Mono808Voice, PolyPluck, type MelodicVoice } from "../voices";
 import type { SoundParams } from "../../../types";
+import { VCSL_FACTORY_LAYERS } from "./factorySamples";
 
 /**
  * Melodic preset library, authored as data.
@@ -137,6 +138,32 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       drive: 0.09,
       width: 0.4,
       reverbSend: 0.22,
+    }),
+  },
+  {
+    id: "keys.vcsl-tx81z-piano",
+    name: "VCSL TX81Z Piano",
+    category: "Keys",
+    description: "Six-zone sampled FM piano with a crisp attack and glossy digital body.",
+    compatibleWith: ["piano"],
+    layers: VCSL_FACTORY_LAYERS.tx81zPiano,
+    guide: {
+      family: "Digital FM piano",
+      register: "C2–C6; strongest for midrange chords and bright upper hooks",
+      character: "Fast, glassy attack followed by a compact electric-piano body.",
+      listeningCue: "Notice how the transient stays clear even when several notes overlap.",
+      creativeMove: "Play seventh chords in the middle register, then answer them one octave higher with a two-note motif.",
+    },
+    synth: synth({
+      engine: "fmkeys",
+      attack: 0.01,
+      decay: 0.46,
+      sustain: 0.38,
+      release: 0.58,
+      cutoff: 0.78,
+      chorusSend: 0.18,
+      width: 0.48,
+      reverbSend: 0.2,
     }),
   },
 
@@ -349,6 +376,32 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       reverbSend: 0.24,
     }),
   },
+  {
+    id: "pluck.vcsl-folk-harp",
+    name: "VCSL Folk Harp",
+    category: "Pluck",
+    description: "Four-zone sampled folk harp with a natural finger attack and open resonance.",
+    compatibleWith: ["guitar", "piano"],
+    layers: VCSL_FACTORY_LAYERS.folkHarp,
+    guide: {
+      family: "Plucked string",
+      register: "C2–C5; keep bass notes sparse and let upper notes ring",
+      character: "Rounded finger transient, woody center, and an airy natural decay.",
+      listeningCue: "Listen for the small change from attack to ringing string—the decay is part of the phrase.",
+      creativeMove: "Arpeggiate a four-note chord upward, leave a beat of silence, then reverse the same notes downward.",
+    },
+    synth: synth({
+      engine: "pluck",
+      attack: 0.001,
+      decay: 0.7,
+      sustain: 0,
+      release: 0.8,
+      cutoff: 0.72,
+      resonance: 0.12,
+      width: 0.5,
+      reverbSend: 0.32,
+    }),
+  },
 
   // ---- Pad ----
   {
@@ -473,6 +526,35 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       reverbSend: 0.16,
     }),
   },
+  {
+    id: "lead.vcsl-ocarina",
+    name: "VCSL Ocarina",
+    category: "Lead",
+    description: "Four-zone sampled ocarina sustain with breath, focus, and an organic pitch center.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.ocarina,
+    guide: {
+      family: "Vessel flute",
+      register: "A3–C5; most expressive as a single-note melody",
+      character: "Pure flute tone with audible breath and a gentle, human sustain.",
+      listeningCue: "Hear how held notes reveal more breath than short notes; phrase around that change.",
+      creativeMove: "Write a five-note question, leave half a bar of air, then answer it with the last three notes reversed.",
+    },
+    synth: synth({
+      engine: "monosaw",
+      attack: 0.06,
+      decay: 0.28,
+      sustain: 0.82,
+      release: 0.52,
+      cutoff: 0.46,
+      resonance: 0.12,
+      mono: true,
+      glide: 0.035,
+      width: 0.2,
+      reverbSend: 0.34,
+      delaySend: 0.08,
+    }),
+  },
 
   // ---- Bell ----
   {
@@ -527,6 +609,58 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       delaySend: 0.12,
     }),
   },
+  {
+    id: "bell.vcsl-vibraphone",
+    name: "VCSL Vibraphone",
+    category: "Bell",
+    description: "Four-zone hard-mallet vibraphone with a defined strike and lingering metal bloom.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.vibraphone,
+    guide: {
+      family: "Struck metal idiophone",
+      register: "F2–C5; use close voicings above the bass or sparse low octaves",
+      character: "Bright mallet transient opening into a warm, sustained metallic bloom.",
+      listeningCue: "The strike locates the rhythm; the ringing tail supplies harmony between hits.",
+      creativeMove: "Place syncopated two-note chords off the kick, then let each tail bridge into the next downbeat.",
+    },
+    synth: synth({
+      engine: "bell",
+      attack: 0.001,
+      decay: 0.82,
+      sustain: 0,
+      release: 0.92,
+      cutoff: 0.88,
+      width: 0.58,
+      reverbSend: 0.42,
+    }),
+  },
+  {
+    id: "bell.vcsl-tanzanian-kalimba",
+    name: "VCSL Tanzanian Kalimba",
+    category: "Bell",
+    description: "Four-zone sampled Tanzanian kalimba with a dry thumb attack and complex tine ring.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.tanzanianKalimba,
+    guide: {
+      family: "Plucked idiophone",
+      register: "C#2–C#5; clear for ostinatos, counter-lines, and sparse chords",
+      character: "Woody click, focused fundamental, and asymmetric metallic overtones.",
+      listeningCue: "The short attack defines groove while the upper overtones make repeated notes feel alive.",
+      creativeMove: "Build a three-note ostinato, accent every third hit, and hear a new cross-rhythm emerge over 4/4.",
+    },
+    synth: synth({
+      engine: "pluck",
+      attack: 0.001,
+      decay: 0.5,
+      sustain: 0,
+      release: 0.58,
+      cutoff: 0.76,
+      resonance: 0.24,
+      width: 0.42,
+      reverbSend: 0.22,
+      delaySend: 0.1,
+    }),
+  },
 
   // ---- Brass / Siren ----
   {
@@ -564,6 +698,33 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       width: 0.66,
       drive: 0.14,
       reverbSend: 0.28,
+    }),
+  },
+  {
+    id: "brass.vcsl-tenor-sax-stabs",
+    name: "VCSL Tenor Sax Stabs",
+    category: "Brass",
+    description: "Four-zone sampled tenor sax staccato with breathy punch and acoustic variation.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.tenorSaxStaccato,
+    guide: {
+      family: "Single-reed woodwind",
+      register: "C2–C5; strongest as short riffs, section answers, and rhythmic punches",
+      character: "Immediate reed bite, warm body, and a naturally abrupt staccato release.",
+      listeningCue: "The noisy reed edge makes soft and hard accents read differently even in a dense mix.",
+      creativeMove: "Answer the snare with a two-hit stab, then move the second note up a fourth on every other bar.",
+    },
+    synth: synth({
+      engine: "brass",
+      attack: 0.015,
+      decay: 0.24,
+      sustain: 0.25,
+      release: 0.2,
+      cutoff: 0.62,
+      resonance: 0.16,
+      width: 0.4,
+      drive: 0.08,
+      reverbSend: 0.18,
     }),
   },
 ];

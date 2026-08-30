@@ -209,9 +209,16 @@ function PresetsTab() {
             }`}
             title={`${p.name} · ${p.category}`}
           >
-            <div className="truncate">{p.name}</div>
+            <div className="flex items-center justify-between gap-1">
+              <div className="truncate">{p.name}</div>
+              {p.layers?.length ? (
+                <span className="shrink-0 text-[7px] uppercase tracking-wider text-primary">
+                  HQ
+                </span>
+              ) : null}
+            </div>
             <div className="text-[9px] uppercase tracking-widest opacity-60">
-              {p.category}
+              {p.category}{p.layers?.length ? ` · ${p.layers.length} zones` : ""}
             </div>
           </button>
         );

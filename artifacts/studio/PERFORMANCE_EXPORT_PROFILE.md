@@ -36,15 +36,17 @@ direct Web Audio nodes:
 
 - Per-track gain, pan, and low-pass filter.
 - One-shot drum hits using bounded oscillator or shared-noise buffer sources.
-- Simple native oscillator fallback for melodic Tone-only tracks.
+- Nearest-root decoded factory sample sources with playback-rate transposition,
+  plus a native oscillator fallback for modeled or unavailable sample voices.
 - Audio clips decoded in existing small batches, then scheduled as buffer
   sources.
 - Scheduling yields every 256 note events.
 - Render budget rejects very large ranges before allocating the offline render.
 
-The native route intentionally approximates Tone-only melodic and advanced FX
-tracks. This keeps WAV export functional and responsive, but it is not yet a
-high-fidelity Tone bounce replacement.
+The native route now preserves the shipped factory instruments by scheduling
+their decoded sample zones directly. It intentionally approximates modeled
+Tone-only voices and advanced FX. This keeps WAV export functional and
+responsive, but it is not yet an exact Tone graph bounce.
 
 ### Latest Verification
 
@@ -81,13 +83,27 @@ Comparison against the prior failing profile:
 | `ConstantSourceNode` creates | 2,150 | 0 |
 | `GainNode` creates | 16,287 | 534 |
 
+### 2026-08-30 Factory-Instrument Parity Update
+
+- Factory zones are pre-decoded through the shared concurrency-limited loader.
+- The nearest recorded root is selected for each note, then transposed through
+  `AudioBufferSourceNode.playbackRate` with a bounded native envelope.
+- The browser acceptance test exports a tenor-sax project, verifies all four
+  source zones were served, and validates a non-empty RIFF/WAVE result through
+  the `native-wav` route.
+- The latest production runtime matrix
+  (`runtime-profile/runtime-profile-1788072902071.json`, ignored by Git) passed
+  19/19 scenarios with WAV export's largest long task at 92 ms.
+
 ### Remaining Export Risks
 
-- WAV output for Tone-only melodic presets and advanced FX is a stabilized
-  approximation, not exact Tone fidelity.
+- WAV output for modeled Tone-only presets and advanced FX remains a stabilized
+  approximation, not exact Tone fidelity. Factory-sampled presets retain their
+  shipped source timbre through native buffer sources.
 - MP3 still uses the legacy Tone offline renderer.
-- Export trace currently counts created native sources but does not prove
-  rendered audio content beyond successful WAV generation.
+- Automated export validation proves that a sampled source is requested and a
+  non-empty WAV is produced; critical listening across browsers and audio
+  devices remains a manual acceptance step.
 - Large projects with many audio clips still need more memory profiling.
 
 ### MP3 Risk Status

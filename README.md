@@ -20,10 +20,14 @@ The repo is a pnpm monorepo. The studio app itself lives in
 
 ## Features
 
-- **5 instrument families**, each with multiple audibly-distinct presets:
-  Piano (Grand · Electric · Synth), Guitar (Clean · Crunch · Acoustic),
-  Drums (multi-kit, 8-piece per kit), Bass (Finger · Synth · Sub), and
-  Vocals (Clean · Warm · Lo-Fi) recorded from the real microphone.
+- **34 melodic presets and 19 ready-to-play sound packs** spanning modeled
+  keys, guitar, bass, orchestral/world colors, multi-kit drums, and real
+  microphone vocals. Six high-quality factory instruments use 26 same-origin
+  CC0 sample zones: TX81Z piano, folk harp, vibraphone, Tanzanian kalimba,
+  ocarina, and tenor sax stabs.
+- **Creative learning built into the studio** — sampled-instrument listening
+  guides, practical "try this" prompts, pitched pack previews, and lessons on
+  motif development, timbre/register, call-and-response, and harmony tools.
 - **Transport** — Play / Pause / Stop / Record, BPM 40–240, metronome,
   configurable count-in, loop region, master volume, master meter with
   latching clip indicator, master oscilloscope, and a Panic button that
@@ -44,7 +48,8 @@ The repo is a pnpm monorepo. The studio app itself lives in
 - **Global error boundary** with copy-trace, panic, and recovery-data
   download.
 - **Diagnostics panel** showing app version, AudioContext state, sample
-  rate, MIDI support, saved-projects count, and storage estimate.
+  rate, MIDI support, saved-projects count, storage estimate, and decoded
+  sample-cache activity.
 
 ## How to run
 
@@ -68,6 +73,13 @@ pnpm --filter @workspace/studio build
 
 The build output lands in `artifacts/studio/dist/public` and can be
 served by any static host.
+
+The checked-in CC0 factory subset is reproducible from its pinned upstream
+commit. The fetcher verifies every Git blob before replacing a local file:
+
+```sh
+node scripts/fetch-vcsl-factory-samples.mjs
+```
 
 ## How to deploy
 
@@ -99,8 +111,13 @@ side and persists to the user's own browser storage.
 - The audio engine is monolithic and single-instance per page; opening
   the studio in multiple tabs will give each tab its own engine but they
   share IndexedDB, so the most recent autosave wins.
-- WAV export is rendered through `Tone.Offline` and held in memory before
-  download, so very long projects can hit the browser's memory cap.
+- WAV export uses a bounded native `OfflineAudioContext` path; factory-sampled
+  presets use their decoded zones while modeled Tone-only voices and advanced
+  FX use stable approximations. MP3 remains on the heavier Tone offline path,
+  and very long exports can still hit a browser memory cap.
+- Factory zones are downloaded only when first previewed, loaded, or exported.
+  They are cached for later offline use, so the first use of an instrument can
+  reflect network speed while startup avoids the 24.07 MiB sample payload.
 - There is no cloud sync — projects live in your browser's IndexedDB. If
   you clear site data, projects are gone. Use **File · Export Project
   JSON** to back up.
@@ -119,7 +136,12 @@ previews, [lamejs](https://github.com/zhuker/lamejs) for MP3 encoding.
 - [`FREE_PRODUCT_POLICY.md`](./FREE_PRODUCT_POLICY.md) — the binding
   product policy.
 - [`USER_GUIDE.md`](./USER_GUIDE.md) — step-by-step user guide.
-- [`PHASE_3_NOTES.md`](./PHASE_3_NOTES.md) — current Phase 3 status,
+- [`PHASE_3_NOTES.md`](./PHASE_3_NOTES.md) — historical Phase 3 baseline,
   testing checklist, and roadmap.
+- [`artifacts/studio/PERF_BASELINE.md`](./artifacts/studio/PERF_BASELINE.md)
+  — measured bundle, runtime, audio, storage, and export baselines.
+- [`artifacts/studio/PERFORMANCE_AUDIT.md`](./artifacts/studio/PERFORMANCE_AUDIT.md)
+  and [`artifacts/studio/PERFORMANCE_FIXES.md`](./artifacts/studio/PERFORMANCE_FIXES.md)
+  — confirmed root causes, implemented controls, and acceptance evidence.
 - [`artifacts/studio/UPGRADE_NOTES.md`](./artifacts/studio/UPGRADE_NOTES.md)
   — v2 upgrade baseline audit.

@@ -13,7 +13,7 @@ function assertUnique(values: string[], label: string) {
 }
 
 test("expanded offline sound catalog is unique and range-safe", () => {
-  assert.ok(MELODIC_PRESETS.length >= 28);
+  assert.ok(MELODIC_PRESETS.length >= 34);
   assertUnique(MELODIC_PRESETS.map((preset) => preset.id), "Preset");
 
   for (const preset of MELODIC_PRESETS) {
@@ -29,7 +29,7 @@ test("expanded offline sound catalog is unique and range-safe", () => {
 });
 
 test("sound packs reference working kits, presets, and 16-step patterns", () => {
-  assert.ok(SOUND_PACKS.length >= 13);
+  assert.ok(SOUND_PACKS.length >= 19);
   assertUnique(SOUND_PACKS.map((pack) => pack.id), "Sound pack");
 
   for (const pack of SOUND_PACKS) {
@@ -39,6 +39,16 @@ test("sound packs reference working kits, presets, and 16-step patterns", () => 
     }
     for (const grid of Object.values(pack.demoPattern)) {
       assert.equal(grid?.length, 16, `${pack.id} contains a non-16-step demo grid`);
+    }
+    for (const event of pack.demoMelody ?? []) {
+      assert.ok(event.step >= 0 && event.step < 32, `${pack.id} melody step is out of range`);
+      assert.ok(event.lengthSteps > 0 && event.lengthSteps <= 16, `${pack.id} melody length is out of range`);
+      assert.match(event.note, /^[A-G](?:#|b)?-?\d+$/, `${pack.id} has an invalid note`);
+      assert.ok((event.velocity ?? 0.72) > 0 && (event.velocity ?? 0.72) <= 1);
+    }
+    if (pack.id.startsWith("vcsl-")) {
+      assert.ok(pack.demoMelody?.length, `${pack.id} needs a pitched preview`);
+      assert.ok(pack.creativePrompt, `${pack.id} needs a creative prompt`);
     }
   }
 });
