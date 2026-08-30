@@ -1,0 +1,1 @@
+- [Imported artifact registration](imported-artifact-registration.md) — a checked-in artifact manifest may not create a live registry entry after GitHub import.
