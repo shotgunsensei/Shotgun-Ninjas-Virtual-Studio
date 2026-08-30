@@ -2,7 +2,8 @@ modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
+deploymentTarget = "static"
+publicDir = "artifacts/studio/dist/public"
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
