@@ -1,0 +1,2 @@
+import { motion } from 'framer-motion';
+export function Scene5(){return <section className="scene final"><div className="ring"/><motion.div initial={{opacity:0,y:25}} animate={{opacity:1,y:0}} transition={{duration:.8,ease:[.16,1,.3,1]}}><div className="eyebrow">YOUR MUSIC / YOUR BROWSER</div><h2>Press play.<br/><span>Go somewhere.</span></h2><div className="formats"><b>WAV</b><i>•</i><b>MP3</b><i>•</i><b>FREE FOREVER</b></div><div className="brand">SHOTGUN <strong>NINJAS</strong><small>VIRTUAL STUDIO</small></div></motion.div></section>}

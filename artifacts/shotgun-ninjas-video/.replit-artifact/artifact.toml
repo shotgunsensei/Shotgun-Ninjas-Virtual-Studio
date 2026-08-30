@@ -1,0 +1,29 @@
+kind = "video"
+previewPath = "/shotgun-ninjas-video/"
+title = "Shotgun Ninjas Studio — Product Film"
+description = "A short animated product film introducing Shotgun Ninjas Virtual Studio, a browser-based music studio for making beats, recording vocals, shaping sounds, and exporting finished tracks."
+version = "1.0.0"
+id = "artifacts/shotgun-ninjas-video"
+videoAspectRatio = "16:9"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/shotgun-ninjas-video/" ]
+localPort = 22678
+
+[services.development]
+run = "pnpm --filter @workspace/shotgun-ninjas-video run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/shotgun-ninjas-video", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/shotgun-ninjas-video/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22678"
+BASE_PATH = "/shotgun-ninjas-video/"

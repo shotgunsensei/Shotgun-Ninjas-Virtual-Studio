@@ -1,8 +1,15 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "-_80wQQkbhk6k5j1Km4kE"
 uri = "file://artifacts/studio/public/og-image.png"
 type = "image"
 title = "generated_image"
+
+[[outputs]]
+id = "cOvXTAbbGC9li_W61TH_M"
+uri = "file://artifacts/shotgun-ninjas-video/public/audio/bg_music.mp3"
+type = "audio"
+title = "background music"
+description = "Generated music: Driving electronic instrumental background music scoring a kinetic audio product film. Tight analog drum machine, clipped bass pulse, textured synth arpeggio, subtle tape grit, 116 B…"
+logical_id = "3e51ca0a-76b6-40ab-85d4-9f078a9ff8e9"

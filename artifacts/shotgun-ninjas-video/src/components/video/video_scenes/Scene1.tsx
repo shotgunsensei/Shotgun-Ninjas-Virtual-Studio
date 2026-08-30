@@ -1,0 +1,2 @@
+import { motion } from 'framer-motion';
+export function Scene1(){return <section className="scene hero"><div className="eyebrow">SHOTGUN NINJAS / VIRTUAL STUDIO</div><motion.h1 initial={{opacity:0,y:30,letterSpacing:'.3em'}} animate={{opacity:1,y:0,letterSpacing:'-.04em'}} transition={{duration:.9,ease:[.16,1,.3,1]}}>MAKE<br/><span>NOISE.</span></motion.h1><motion.p initial={{opacity:0}} animate={{opacity:1}} transition={{delay:.8}}>A full studio in your browser.</motion.p><div className="micro">NO SIGN-UP · NO PAYWALL · NOTHING TO INSTALL</div></section>}

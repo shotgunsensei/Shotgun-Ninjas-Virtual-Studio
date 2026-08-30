@@ -1,1 +1,2 @@
 - [Imported artifact registration](imported-artifact-registration.md) — a checked-in artifact manifest may not create a live registry entry after GitHub import.
+- [Video artifact frame wrappers](video-artifact-frame-wrappers.md) — absolutely positioned scenes need a full-frame transition wrapper or clipping can hide the entire film.
