@@ -91,7 +91,6 @@ export function PresetBrowser({ track }: { track: Track }) {
       getStore().setStatus(`Loading HQ preview: ${p.name}…`, "info");
     }
     try {
-      await audio.unlock();
       const source = await audio.previewPresetNote(
         p.id,
         p.category === "Bass" ? "A2" : "C4",

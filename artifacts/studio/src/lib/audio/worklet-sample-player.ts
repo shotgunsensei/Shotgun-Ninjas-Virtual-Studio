@@ -21,6 +21,7 @@
 
 import * as Tone from "tone";
 import { workletManager } from "./worklet-manager";
+import { connectToneCompatible } from "./toneConnection";
 import type { DrumVoice } from "./voices";
 
 // ── A/B module-level toggle ────────────────────────────────────────────────
@@ -49,12 +50,13 @@ function connectNativeToDest(
   native: AudioWorkletNode,
   dest: Tone.InputNode,
 ): boolean {
-  const destAny = dest as unknown as { input?: AudioNode };
-  if (destAny.input instanceof AudioNode) {
-    native.connect(destAny.input);
+  try {
+    connectToneCompatible(native, dest);
     return true;
+  } catch (error) {
+    console.warn("[WorkletSampledDrum] Worklet routing failed; using Tone.Player.", error);
+    return false;
   }
-  return false;
 }
 
 // ── Main export ────────────────────────────────────────────────────────────
@@ -80,10 +82,11 @@ export function makeWorkletSampledDrum(
   let decodedBuffer: AudioBuffer | null = null;
   let workletNodeConnected = false;
   let pendingDest: Tone.InputNode | null = null;
+  let disposed = false;
 
   // ── Wire worklet node to the Tone destination once both exist ──
   function maybeConnectWorklet(): void {
-    if (!workletNode || workletNodeConnected || !pendingDest) return;
+    if (disposed || !workletNode || workletNodeConnected || !pendingDest) return;
     if (connectNativeToDest(workletNode, pendingDest)) {
       workletNodeConnected = true;
     }
@@ -91,7 +94,7 @@ export function makeWorkletSampledDrum(
 
   // ── Create AudioWorkletNode and upload PCM data to audio thread ──
   function initWorkletNode(): void {
-    if (workletNode) return;
+    if (disposed || workletNode) return;
     if (!workletManager.ready || workletManager.fallback || !decodedBuffer) return;
     if (
       decodedBuffer.duration > MAX_WORKLET_SAMPLE_SECONDS ||
@@ -101,9 +104,15 @@ export function makeWorkletSampledDrum(
       return;
     }
     try {
-      const rawCtx = Tone.getContext().rawContext as AudioContext;
-      const node = workletManager.createNode("sample-player", rawCtx);
+      const node = workletManager.createNode(
+        "sample-player",
+        Tone.getContext() as unknown as AudioContext,
+      );
       if (!node) return;
+      if (disposed) {
+        workletManager.disposeNode(node);
+        return;
+      }
 
       // Transfer channel arrays to the audio thread.
       // We use transferable ArrayBuffers so the copy is zero-cost on the
@@ -134,12 +143,17 @@ export function makeWorkletSampledDrum(
   void (async () => {
     try {
       const resp = await fetch(url);
-      if (!resp.ok) return;
+      if (!resp.ok || disposed) return;
       const arrayBuf = await resp.arrayBuffer();
+      if (disposed) return;
       // decodeAudioData works on a suspended AudioContext; Tone always
       // creates one eagerly on import so this is safe.
       const rawCtx = Tone.getContext().rawContext as AudioContext;
       decodedBuffer = await rawCtx.decodeAudioData(arrayBuf);
+      if (disposed) {
+        decodedBuffer = null;
+        return;
+      }
       initWorkletNode();
     } catch {
       // Decode failed — Tone.Player still handles the URL via its own path.
@@ -153,7 +167,12 @@ export function makeWorkletSampledDrum(
         initWorkletNode();
       }
 
-      if (_workletPlayerEnabled && workletNode && !workletManager.fallback) {
+      if (
+        _workletPlayerEnabled &&
+        workletNode &&
+        workletNodeConnected &&
+        !workletManager.fallback
+      ) {
         // ── Worklet path: audio-thread-accurate trigger ──
         workletNode.port.postMessage({
           type: "play",
@@ -183,6 +202,9 @@ export function makeWorkletSampledDrum(
     },
 
     dispose: () => {
+      disposed = true;
+      pendingDest = null;
+      decodedBuffer = null;
       player.dispose();
       fallbackVoice.dispose();
       if (workletNode) {
@@ -194,6 +216,7 @@ export function makeWorkletSampledDrum(
         workletManager.disposeNode(workletNode);
         workletNode = null;
       }
+      workletNodeConnected = false;
     },
   };
 }

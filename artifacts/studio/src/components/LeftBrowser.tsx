@@ -7,12 +7,18 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { getStore, useStore } from "../store";
+import { getStore, resetStore, useStore } from "../store";
 import { DRUM_KIT_LIST } from "../lib/audio/sounds/kits";
 import { MELODIC_PRESETS } from "../lib/audio/sounds/presets";
-import { listProjects, loadProject, relocateSampleBlob } from "../lib/storage/db";
+import {
+  listProjects,
+  loadProject,
+  preserveProjectForReplacement,
+  relocateSampleBlob,
+  setLastProjectId,
+} from "../lib/storage/db";
 import { assertSampleImportAllowed, isLargeSample, formatBytes } from "../lib/storage/performanceGuards";
-import { flushMixToEngine } from "../store";
+import { audio } from "../lib/audio/engine";
 import type { SampleLibraryItem } from "../types";
 
 const SoundLibraryPanel = lazy(() =>
@@ -257,10 +263,13 @@ function KitsTab() {
             disabled={!drumTrack}
             onClick={() => {
               if (!drumTrack) return;
-              getStore().patchTrack(drumTrack.id, { kitId: k.id });
-              getStore().set({ selectedTrackId: drumTrack.id });
-              flushMixToEngine(getStore().state.project);
-              getStore().setStatus(`Kit: ${k.name}`, "info");
+              const store = getStore();
+              if (!store.applyDrumKit(drumTrack.id, k.id)) {
+                store.setStatus(`Could not load kit: ${k.name}`, "error");
+                return;
+              }
+              store.set({ selectedTrackId: drumTrack.id });
+              store.setStatus(`Kit: ${k.name}`, "info");
             }}
             className={`w-full px-2 py-1.5 rounded font-mono text-[11px] text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               active
@@ -306,10 +315,16 @@ function PresetsTab() {
             disabled={!target}
             onClick={() => {
               if (!target) return;
-              getStore().patchTrack(target.id, { presetId: p.id });
-              getStore().set({ selectedTrackId: target.id });
-              flushMixToEngine(getStore().state.project);
-              getStore().setStatus(`Preset: ${p.name}`, "info");
+              const store = getStore();
+              if (!store.applyMelodicPreset(target.id, p.id)) {
+                store.setStatus(
+                  `${p.name} is not compatible with ${target.name}.`,
+                  "warn",
+                );
+                return;
+              }
+              store.set({ selectedTrackId: target.id });
+              store.setStatus(`Preset: ${p.name}`, "info");
             }}
             className={`w-full px-2 py-1.5 rounded font-mono text-[11px] text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               active
@@ -350,8 +365,13 @@ function SamplesTab() {
     const sampleId = pendingSampleIdRef.current;
     pendingSampleIdRef.current = null;
     if (!sampleId) return;
-    const proj = getStore().state.project;
-    const target = (proj.samples ?? []).find((s) => s.id === sampleId);
+    const store = getStore();
+    const projectId = store.state.project.id;
+    const projectLoadRevision = store.state.projectLoadRevision;
+    const isCurrentProject = () =>
+      store.state.project.id === projectId &&
+      store.state.projectLoadRevision === projectLoadRevision;
+    const target = (store.state.project.samples ?? []).find((s) => s.id === sampleId);
     if (!target) return;
     try {
       assertSampleImportAllowed(file);
@@ -361,22 +381,38 @@ function SamplesTab() {
           "warn",
         );
       }
-      // Rewrite the blob behind the sample's existing blobKey so any
-      // clip that references the sample picks up the new audio on next
-      // load without a full project reload.
-      await relocateSampleBlob(target.blobKey, file);
       const ac = new (window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const buf = await ac.decodeAudioData(await file.arrayBuffer());
-      const durationSec = buf.duration;
-      ac.close();
-      const nextSamples = (proj.samples ?? []).map((s) =>
+      let durationSec: number;
+      try {
+        const buf = await ac.decodeAudioData(await file.arrayBuffer());
+        durationSec = buf.duration;
+      } finally {
+        await ac.close().catch(() => {
+          // Closing a decode-only context is best effort on older browsers.
+        });
+      }
+      if (!isCurrentProject()) return;
+      const currentTarget = (store.state.project.samples ?? []).find(
+        (sample) => sample.id === sampleId,
+      );
+      if (!currentTarget || currentTarget.blobKey !== target.blobKey) return;
+      // Validate/decode before replacing the durable blob. A corrupt relink
+      // must not destroy the last working sample behind this blobKey.
+      await relocateSampleBlob(currentTarget.blobKey, file);
+      if (!isCurrentProject()) return;
+      const latestTarget = (store.state.project.samples ?? []).find(
+        (sample) => sample.id === sampleId,
+      );
+      if (!latestTarget || latestTarget.blobKey !== currentTarget.blobKey) return;
+      const nextSamples = (store.state.project.samples ?? []).map((s) =>
         s.id === sampleId ? { ...s, blob: file, durationSec } : s,
       );
-      getStore().patchProject({ samples: nextSamples });
-      getStore().setStatus(`Sample "${target.name}" located`, "info");
+      store.patchProject({ samples: nextSamples });
+      store.setStatus(`Sample "${latestTarget.name}" located`, "info");
     } catch (err) {
-      getStore().setStatus(
+      if (!isCurrentProject()) return;
+      store.setStatus(
         `Locate failed: ${(err as Error).message}`,
         "error",
       );
@@ -473,17 +509,29 @@ function ProjectsTab() {
             key={p.id}
             type="button"
             onClick={async () => {
+              const store = getStore();
               try {
-                const proj = await loadProject(p.id);
-                if (!proj) return;
-                getStore().set({ project: proj });
-                flushMixToEngine(proj);
-                getStore().setStatus(`Loaded "${proj.name}"`, "info");
+                const { project: current, isTransientProject } = store.state;
+                await preserveProjectForReplacement(current, isTransientProject);
               } catch (err) {
-                getStore().setStatus(
-                  `Load failed: ${(err as Error).message}`,
+                store.setStatus(
+                  `Current project could not be preserved; replacement cancelled: ${(err as Error).message}`,
                   "error",
                 );
+                return;
+              }
+              try {
+                const proj = await loadProject(p.id);
+                if (!proj) {
+                  store.setStatus(`Project is no longer available: ${p.name}`, "warn");
+                  return;
+                }
+                audio.stop();
+                await setLastProjectId(proj.id);
+                resetStore(proj);
+                window.location.reload();
+              } catch (err) {
+                store.setStatus(`Load failed: ${(err as Error).message}`, "error");
               }
             }}
             className={`w-full px-2 py-1.5 rounded font-mono text-[11px] text-left transition-colors ${

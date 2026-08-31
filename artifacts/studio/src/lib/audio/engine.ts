@@ -1,3 +1,4 @@
+import { studioAudioContext } from "./toneContext";
 import * as Tone from "tone";
 import type {
   AnyPreset,
@@ -5,6 +6,7 @@ import type {
   AutomationLane,
   AutomationParamId,
   DrumKitId,
+  DrumPadSamplePiece,
   DrumPieceSettings,
   FxModuleId,
   FxModuleSettings,
@@ -15,6 +17,7 @@ import type {
   ModulationSource,
   NoteClip,
   Project,
+  SampleLibraryItem,
   SendBusId,
   SoundParams,
   Track,
@@ -38,9 +41,12 @@ import {
   type DrumPiece,
   type MelodicVoice,
 } from "./voices";
-import { buildKit, cutoffNormToHz, findKit, type KitVoice } from "./sounds/kits";
+import {
+  cutoffNormToHz,
+  type KitVoice,
+} from "./sounds/kits";
 import { buildPresetVoice, findPreset } from "./sounds/presets";
-import { tryLoadMelodicSampler } from "./sounds/samples";
+import { getSampleCacheStats, tryLoadMelodicSampler } from "./sounds/samples";
 import { applyGroove, getGroove, shouldFlam, shouldGhost } from "./sounds/groove";
 import {
   configureChopEngineOutput,
@@ -50,7 +56,10 @@ import {
   stopChopEngine,
 } from "./chopEngine";
 import { createLeanDrumVoice, type LeanDrumVoice } from "./leanDrumVoice";
+import { connectToneCompatible, resolveToneContextInput } from "./toneConnection";
 import { LeanDrumTrackSettingsCache } from "./leanDrumTrackSettings";
+import type { LevelMeter } from "./meterTypes";
+import { DrumPadSampleManager } from "./drumPadSamples";
 import {
   startPerfTimer,
   trackAudioResource,
@@ -98,6 +107,7 @@ export type { DrumKit, DrumPiece, DrumVoice, MelodicVoice } from "./voices";
  */
 
 interface TrackVoice {
+  readonly trackId: string;
   channel: Tone.Channel;
   meter: Tone.Meter;
   delay: Tone.FeedbackDelay;
@@ -131,6 +141,14 @@ interface TrackVoice {
   dispose: () => void;
 }
 
+interface InstrumentState {
+  poly?: MelodicVoice;
+  drums?: DrumKit;
+  kit?: KitVoice;
+  kitId?: DrumKitId;
+  presetId?: string;
+}
+
 type VoiceMode = "shell" | "lean" | "tone" | "disposed";
 
 interface EnsureTrackOptions {
@@ -159,11 +177,21 @@ interface AudioClipResource {
   eventId: number;
 }
 
+interface SamplerPromotionRequest {
+  id: number;
+  voice: TrackVoice;
+  def: NonNullable<ReturnType<typeof findPreset>>;
+  presetId: string;
+  instrumentGeneration: number;
+}
+
 declare global {
   interface Window {
     __SN_AUDIO_ENGINE_STATUS__?: {
       voiceModes: () => ReturnType<AudioEngine["getVoiceModeSnapshot"]>;
       soundSelectors: () => ReturnType<AudioEngine["getVoiceSoundSelectorSnapshot"]>;
+      padSamples: () => ReturnType<AudioEngine["getDrumPadSampleSnapshot"]>;
+      playback: () => ReturnType<AudioEngine["getPlaybackDiagnosticSnapshot"]>;
     };
   }
 }
@@ -187,12 +215,33 @@ class AudioEngine {
   private metronomeGain: Tone.Gain;
   /** Phase 6: AudioWorkletNode running MetronomeProcessor on the audio thread. */
   private metronomeWorkletNode: AudioWorkletNode | null = null;
+  /** Native bridge keeps a native AudioWorkletNode on the same context all
+   * the way to the master input; Tone's wrapper Gain remains fallback-only. */
+  private metronomeWorkletGain: GainNode | null = null;
+  private metronomeVolume = 1;
 
   private voices = new Map<string, TrackVoice>();
   private leanDrumVoices = new Map<string, LeanDrumVoice>();
   private leanTrackSnapshots = new Map<string, Track>();
   private leanTrackSettings = new LeanDrumTrackSettingsCache();
   private projectTrackSnapshots = new Map<string, Track>();
+  private drumPadSampleManager = new DrumPadSampleManager(
+    this.masterChain.input,
+    (trackId, piece) => {
+      const voice = this.voices.get(trackId);
+      if (voice) {
+        return { destination: voice.filter, routing: "track" };
+      }
+      const lean = this.leanDrumVoices.get(trackId);
+      if (lean) {
+        return {
+          destination: lean.getPadInput(piece) as Tone.InputNode,
+          routing: "piece",
+        };
+      }
+      return null;
+    },
+  );
   private voiceModes = new Map<string, VoiceMode>();
   private voicePromotions: Array<{
     trackId: string;
@@ -201,6 +250,16 @@ class AudioEngine {
     reason: string;
     durationMs: number;
   }> = [];
+  private samplerPromotionRequestId = 0;
+  private backgroundAudioWorkEpoch = 0;
+  private pendingSamplerPromotions = new Map<string, SamplerPromotionRequest>();
+  private activeSamplerPromotion: SamplerPromotionRequest | null = null;
+  private samplerPromotionDrainTimer: number | null = null;
+  private pendingHeldNotes = new Map<string, number>();
+  /** Invalidates user actions that were waiting on context/mic startup when
+   * Panic or project replacement established a newer silence boundary. */
+  private silenceGeneration = 0;
+  private vocalMonitorGeneration = new Map<string, number>();
 
   // ---- Phase 11: Automation & Modulation ----
   private automationSchedulerId: number | null = null;
@@ -259,6 +318,8 @@ class AudioEngine {
       window.__SN_AUDIO_ENGINE_STATUS__ = {
         voiceModes: () => this.getVoiceModeSnapshot(),
         soundSelectors: () => this.getVoiceSoundSelectorSnapshot(),
+        padSamples: () => this.getDrumPadSampleSnapshot(),
+        playback: () => this.getPlaybackDiagnosticSnapshot(),
       };
     }
 
@@ -290,10 +351,20 @@ class AudioEngine {
    */
   async unlock() {
     if (this.disposed) throw new Error("AudioEngine has been disposed");
-    if (this.unlocked && this.isAudioContextRunning()) return;
+    if (this.unlocked && this.isAudioContextRunning()) {
+      this.masterChain.releasePanicHold();
+      return;
+    }
+    const silenceGeneration = this.silenceGeneration;
     const endInit = startPerfTimer("audio-engine-init");
     try {
       await this.ensureAudioContextStarted();
+      // A Panic that occurred while context startup was pending remains
+      // authoritative. A later, fresh user action will capture the new value
+      // and may intentionally release the hold.
+      if (silenceGeneration === this.silenceGeneration) {
+        this.masterChain.releasePanicHold();
+      }
     } finally {
       endInit();
     }
@@ -302,6 +373,10 @@ class AudioEngine {
   /** Alias for `unlock()` — part of the documented v2 facade surface. */
   async initAudio() {
     return this.unlock();
+  }
+
+  getSilenceGeneration(): number {
+    return this.silenceGeneration;
   }
 
   private async startToneWithTimeout(): Promise<void> {
@@ -336,6 +411,8 @@ class AudioEngine {
   private async ensureAudioContextStarted(): Promise<void> {
     if (this.isAudioContextRunning()) {
       this.unlocked = true;
+      configureChopEngineOutput(this.masterChain.input);
+      await this.tryInitWorkletsOnce();
       return;
     }
     if (this.audioStartPromise) return this.audioStartPromise;
@@ -382,30 +459,34 @@ class AudioEngine {
     }
     try {
       const toneCtx = Tone.getContext();
-      const rawCtx = toneCtx.rawContext as AudioContext;
       const registered = await workletManager.register(toneCtx as unknown as AudioContext);
       if (!registered || workletManager.fallback) {
         this.workletUnavailable = true;
         return;
       }
 
-      this.masterChain.initWorklets();
-      if (workletManager.fallback) {
-        this.workletUnavailable = true;
-        return;
-      }
+      // Keep the safety-critical master graph on Tone/native Web Audio nodes.
+      // Those nodes already execute on the audio rendering thread, while a
+      // custom master rewire can strand the entire studio if a browser's
+      // wrapper/native-node bridge is incompatible. Worklets are reserved for
+      // the scheduler and sampled voices, where failure is locally recoverable.
 
       const node = workletManager.createNode("metronome", toneCtx as unknown as AudioContext);
       if (!node) return;
+      let nativeGain: GainNode | null = null;
       try {
-        const gainAny = this.metronomeGain as unknown as { input?: AudioNode };
-        if (gainAny.input instanceof AudioNode) {
-          node.connect(gainAny.input);
-        } else {
-          node.connect(rawCtx.destination);
-        }
+        // Keep the native worklet and its fader on the node's own context.
+        // Routing a native AudioWorkletNode through Tone's wrapper Gain can
+        // connect without throwing yet remain outside the wrapper's rendered
+        // graph in Chromium. One native bridge into the master is reliable.
+        nativeGain = node.context.createGain();
+        nativeGain.gain.value = this.metronomeVolume;
+        node.connect(nativeGain);
+        connectToneCompatible(nativeGain, this.masterChain.input);
         this.metronomeWorkletNode = node;
+        this.metronomeWorkletGain = nativeGain;
       } catch (err) {
+        try { nativeGain?.disconnect(); } catch { /* best effort */ }
         workletManager.disposeNode(node);
         throw err;
       }
@@ -418,12 +499,19 @@ class AudioEngine {
       );
       workletManager.disposeNode(this.metronomeWorkletNode);
       this.metronomeWorkletNode = null;
+      try { this.metronomeWorkletGain?.disconnect(); } catch { /* best effort */ }
+      this.metronomeWorkletGain = null;
     }
   }
 
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.pendingSamplerPromotions.clear();
+    if (this.samplerPromotionDrainTimer !== null) {
+      globalThis.clearTimeout(this.samplerPromotionDrainTimer);
+      this.samplerPromotionDrainTimer = null;
+    }
     try {
       this.panicStopAll();
     } catch {
@@ -434,9 +522,13 @@ class AudioEngine {
     } catch {
       // ignore
     }
+    this.drumPadSampleManager.dispose();
     this.cancelPresetPreview();
     try {
-      this.masterAnalyser?.dispose();
+      if (this.masterAnalyser) {
+        this.masterChain.disconnectPostMaster(this.masterAnalyser);
+        this.masterAnalyser.dispose();
+      }
     } catch {
       // ignore
     }
@@ -448,6 +540,8 @@ class AudioEngine {
       // ignore
     }
     this.metronomeWorkletNode = null;
+    try { this.metronomeWorkletGain?.disconnect(); } catch { /* ignore */ }
+    this.metronomeWorkletGain = null;
     lookaheadScheduler.cancelAll();
     lookaheadScheduler.stop();
     try {
@@ -467,9 +561,27 @@ class AudioEngine {
     (globalThis as typeof globalThis & Record<string, boolean | undefined>).__SN_STUDIO_AUDIO_ENGINE_ACTIVE__ = false;
   }
 
-  /** Resolves once all Tone-managed buffers (samplers etc.) finish loading. */
+  /** Resolves once Tone-managed buffers finish loading. Factory preset sample
+   * work uses the app-owned queue below and can be awaited independently. */
   whenSamplesReady(): Promise<void> {
     return Tone.loaded();
+  }
+
+  async whenSampleWorkSettled(timeoutMs = 30_000): Promise<void> {
+    const deadline = performance.now() + Math.max(1, timeoutMs);
+    while (!this.disposed) {
+      const cache = getSampleCacheStats();
+      if (
+        !this.activeSamplerPromotion &&
+        this.pendingSamplerPromotions.size === 0 &&
+        cache.activeDecodes === 0 &&
+        cache.inFlight === 0
+      ) return;
+      if (performance.now() >= deadline) {
+        throw new Error("Factory sample work did not settle before the timeout.");
+      }
+      await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 25));
+    }
   }
 
   // ---- master ----
@@ -480,14 +592,15 @@ class AudioEngine {
   }
 
   /**
-   * Native Web Audio input for the studio master chain. World ambience and
-   * other raw-AudioContext sources use this so Panic, master volume, limiting,
-   * metering, and export monitoring remain authoritative.
+   * Context-level input for the studio master chain. World ambience and other
+   * sources created from Tone's raw context use this so Panic, master volume,
+   * limiting, metering, and export monitoring remain authoritative.
+   *
+   * This may be a standardized-audio-context wrapper rather than a browser
+   * native node, but it is owned by the same raw context as those sources.
    */
-  getMasterNativeInput(): AudioNode {
-    // MasterChain.input is a Tone.Gain, whose concrete input is a native
-    // GainNode. Tone's broader InputNode union obscures that at type level.
-    return this.masterChain.input.input as AudioNode;
+  getMasterContextInput(): AudioNode {
+    return resolveToneContextInput(this.masterChain.input);
   }
 
   /** Tone.Meter for the post-master bus (used by StereoMeter). */
@@ -512,6 +625,7 @@ class AudioEngine {
     if (!this.masterAnalyser || this.masterAnalyserSize !== boundedSize) {
       if (this.masterAnalyser) {
         try {
+          this.masterChain.disconnectPostMaster(this.masterAnalyser);
           this.masterAnalyser.dispose();
           trackToneDispose("analyser", `master:${this.masterAnalyserSize}`);
         } catch {
@@ -522,7 +636,7 @@ class AudioEngine {
       trackToneCreate("analyser", `master:${boundedSize}`);
       // tap the post-master signal so the scope reflects what the user
       // actually hears (post FX, post limiter)
-      this.masterChain.input.connect(a);
+      this.masterChain.connectPostMaster(a);
       this.masterAnalyser = a;
       this.masterAnalyserSize = boundedSize;
     }
@@ -571,11 +685,11 @@ class AudioEngine {
 
   /** Apply EQ (low/mid/high gain dB + HPF on/off + HPF cutoff Hz). */
   setTrackEq(trackId: string, eq: Partial<TrackEq>) {
+    this.leanDrumVoices.get(trackId)?.setTrackEq(eq);
     const v = this.voices.get(trackId);
     if (!v) return;
     const wantsEq =
       eq.hpfOn === true ||
-      typeof eq.hpfHz === "number" ||
       Math.abs(eq.low ?? 0) > 0.001 ||
       Math.abs(eq.mid ?? 0) > 0.001 ||
       Math.abs(eq.high ?? 0) > 0.001;
@@ -599,6 +713,7 @@ class AudioEngine {
 
   /** Set a single send (0..1) from this track to one of the global buses. */
   setTrackSend(trackId: string, busId: SendBusId, amount: number) {
+    this.leanDrumVoices.get(trackId)?.setSend(busId, amount);
     const v = this.voices.get(trackId);
     if (!v?.sends) return;
     const g = v.sends.get(busId);
@@ -613,10 +728,9 @@ class AudioEngine {
     moduleId: FxModuleId,
     settings: Partial<FxModuleSettings>,
   ) {
-    const hasLean = this.leanDrumVoices.has(trackId);
     const enabled = settings.enabled !== false;
-    if (hasLean && !enabled) return;
-    const v = this.voices.get(trackId) ?? (hasLean ? this.promoteLeanDrumTrackToTone(trackId, `effect:${moduleId}`) : null);
+    this.leanDrumVoices.get(trackId)?.setEffectModule(moduleId, settings);
+    const v = this.voices.get(trackId);
     if (!v) return;
     const amount = Math.max(0, Math.min(1, settings.amount ?? 0.5));
     const params = settings.params ?? {};
@@ -716,6 +830,49 @@ class AudioEngine {
     return this.playbackState;
   }
 
+  /** Read-only production diagnostics for sustained-playback acceptance. */
+  getPlaybackDiagnosticSnapshot() {
+    const rawContext = Tone.getContext().rawContext;
+    return {
+      playbackState: this.playbackState,
+      transportState: Tone.getTransport().state,
+      contextState: this.getAudioContextState(),
+      audioContext: {
+        browserNative: rawContext === studioAudioContext,
+        constructorName: rawContext?.constructor?.name ?? "unknown",
+        standardizedProxyOwnerPresent: Boolean(
+          (rawContext as typeof rawContext & { _nativeAudioContext?: unknown })
+            ?._nativeAudioContext,
+        ),
+      },
+      positionBeats: this.positionBeats(),
+      masterLevels: this.getMasterLevels(),
+      // Named drums are data-swapped on the native voice. These legacy-shaped
+      // arrays stay in diagnostics so older support tools can assert no work.
+      activeKitBuilds: [] as Array<{ trackId: string; generation: number }>,
+      requestedKits: [] as Array<{
+        trackId: string;
+        kitId: DrumKitId;
+        generation: number;
+      }>,
+      samplerPromotions: {
+        active: this.activeSamplerPromotion
+          ? {
+              trackId: this.activeSamplerPromotion.voice.trackId,
+              presetId: this.activeSamplerPromotion.presetId,
+              requestId: this.activeSamplerPromotion.id,
+            }
+          : null,
+        pending: Array.from(this.pendingSamplerPromotions.values()).map((request) => ({
+          trackId: request.voice.trackId,
+          presetId: request.presetId,
+          requestId: request.id,
+        })),
+        cache: getSampleCacheStats(),
+      },
+    };
+  }
+
   play(): boolean {
     const flags = getFirstPlayFlags();
     const traceFirstPlay = isFirstPlayTraceEnabled() && !this.firstPlayAttempted;
@@ -755,6 +912,11 @@ class AudioEngine {
     }
     // Releasing any held panic mute is a no-op when no panic is active,
     // so this is safe to call on every play.
+    this.backgroundAudioWorkEpoch += 1;
+    if (this.samplerPromotionDrainTimer !== null) {
+      globalThis.clearTimeout(this.samplerPromotionDrainTimer);
+      this.samplerPromotionDrainTimer = null;
+    }
     this.playbackState = "starting";
     let watchdogId: number | null = null;
     if (traceFirstPlay) {
@@ -868,6 +1030,7 @@ class AudioEngine {
       firstPlayMark("AudioEngine.stop:complete", {
         transportState: Tone.getTransport().state,
       });
+      this.scheduleSamplerPromotionDrain();
     } catch (err) {
       this.playbackState = "error";
       throw err;
@@ -898,6 +1061,8 @@ class AudioEngine {
    * tails, and stop any live mic monitoring. Bound to the red Panic button.
    */
   panicStopAll() {
+    this.silenceGeneration += 1;
+    this.backgroundAudioWorkEpoch += 1;
     const transport = Tone.getTransport();
     this.playbackState = "stopping";
     this.playBlockedByWatchdog = false;
@@ -913,15 +1078,23 @@ class AudioEngine {
       this.stopAutomationScheduler();
       this.stopScheduledAudioPlayers(true);
       this.cancelPresetPreview();
+      this.drumPadSampleManager.stopAll();
+      this.pendingHeldNotes.clear();
       for (const v of this.voices.values()) {
+        this.vocalMonitorGeneration.set(
+          v.trackId,
+          (this.vocalMonitorGeneration.get(v.trackId) ?? 0) + 1,
+        );
         releaseAllNotes(v.poly);
-        if (v.mic && v.micOn) {
+        if (v.mic) {
           try {
             v.mic.close();
           } catch {
             // ignore
           }
           v.micOn = false;
+          try { v.mic.dispose(); } catch { /* ignore */ }
+          v.mic = undefined;
         }
       }
       for (const lean of this.leanDrumVoices.values()) {
@@ -940,6 +1113,7 @@ class AudioEngine {
       firstPlayMark("AudioEngine.panic:complete", {
         transportState: transport.state,
       });
+      this.scheduleSamplerPromotionDrain();
     } catch {
       this.playbackState = "error";
     }
@@ -953,7 +1127,15 @@ class AudioEngine {
     // Tone.js fallback synths AND the AudioWorklet click node are affected.
     // A 3 ms ramp prevents audible clicks when the slider moves quickly.
     const lin = clamped <= 0.001 ? 0 : Math.pow(10, ((clamped - 1) * 60) / 20);
+    this.metronomeVolume = lin;
     this.metronomeGain.gain.rampTo(lin, 0.003);
+    const nativeGain = this.metronomeWorkletGain;
+    if (nativeGain) {
+      const now = nativeGain.context.currentTime;
+      nativeGain.gain.cancelScheduledValues(now);
+      nativeGain.gain.setValueAtTime(nativeGain.gain.value, now);
+      nativeGain.gain.linearRampToValueAtTime(lin, now + 0.003);
+    }
   }
 
   setMetronome(on: boolean) {
@@ -967,6 +1149,10 @@ class AudioEngine {
       // Explicitly remove the repeating Transport event so it stops consuming
       // scheduling CPU instead of just being silenced by the boolean guard.
       this.clearMetronomeSchedule();
+      if (this.metronomeWorkletNode) {
+        workletManager.postMessage(this.metronomeWorkletNode, { type: "clear" });
+      }
+      lookaheadScheduler.cancelAll();
       return;
     }
     if (this.metronomeId !== null) return; // already scheduled — don't stack
@@ -1011,19 +1197,23 @@ class AudioEngine {
    * Used by the Diagnostics panel for CPU load estimation.
    */
   getActiveVoiceCount(): number {
-    let count = 0;
-    for (const v of this.voices.values()) {
-      if (v.poly || v.drums || v.kit) count++;
+    const active = new Set(this.leanDrumVoices.keys());
+    for (const [trackId, voice] of this.voices) {
+      if (voice.poly || voice.drums || voice.kit) active.add(trackId);
     }
-    return count;
+    return active.size;
   }
 
   /**
    * Expose whether AudioWorklets are active (for the diagnostics panel).
    * Mirrors workletManager.ready.
    */
-  getWorkletStatus(): { ready: boolean; fallback: boolean } {
-    return { ready: workletManager.ready, fallback: workletManager.fallback };
+  getWorkletStatus(): { ready: boolean; fallback: boolean; reason: string | null } {
+    return {
+      ready: workletManager.ready,
+      fallback: workletManager.fallback,
+      reason: workletManager.unavailableReason,
+    };
   }
 
   /**
@@ -1047,15 +1237,39 @@ class AudioEngine {
   /** Keep lightweight project snapshots so live pads/keys can realize only the
    * requested voice before transport preparation has run. */
   setProjectTrackSnapshots(tracks: readonly Track[]) {
+    const previousSnapshots = this.projectTrackSnapshots;
     this.projectTrackSnapshots = new Map(tracks.map((track) => [track.id, track]));
-    // Keep promotion snapshots current without doing AudioParam work in the
-    // note scheduler. The settings cache below remains the source of truth for
-    // whether a realized lean voice needs an update.
+    this.soloSet = new Set(
+      tracks.filter((track) => track.solo).map((track) => track.id),
+    );
+    if (!this.noAudio) this.drumPadSampleManager.syncTracks(tracks);
+    // A same-id project/sketch replacement can alter the entire channel strip
+    // without invoking the individual engine setters. Reapply a changed drum
+    // snapshot here, outside the note scheduler, so EQ, sends, piece settings,
+    // FX and sound parameters cannot remain stale behind a correct selector.
     for (const track of tracks) {
-      if (this.leanDrumVoices.has(track.id)) {
-        this.leanTrackSnapshots.set(track.id, track);
+      const lean = this.leanDrumVoices.get(track.id);
+      if (!lean) continue;
+      this.leanTrackSnapshots.set(track.id, track);
+      if (previousSnapshots.get(track.id) !== track) {
+        lean.applyTrack(track);
+        lean.setAudible(
+          !track.muted && (this.soloSet.size === 0 || track.solo),
+        );
+        this.leanTrackSettings.markApplied(track);
       }
     }
+  }
+
+  /** Keep project-library blobs available to persisted drum-pad overrides. */
+  setProjectSampleLibrary(samples: readonly SampleLibraryItem[] = []): void {
+    if (this.noAudio) return;
+    this.drumPadSampleManager.syncSamples(samples);
+  }
+
+  /** Read-only assignment/decode status for diagnostics and regression tests. */
+  getDrumPadSampleSnapshot() {
+    return this.drumPadSampleManager.snapshot();
   }
 
   private applyLeanTrackSettingsIfChanged(
@@ -1064,6 +1278,7 @@ class AudioEngine {
   ): boolean {
     if (!this.leanTrackSettings.needsApply(track)) return false;
     lean.applyTrack(track);
+    lean.setAudible(!track.muted && (this.soloSet.size === 0 || track.solo));
     this.leanTrackSettings.markApplied(track);
     return true;
   }
@@ -1072,6 +1287,20 @@ class AudioEngine {
    * audio graph while the browser is locked, but guarantees that a project
    * selector change cannot leave the previous kit or preset sounding. */
   private reconcileExistingSoundSelector(track: Track): void {
+    const lean = this.leanDrumVoices.get(track.id);
+    if (track.kind === "drums" && lean) {
+      const selectedKit = track.kitId ?? (
+        track.preset === "acoustic"
+          ? "garageband"
+          : track.preset === "electronic"
+            ? "cyberpunk"
+            : "trap"
+      );
+      if (lean.kitId !== selectedKit) lean.setKit(selectedKit);
+      const shell = this.voices.get(track.id);
+      if (shell) shell.kitId = selectedKit;
+      return;
+    }
     const voice = this.voices.get(track.id);
     if (!voice) return;
 
@@ -1099,16 +1328,19 @@ class AudioEngine {
   private ensurePlayableTrack(trackId: string, reason: string): void {
     const track = this.projectTrackSnapshots.get(trackId);
     if (!track) return;
-    if (this.voices.has(trackId)) {
-      this.reconcileExistingSoundSelector(track);
-      return;
-    }
     const lean = this.leanDrumVoices.get(trackId);
     if (lean) {
       if (this.applyLeanTrackSettingsIfChanged(track, lean)) {
         const anySolo = this.soloSet.size > 0;
         lean.setAudible(!track.muted && (!anySolo || track.solo));
       }
+      this.reconcileExistingSoundSelector(track);
+      this.drumPadSampleManager.refreshRouting(trackId);
+      return;
+    }
+    if (this.voices.has(trackId) && track.kind !== "drums") {
+      this.reconcileExistingSoundSelector(track);
+      this.drumPadSampleManager.refreshRouting(trackId);
       return;
     }
     this.ensureTrack(track, {
@@ -1155,7 +1387,10 @@ class AudioEngine {
       return;
     }
     const started = performance.now();
-    if (requestedMode === "lean" && track.kind === "drums") {
+    // All real-time drum modes use the bounded native instrument. Treating a
+    // caller's generic `mode: "tone"` as permission to rebuild a named Tone
+    // kit was the path that exhausted the AudioContext after sound-set swaps.
+    if (track.kind === "drums") {
       this.ensureLeanDrumTrack(track, reason, started);
       return;
     }
@@ -1186,26 +1421,8 @@ class AudioEngine {
     } else {
       this.reconcileExistingSoundSelector(track);
     }
-    this.applyTrackSettings(track);
-    // v2: re-apply per-track sound params and per-piece mixer overrides
-    // so the engine state matches the latest track snapshot.
-    if (track.sound) this.setSoundParams(track.id, track.sound);
-    if (track.kitId && track.pieceSettings) {
-      // Pass the full settings map on every call so kit-wide solo
-      // arbitration sees the complete picture during rehydration —
-      // otherwise the last piece written wins and stored mute/solo
-      // state can be lost.
-      for (const [piece, partial] of Object.entries(track.pieceSettings)) {
-        if (partial) {
-          this.setPieceSetting(
-            track.id,
-            piece as DrumPiece,
-            partial,
-            track.pieceSettings,
-          );
-        }
-      }
-    }
+    this.rehydrateTrackVoice(track);
+    this.drumPadSampleManager.refreshRouting(track.id);
     firstPlayMeasure("ensureTrack", started, performance.now(), {
       trackId: track.id,
       kind: track.kind,
@@ -1216,29 +1433,63 @@ class AudioEngine {
   }
 
   private ensureLeanDrumTrack(track: Track, reason: string, started: number): void {
-    const existingTone = this.voices.get(track.id);
-    if (existingTone) {
-      this.reconcileExistingSoundSelector(track);
-      this.applyTrackSettings(track);
-      return;
-    }
     this.leanTrackSnapshots.set(track.id, track);
     let lean = this.leanDrumVoices.get(track.id);
     const from = this.getVoiceMode(track.id);
-    if (!lean) {
-      lean = createLeanDrumVoice(track, this.masterChain.input);
-      this.leanDrumVoices.set(track.id, lean);
+    const shell = this.voices.get(track.id);
+    // A previous build can still have a shell-backed native voice. Replace it
+    // while the old route is alive, then dispose the shell only after the
+    // direct native route is ready.
+    if (!lean || shell) {
+      let replacement: LeanDrumVoice;
+      try {
+        replacement = createLeanDrumVoice(track, this.masterChain.input, {
+          roomReverb: this.masterChain.getBus("roomReverb")?.input,
+          neonHall: this.masterChain.getBus("neonHall")?.input,
+          tapeDelay: this.masterChain.getBus("tapeDelay")?.input,
+          darkSlapback: this.masterChain.getBus("darkSlapback")?.input,
+        });
+      } catch (error) {
+        firstPlayMark("ensureTrack:lean-construction-failed", {
+          trackId: track.id,
+          reason,
+          message: error instanceof Error ? error.message : String(error),
+          preservedPreviousVoice: Boolean(lean || shell),
+        });
+        return;
+      }
+      if (!replacement.isReady()) {
+        replacement.dispose();
+        firstPlayMark("ensureTrack:lean-routing-fallback", {
+          trackId: track.id,
+          reason,
+        });
+        return;
+      }
+      lean?.dispose();
+      lean = replacement;
+      this.leanDrumVoices.set(track.id, replacement);
+      replacement.setAudible(
+        !track.muted && (this.soloSet.size === 0 || track.solo),
+      );
       this.leanTrackSettings.markApplied(track);
       this.recordVoicePromotion(track.id, from, "lean", reason, started);
     } else {
       this.applyLeanTrackSettingsIfChanged(track, lean);
     }
+
+    if (shell) {
+      shell.dispose();
+      this.voices.delete(track.id);
+    }
+    this.drumPadSampleManager.refreshRouting(track.id);
     firstPlayMeasure("ensureTrack", started, performance.now(), {
       trackId: track.id,
       kind: track.kind,
       created: from !== "lean",
       mode: "lean",
       reason,
+      mixerShell: false,
     });
   }
 
@@ -1259,39 +1510,9 @@ class AudioEngine {
     if (!this.voices.has(trackId)) this.voiceModes.set(trackId, "disposed");
   }
 
-  private promoteLeanDrumTrackToTone(trackId: string, reason: string): TrackVoice | null {
-    const existing = this.voices.get(trackId);
-    if (existing) return existing;
-    const track = this.leanTrackSnapshots.get(trackId);
-    if (!track) {
-      firstPlayMark("voice-promotion:missing-track", { trackId, reason });
-      return null;
-    }
-    const started = performance.now();
-    const lean = this.leanDrumVoices.get(trackId);
-    if (lean) {
-      try {
-        lean.dispose();
-      } catch {
-        // ignore promotion cleanup races
-      }
-      this.leanDrumVoices.delete(trackId);
-      this.leanTrackSettings.delete(trackId);
-    }
-    const v = this.buildVoice(track);
-    this.voices.set(trackId, v);
-    this.recordVoicePromotion(trackId, "lean", "tone", reason, started);
-    this.applyTrackSettings(track);
-    firstPlayMeasure("voice-promotion:lean-to-tone", started, performance.now(), {
-      trackId,
-      reason,
-    });
-    return v;
-  }
-
   private getVoiceMode(trackId: string): VoiceMode {
-    if (this.voices.has(trackId)) return "tone";
     if (this.leanDrumVoices.has(trackId)) return "lean";
+    if (this.voices.has(trackId)) return "tone";
     return this.voiceModes.get(trackId) ?? "shell";
   }
 
@@ -1321,8 +1542,13 @@ class AudioEngine {
     return {
       counts,
       promotions: this.voicePromotions.slice(-50),
-      activeToneTrackIds: Array.from(this.voices.keys()),
+      activeToneTrackIds: Array.from(this.voices.keys()).filter(
+        (trackId) => !this.leanDrumVoices.has(trackId),
+      ),
       activeLeanTrackIds: Array.from(this.leanDrumVoices.keys()),
+      activeMixerShellTrackIds: Array.from(this.voices.keys()).filter((trackId) =>
+        this.leanDrumVoices.has(trackId),
+      ),
     };
   }
 
@@ -1330,16 +1556,63 @@ class AudioEngine {
    * tests. Project selectors and realized voices must agree after a pack or
    * preset switch; exposing IDs avoids relying on private Tone node shapes. */
   getVoiceSoundSelectorSnapshot() {
-    return Array.from(this.voices.entries()).map(([trackId, voice]) => ({
+    const trackIds = new Set([
+      ...this.voices.keys(),
+      ...this.leanDrumVoices.keys(),
+    ]);
+    return Array.from(trackIds).map((trackId) => {
+      const voice = this.voices.get(trackId);
+      const lean = this.leanDrumVoices.get(trackId);
+      return {
+        trackId,
+        kitId: lean?.kitId ?? voice?.kitId,
+        presetId: voice?.presetId,
+        hasKit: Boolean(lean || voice?.kit),
+        hasNativeKit: Boolean(lean),
+        hasToneKit: Boolean(voice?.kit),
+        runtime: lean ? "native" as const : "tone" as const,
+        hasMelodicVoice: Boolean(voice?.poly),
+        isSampled: voice?.poly instanceof Tone.Sampler,
+        samplePromotionState:
+          this.activeSamplerPromotion?.voice.trackId === trackId
+            ? "loading" as const
+            : this.pendingSamplerPromotions.has(trackId)
+              ? "pending" as const
+              : "settled" as const,
+      };
+    });
+  }
+
+  /** Read-only live mixer diagnostics for regression tests and support. */
+  getVoiceMixSnapshot() {
+    const toneEntries = Array.from(this.voices.entries()).map(([trackId, voice]) => ({
       trackId,
-      kitId: voice.kitId,
-      presetId: voice.presetId,
-      hasKit: Boolean(voice.kit),
-      hasMelodicVoice: Boolean(voice.poly),
+      volumeDb: voice.channel.volume.value,
+      pan: voice.channel.pan.value,
+      hasEq: Boolean(voice.eq3 || voice.hpf),
+      hasCompressor: Boolean(voice.comp),
+      sends: Object.fromEntries(
+        Array.from(voice.sends?.entries() ?? []).map(([id, gain]) => [id, gain.gain.value]),
+      ) as Partial<Record<SendBusId, number>>,
     }));
+    const toneTrackIds = new Set(toneEntries.map((entry) => entry.trackId));
+    const nativeEntries = Array.from(this.leanDrumVoices.entries())
+      .filter(([trackId]) => !toneTrackIds.has(trackId))
+      .map(([trackId, voice]) => ({ trackId, ...voice.getMixSnapshot() }));
+    return [...toneEntries, ...nativeEntries];
   }
 
   removeTrack(trackId: string) {
+    this.pendingSamplerPromotions.delete(trackId);
+    this.projectTrackSnapshots.delete(trackId);
+    this.drumPadSampleManager.removeTrack(trackId);
+    this.vocalMonitorGeneration.set(
+      trackId,
+      (this.vocalMonitorGeneration.get(trackId) ?? 0) + 1,
+    );
+    for (const key of Array.from(this.pendingHeldNotes.keys())) {
+      if (key.startsWith(`${trackId}:`)) this.pendingHeldNotes.delete(key);
+    }
     this.cancelScheduledForTrack(trackId);
     this.removeTrackAutomation(trackId);
     this.leanTrackSnapshots.delete(trackId);
@@ -1347,12 +1620,12 @@ class AudioEngine {
     for (const key of Array.from(this.paramOverrides)) {
       if (key.startsWith(`${trackId}:`)) this.paramOverrides.delete(key);
     }
+    this.disposeLeanDrumTrack(trackId);
     const v = this.voices.get(trackId);
     if (v) {
       v.dispose();
       this.voices.delete(trackId);
     }
-    this.disposeLeanDrumTrack(trackId);
     this.voiceModes.set(trackId, "disposed");
     this.soloSet.delete(trackId);
   }
@@ -1378,6 +1651,8 @@ class AudioEngine {
    * replaced. This prevents reused track ids from inheriting voices,
    * automation, modulation, Chop slices, or scheduled callbacks. */
   replaceProject(project: Project) {
+    this.silenceGeneration += 1;
+    this.pendingHeldNotes.clear();
     try {
       this.stop();
     } catch {
@@ -1386,6 +1661,7 @@ class AudioEngine {
     this.cancelAllProjectSchedules();
     this.stopAutomationScheduler();
     this.disposeAllTracks();
+    this.drumPadSampleManager.dispose();
     stopChopEngine();
     disposeChopEngine();
     this.chopKitTrackId = null;
@@ -1398,6 +1674,7 @@ class AudioEngine {
     this.stepModState.clear();
     this.paramOverrides.clear();
     this.soloSet.clear();
+    this.setProjectSampleLibrary(project.samples ?? []);
     this.setProjectTrackSnapshots(project.tracks);
     this.setGlobalGroove(project.globalGroove);
     this.masterChain.releasePanicHold();
@@ -1416,15 +1693,13 @@ class AudioEngine {
     else this.soloSet.delete(track.id);
     const anySolo = this.soloSet.size > 0;
     const audible = !track.muted && (!anySolo || track.solo);
-    const v = this.voices.get(track.id);
-    if (!v) {
-      const lean = this.leanDrumVoices.get(track.id);
-      if (lean) {
-        this.applyLeanTrackSettingsIfChanged(track, lean);
-        lean.setAudible(audible);
-      }
-      return;
+    const lean = this.leanDrumVoices.get(track.id);
+    if (lean) {
+      this.applyLeanTrackSettingsIfChanged(track, lean);
+      lean.setAudible(audible);
     }
+    const v = this.voices.get(track.id);
+    if (!v) return;
     const db = audible
       ? track.volume <= 0.005
         ? -60
@@ -1437,6 +1712,36 @@ class AudioEngine {
     v.delay.wet.rampTo(track.fx.delay, 0.05);
     const cutoff = 200 + track.fx.filter ** 2 * 17800;
     v.filter.frequency.rampTo(cutoff, 0.05);
+  }
+
+  /** Write a persisted channel fader change straight through to a live voice. */
+  setTrackVolume(trackId: string, volume: number) {
+    const track = this.projectTrackSnapshots.get(trackId);
+    const bounded = Math.max(0, Math.min(1, volume));
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean && track) {
+      lean.setVolume(bounded);
+      lean.setAudible(!track.muted && (this.soloSet.size === 0 || track.solo));
+      this.leanTrackSettings.markApplied(track);
+    }
+    const v = this.voices.get(trackId);
+    if (!v) return;
+    const audible = !track?.muted && (this.soloSet.size === 0 || Boolean(track?.solo));
+    const db = audible ? (bounded <= 0.005 ? -60 : 20 * Math.log10(bounded)) : -Infinity;
+    v.channel.volume.rampTo(db, 0.02);
+  }
+
+  /** Write a persisted pan change straight through to a live voice. */
+  setTrackPan(trackId: string, pan: number) {
+    const track = this.projectTrackSnapshots.get(trackId);
+    const bounded = Math.max(-1, Math.min(1, pan));
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean && track) {
+      lean.setPan(bounded);
+      lean.setAudible(!track.muted && (this.soloSet.size === 0 || track.solo));
+      this.leanTrackSettings.markApplied(track);
+    }
+    this.voices.get(trackId)?.channel.pan.rampTo(bounded, 0.02);
   }
 
   refreshAllMutes(tracks: Track[]) {
@@ -1475,39 +1780,170 @@ class AudioEngine {
     }
   }
 
+  private snapshotInstrument(v: TrackVoice): InstrumentState {
+    return {
+      poly: v.poly,
+      drums: v.drums,
+      kit: v.kit,
+      kitId: v.kitId,
+      presetId: v.presetId,
+    };
+  }
+
+  private disposeInstrumentState(state: InstrumentState): void {
+    if (state.poly) {
+      try {
+        releaseAllNotes(state.poly);
+        (state.poly as unknown as { disconnect?: () => void }).disconnect?.();
+      } catch {
+        // Best-effort release; disposal below remains authoritative.
+      }
+      try { state.poly.dispose(); } catch { /* ignore */ }
+    }
+    if (state.drums) {
+      for (const piece of Object.keys(state.drums) as DrumPiece[]) {
+        try { state.drums[piece].dispose(); } catch { /* ignore */ }
+      }
+    }
+    if (state.kit) {
+      try { state.kit.dispose(); } catch { /* ignore */ }
+    }
+  }
+
+  /** Publish a fully-built instrument before releasing its predecessor. */
+  private commitInstrument(v: TrackVoice, next: InstrumentState): void {
+    const previous = this.snapshotInstrument(v);
+    v.instrumentGeneration += 1;
+    v.poly = next.poly;
+    v.drums = next.drums;
+    v.kit = next.kit;
+    v.kitId = next.kitId;
+    v.presetId = next.presetId;
+    this.disposeInstrumentState(previous);
+  }
+
+  private rehydrateTrackVoice(track: Track): void {
+    this.applyTrackSettings(track);
+    if (track.sound) this.setSoundParams(track.id, track.sound);
+    if (track.eq) this.setTrackEq(track.id, track.eq);
+    if (track.sends) {
+      for (const [busId, amount] of Object.entries(track.sends) as [SendBusId, number][]) {
+        this.setTrackSend(track.id, busId, amount);
+      }
+    }
+    if (track.fxRack) {
+      for (const [moduleId, settings] of Object.entries(track.fxRack) as [
+        FxModuleId,
+        FxModuleSettings,
+      ][]) {
+        this.setEffectModule(track.id, moduleId, settings);
+      }
+    }
+    if (track.kitId && track.pieceSettings) {
+      for (const [piece, partial] of Object.entries(track.pieceSettings)) {
+        if (!partial) continue;
+        this.setPieceSetting(
+          track.id,
+          piece as DrumPiece,
+          partial,
+          track.pieceSettings,
+        );
+      }
+    }
+  }
+
   changePreset(track: Track) {
+    if (track.kind === "drums") {
+      const kitId = track.kitId ?? (
+        track.preset === "acoustic"
+          ? "garageband"
+          : track.preset === "electronic"
+            ? "cyberpunk"
+            : "trap"
+      );
+      this.ensureLeanDrumTrack(track, "drum-preset-switch", performance.now());
+      this.setKit(track.id, kitId);
+      this.rehydrateTrackVoice(track);
+      return;
+    }
     const v = this.voices.get(track.id);
     if (!v) {
-      const lean = this.leanDrumVoices.get(track.id);
-      if (lean) this.applyLeanTrackSettingsIfChanged(track, lean);
+      if (this.isAudioContextRunning()) {
+        this.ensureTrack(track, {
+          mode: "tone",
+          reason: "legacy-preset-switch",
+          allowHeavy: true,
+        });
+      }
       return;
     }
     const endTiming = startPerfTimer("instrument-replacement", {
       trackId: track.id,
       kind: track.kind,
     });
-    this.disposeInstrument(v);
-    this.attachInstrument(v, track);
-    // Rebuilding a selector creates a fresh synth/sampler with factory
-    // defaults. Reapply the project's sound model immediately so custom
-    // ADSR, filter, spatial sends, and glide cannot diverge from saved state.
-    if (track.sound) this.setSoundParams(track.id, track.sound);
-    endTiming();
+    try {
+      if (track.kind === "vocals") {
+        this.applyVocalPresetSettings(v, track.preset as VocalsPreset);
+        return;
+      }
+      if (track.presetId) {
+        this.setMelodicPreset(track.id, track.presetId);
+        return;
+      }
+      const poly = buildMelodicVoice(track.kind, track.preset);
+      if (!poly) return;
+      try {
+        poly.connect(v.filter);
+      } catch (error) {
+        try { poly.dispose(); } catch { /* ignore */ }
+        throw error;
+      }
+      this.commitInstrument(v, { poly });
+      if (track.kind === "piano") announceSamplerLoadIfNeeded(poly);
+      this.rehydrateTrackVoice(track);
+    } catch (error) {
+      firstPlayMark("instrument-replacement:failed", {
+        trackId: track.id,
+        kind: track.kind,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      endTiming();
+    }
   }
 
   // ---- v2 sound-model methods ----
 
-  /** Switch this track to a named v2 drum kit, rebuilding pieces. */
+  /** Select a named kit without rebuilding the real-time audio graph. */
   setKit(trackId: string, kitId: DrumKitId) {
-    const v = this.voices.get(trackId) ?? this.promoteLeanDrumTrackToTone(trackId, "kit-switch");
-    if (!v) return;
-    if (v.kitId === kitId && v.kit) return;
-    const endTiming = startPerfTimer("kit-switch", { trackId, kitId });
-    this.disposeInstrument(v);
-    v.kitId = kitId;
-    const def = findKit(kitId);
-    v.kit = buildKit(def, v.filter, this.masterChain.getBus("roomReverb")?.input ?? null, v.delay);
-    endTiming();
+    let lean = this.leanDrumVoices.get(trackId);
+    const track = this.projectTrackSnapshots.get(trackId);
+    if (!lean && track?.kind === "drums") {
+      this.ensureLeanDrumTrack(track, "named-kit-selection", performance.now());
+      lean = this.leanDrumVoices.get(trackId);
+    }
+    if (!lean) return;
+
+    lean.setKit(kitId);
+    const shell = this.voices.get(trackId);
+    if (shell && (shell.kit || shell.drums)) {
+      this.commitInstrument(shell, { kitId });
+    } else if (shell) {
+      shell.kitId = kitId;
+    }
+    if (track?.pieceSettings) {
+      for (const [piece, settings] of Object.entries(track.pieceSettings)) {
+        if (settings) {
+          lean.setPieceSetting(
+            piece as DrumPiece,
+            settings,
+            track.pieceSettings,
+          );
+        }
+      }
+    }
+    this.drumPadSampleManager.refreshRouting(trackId);
+    firstPlayMark("kit-switch:native", { trackId, kitId });
   }
 
   /** Switch this track to a named v2 melodic preset, rebuilding the voice. */
@@ -1518,66 +1954,181 @@ class AudioEngine {
     const def = findPreset(presetId);
     if (!def) return;
     const endTiming = startPerfTimer("instrument-replacement", { trackId, presetId });
-    this.disposeInstrument(v);
-    v.presetId = presetId;
-    const poly = buildPresetVoice(def);
-    v.poly = poly;
-    poly.connect(v.filter);
-    announceSamplerLoadIfNeeded(poly);
-    // Apply preset's send defaults as a starting point so the user hears
-    // the intended character without further tweaking.
-    this.setTrackReverbWet(v, def.synth.reverbSend, 0.05);
-    v.delay.wet.rampTo(def.synth.delaySend, 0.05);
-    this.maybeAttachMelodicSampler(v, def, presetId);
-    endTiming();
+    let poly: MelodicVoice | null = null;
+    try {
+      poly = buildPresetVoice(def);
+      poly.connect(v.filter);
+      this.commitInstrument(v, { poly, presetId });
+      announceSamplerLoadIfNeeded(poly);
+      const track = this.projectTrackSnapshots.get(trackId);
+      if (track) this.rehydrateTrackVoice(track);
+      else {
+        this.setTrackReverbWet(v, def.synth.reverbSend, 0.05);
+        v.delay.wet.rampTo(def.synth.delaySend, 0.05);
+      }
+      this.maybeAttachMelodicSampler(v, def, presetId);
+    } catch (error) {
+      if (poly && v.poly !== poly) {
+        try { poly.dispose(); } catch { /* ignore */ }
+      }
+      firstPlayMark("instrument-replacement:failed", {
+        trackId,
+        presetId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      endTiming();
+    }
   }
 
   /**
-   * Probe the preset's sample layers in the background. If at least one
-   * layer is reachable, hot-swap the active voice from the synth fallback
-   * to the loaded Tone.Sampler — disposing the old voice and connecting
-   * the sampler into the existing track chain. Guarded by `presetId` so
-   * a preset change mid-load doesn't cross-wire voices.
+   * Queue a sample-backed upgrade for a melodic preset. The modeled synth is
+   * authoritative immediately; fetch/decode and voice replacement happen one
+   * track at a time only while Transport is fully stopped. This keeps a live
+   * set change from spending the playback frame budget on PCM decoding or
+   * disposing a voice that is still sustaining notes.
    */
   private maybeAttachMelodicSampler(
     v: TrackVoice,
     def: ReturnType<typeof findPreset>,
     presetId: string,
   ) {
-    if (!def) return;
-    const r = def.synth;
-    const generation = v.instrumentGeneration;
+    if (!def || !def.layers?.length) {
+      this.pendingSamplerPromotions.delete(v.trackId);
+      return;
+    }
+    if (getFirstPlayFlags().disableSamplePromotion) {
+      this.pendingSamplerPromotions.delete(v.trackId);
+      firstPlayMark("sampler-promotion:disabled", { trackId: v.trackId, presetId });
+      return;
+    }
+    const request: SamplerPromotionRequest = {
+      id: ++this.samplerPromotionRequestId,
+      voice: v,
+      def,
+      presetId,
+      instrumentGeneration: v.instrumentGeneration,
+    };
+    this.pendingSamplerPromotions.set(v.trackId, request);
+    firstPlayMark("sampler-promotion:queued", {
+      trackId: v.trackId,
+      presetId,
+      requestId: request.id,
+      playbackState: this.playbackState,
+    });
+    this.scheduleSamplerPromotionDrain();
+  }
+
+  private isSamplerPromotionIdle(): boolean {
+    return (
+      !this.disposed &&
+      this.playbackState === "stopped" &&
+      Tone.getTransport().state === "stopped"
+    );
+  }
+
+  private isSamplerPromotionCurrent(request: SamplerPromotionRequest): boolean {
+    const { voice, presetId, instrumentGeneration } = request;
+    return (
+      !this.disposed &&
+      this.pendingSamplerPromotions.get(voice.trackId) === request &&
+      this.voices.get(voice.trackId) === voice &&
+      voice.presetId === presetId &&
+      voice.instrumentGeneration === instrumentGeneration
+    );
+  }
+
+  private scheduleSamplerPromotionDrain(): void {
+    if (!this.isSamplerPromotionIdle() || this.activeSamplerPromotion) return;
+    if (this.samplerPromotionDrainTimer !== null) return;
+    this.samplerPromotionDrainTimer = globalThis.setTimeout(() => {
+      this.samplerPromotionDrainTimer = null;
+      this.drainSamplerPromotions();
+    }, 0) as unknown as number;
+  }
+
+  private drainSamplerPromotions(): void {
+    if (!this.isSamplerPromotionIdle() || this.activeSamplerPromotion) return;
+    let request: SamplerPromotionRequest | undefined;
+    for (const candidate of this.pendingSamplerPromotions.values()) {
+      if (this.isSamplerPromotionCurrent(candidate)) {
+        request = candidate;
+        break;
+      }
+      if (this.pendingSamplerPromotions.get(candidate.voice.trackId) === candidate) {
+        this.pendingSamplerPromotions.delete(candidate.voice.trackId);
+      }
+    }
+    if (!request) return;
+
+    this.activeSamplerPromotion = request;
+    const { voice, def, presetId } = request;
+    const recipe = def.synth;
+    const playbackEpoch = this.backgroundAudioWorkEpoch;
+    firstPlayMark("sampler-promotion:start", {
+      trackId: voice.trackId,
+      presetId,
+      requestId: request.id,
+    });
+
     void tryLoadMelodicSampler(def.layers, {
-      release: Math.max(0.1, r.release * 2),
-      attack: Math.max(0, r.attack * 0.4),
+      release: Math.max(0.1, recipe.release * 2),
+      attack: Math.max(0, recipe.attack * 0.4),
       volume: -8,
+      shouldContinue: () => (
+        this.isSamplerPromotionCurrent(request!) &&
+        this.isSamplerPromotionIdle() &&
+        this.backgroundAudioWorkEpoch === playbackEpoch
+      ),
     }).then((sampler) => {
-      if (!sampler) return;
-      // User may have swapped presets, removed the track, or the engine
-      // may already have a sampler attached (e.g. duplicate probe).
-      if (v.presetId !== presetId || v.instrumentGeneration !== generation) {
-        try { sampler.dispose(); } catch { /* ignore */ }
+      const canCommit = (
+        this.isSamplerPromotionCurrent(request!) &&
+        this.isSamplerPromotionIdle() &&
+        this.backgroundAudioWorkEpoch === playbackEpoch
+      );
+      if (!sampler) {
+        // If Play interrupted a decode, retain the request so Stop can retry.
+        // A null result while idle means the asset was unavailable; the synth
+        // fallback remains the final, working voice for this preset.
+        if (canCommit) this.pendingSamplerPromotions.delete(voice.trackId);
         return;
       }
-      if (v.poly instanceof Tone.Sampler) {
+      if (!canCommit || voice.poly instanceof Tone.Sampler) {
         try { sampler.dispose(); } catch { /* ignore */ }
+        if (canCommit) this.pendingSamplerPromotions.delete(voice.trackId);
         return;
       }
       try {
-        const old = v.poly;
-        v.poly = sampler;
-        sampler.connect(v.filter);
-        if (old) {
-          try {
-            (old as unknown as { releaseAll?: () => void }).releaseAll?.();
-          } catch { /* ignore */ }
-          try { old.dispose(); } catch { /* ignore */ }
-        }
+        sampler.connect(voice.filter);
       } catch {
         try { sampler.dispose(); } catch { /* ignore */ }
+        this.pendingSamplerPromotions.delete(voice.trackId);
+        return;
       }
+      const old = voice.poly;
+      voice.poly = sampler;
+      this.pendingSamplerPromotions.delete(voice.trackId);
+      if (old) {
+        try {
+          (old as unknown as { releaseAll?: () => void }).releaseAll?.();
+        } catch { /* ignore */ }
+        try { old.dispose(); } catch { /* ignore */ }
+      }
+      const track = this.projectTrackSnapshots.get(voice.trackId);
+      if (track?.sound) this.setSoundParams(voice.trackId, track.sound);
+      firstPlayMark("sampler-promotion:complete", {
+        trackId: voice.trackId,
+        presetId,
+        requestId: request!.id,
+      });
     }).catch(() => {
+      if (this.isSamplerPromotionCurrent(request!) && this.isSamplerPromotionIdle()) {
+        this.pendingSamplerPromotions.delete(voice.trackId);
+      }
       // The already-connected synth fallback remains authoritative.
+    }).finally(() => {
+      if (this.activeSamplerPromotion === request) this.activeSamplerPromotion = null;
+      this.scheduleSamplerPromotionDrain();
     });
   }
 
@@ -1590,7 +2141,12 @@ class AudioEngine {
     partial: Partial<DrumPieceSettings>,
     allSettings?: Partial<Record<string, Partial<DrumPieceSettings>>>,
   ) {
-    const v = this.voices.get(trackId) ?? this.promoteLeanDrumTrackToTone(trackId, `piece-setting:${piece}`);
+    const lean = this.leanDrumVoices.get(trackId);
+    if (lean) {
+      lean.setPieceSetting(piece, partial, allSettings);
+      return;
+    }
+    const v = this.voices.get(trackId);
     if (!v?.kit) return;
     const pv = v.kit.pieces.get(piece);
     if (!pv) return;
@@ -1647,17 +2203,10 @@ class AudioEngine {
   /** Apply per-track sound parameters (ADSR + cutoff + sends + glide). */
   setSoundParams(trackId: string, partial: Partial<SoundParams>) {
     const lean = this.leanDrumVoices.get(trackId);
-    if (lean) {
-      const unsupported =
-        partial.reverbSend !== undefined ||
-        partial.delaySend !== undefined ||
-        (partial.drive !== undefined && partial.drive > 0);
-      if (!unsupported) {
-        lean.applySoundParams(partial);
-        return;
-      }
-    }
-    const v = this.voices.get(trackId) ?? (lean ? this.promoteLeanDrumTrackToTone(trackId, "sound-params:advanced") : null);
+    lean?.applySoundParams(partial);
+    const leanTrack = this.projectTrackSnapshots.get(trackId);
+    if (lean && leanTrack) this.leanTrackSettings.markApplied(leanTrack);
+    const v = this.voices.get(trackId);
     if (!v) return;
     if (partial.cutoff !== undefined) {
       v.filter.frequency.rampTo(cutoffNormToHz(partial.cutoff), 0.05);
@@ -1724,10 +2273,34 @@ class AudioEngine {
 
   /** Update the automation lanes for a single track. Pass an empty array to clear. */
   setTrackAutomation(trackId: string, lanes: AutomationLane[]) {
+    const previousParams = new Set(
+      (this.trackAutomationData.get(trackId) ?? []).map((lane) => lane.param),
+    );
+    const nextParams = new Set(lanes.map((lane) => lane.param));
     if (lanes.length === 0) {
       this.trackAutomationData.delete(trackId);
     } else {
       this.trackAutomationData.set(trackId, lanes);
+    }
+    const removedParams = Array.from(previousParams).filter(
+      (param) => !nextParams.has(param),
+    );
+    if (removedParams.length > 0) {
+      const track = this.projectTrackSnapshots.get(trackId);
+      if (track) {
+        // Automation writes directly to long-lived AudioParams. Restore the
+        // persisted channel snapshot when a lane disappears so its last value
+        // (especially volume=0) cannot remain latched indefinitely.
+        const lean = this.leanDrumVoices.get(trackId);
+        if (lean) {
+          lean.applyTrack(track);
+          lean.setAudible(
+            !track.muted && (this.soloSet.size === 0 || track.solo),
+          );
+          this.leanTrackSettings.markApplied(track);
+        }
+        if (this.voices.has(trackId)) this.rehydrateTrackVoice(track);
+      }
     }
     if (this.automationActive) this.ensureAutomationScheduler();
     else this.stopAutomationScheduler();
@@ -1851,7 +2424,8 @@ class AudioEngine {
     // Apply automation + modulation to each track
     for (const [trackId, lanes] of this.trackAutomationData) {
       const voice = this.voices.get(trackId);
-      if (!voice) continue;
+      const lean = this.leanDrumVoices.get(trackId);
+      if (!voice && !lean) continue;
       for (const lane of lanes) {
         if (lane.breakpoints.length === 0) continue;
         // Skip if the user has a manual override active for this param
@@ -1863,7 +2437,8 @@ class AudioEngine {
           const modOut = this.modOutputs.get(r.sourceId) ?? 0.5;
           value = Math.max(0, Math.min(1, value + r.depth * (modOut - 0.5)));
         }
-        this.applyAutomationParam(voice, lane.param, value);
+        if (voice) this.applyAutomationParam(voice, lane.param, value);
+        else lean?.applyAutomation(lane.param, value, Tone.now() + 0.02);
       }
     }
   }
@@ -1934,6 +2509,11 @@ class AudioEngine {
   ): Promise<"sampled" | "modeled" | null> {
     const def = findPreset(presetId);
     if (!def || this.noAudio || this.disposed) return null;
+    const silenceGeneration = this.silenceGeneration;
+    // A preview is an explicit user audio action. It must both recover a
+    // suspended context and release the master attenuation left by Panic.
+    await this.unlock();
+    if (silenceGeneration !== this.silenceGeneration || this.disposed) return null;
     this.cancelPresetPreview();
     const generation = this.presetPreviewGeneration;
 
@@ -1945,6 +2525,11 @@ class AudioEngine {
           release: Math.max(0.1, def.synth.release * 2),
           attack: Math.max(0, def.synth.attack * 0.4),
           volume: -8,
+          shouldContinue: () => (
+            generation === this.presetPreviewGeneration &&
+            silenceGeneration === this.silenceGeneration &&
+            !this.disposed
+          ),
         });
         if (voice) source = "sampled";
       } catch {
@@ -1993,36 +2578,14 @@ class AudioEngine {
 
   /** Internal: dispose whichever instrument(s) are attached. */
   private disposeInstrument(v: TrackVoice) {
+    const current = this.snapshotInstrument(v);
     v.instrumentGeneration += 1;
-    if (v.poly) {
-      try {
-        releaseAllNotes(v.poly);
-        (v.poly as unknown as { disconnect?: () => void }).disconnect?.();
-      } catch {
-        // ignore
-      }
-      try {
-        v.poly.dispose();
-      } catch {
-        // ignore
-      }
-      v.poly = undefined;
-    }
-    if (v.drums) {
-      const drums = v.drums;
-      (Object.keys(drums) as DrumPiece[]).forEach((k) => drums[k].dispose());
-      v.drums = undefined;
-    }
-    if (v.kit) {
-      try {
-        v.kit.dispose();
-      } catch {
-        // ignore
-      }
-      v.kit = undefined;
-    }
+    v.poly = undefined;
+    v.drums = undefined;
+    v.kit = undefined;
     v.presetId = undefined;
     v.kitId = undefined;
+    this.disposeInstrumentState(current);
   }
 
   // ---- live triggering ----
@@ -2055,6 +2618,21 @@ class AudioEngine {
     velocity = 0.9,
     source?: "qwerty" | "midi",
   ) {
+    this.masterChain.releasePanicHold();
+    if (!this.isAudioContextRunning()) {
+      const silenceGeneration = this.silenceGeneration;
+      void this.unlock()
+        .then(() => {
+          if (
+            silenceGeneration === this.silenceGeneration &&
+            this.projectTrackSnapshots.has(trackId)
+          ) {
+            this.triggerNote(trackId, note, durationSec, velocity, source);
+          }
+        })
+        .catch(() => { /* the next user gesture can retry */ });
+      return;
+    }
     this.ensurePlayableTrack(trackId, "live-note");
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
@@ -2084,6 +2662,26 @@ class AudioEngine {
     velocity = 0.9,
     source?: "qwerty" | "midi",
   ) {
+    const pendingKey = `${trackId}:${note}`;
+    this.masterChain.releasePanicHold();
+    if (!this.isAudioContextRunning()) {
+      const silenceGeneration = this.silenceGeneration;
+      this.pendingHeldNotes.set(pendingKey, silenceGeneration);
+      void this.unlock()
+        .then(() => {
+          if (
+            this.pendingHeldNotes.get(pendingKey) === silenceGeneration &&
+            silenceGeneration === this.silenceGeneration &&
+            this.projectTrackSnapshots.has(trackId)
+          ) {
+            this.pendingHeldNotes.delete(pendingKey);
+            this.startNote(trackId, note, velocity, source);
+          }
+        })
+        .catch(() => this.pendingHeldNotes.delete(pendingKey));
+      return;
+    }
+    this.pendingHeldNotes.delete(pendingKey);
     this.ensurePlayableTrack(trackId, "live-note-hold");
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
@@ -2097,6 +2695,7 @@ class AudioEngine {
   }
 
   endNote(trackId: string, note: string) {
+    this.pendingHeldNotes.delete(`${trackId}:${note}`);
     const v = this.voices.get(trackId);
     if (!v?.poly) return;
     try {
@@ -2115,7 +2714,14 @@ class AudioEngine {
   /** Activate/deactivate the Chop Lab kit for a track. When active, drum
    *  triggers are routed to the ChopEngine instead of the synthesized voices. */
   setChopKitForTrack(trackId: string | null) {
+    if (this.chopKitTrackId !== trackId) stopChopEngine();
     this.chopKitTrackId = trackId;
+  }
+
+  /** Release Chop Lab ownership only when an authoritative user selector
+   * chooses another sound for the track that currently owns Chop routing. */
+  releaseChopKitForTrack(trackId: string) {
+    if (this.chopKitTrackId === trackId) this.setChopKitForTrack(null);
   }
 
   triggerDrum(trackId: string, piece: DrumPiece, velocity = 0.9) {
@@ -2133,6 +2739,29 @@ class AudioEngine {
     velocity = 0.9,
     time?: number,
   ) {
+    // Only a fresh direct gesture may release the master Panic hold. Transport
+    // callbacks carry an explicit audio time and can arrive from scheduler
+    // lookahead after Panic; letting one reopen the master would resurrect
+    // audio the user explicitly stopped.
+    if (time === undefined) this.masterChain.releasePanicHold();
+    if (!this.isAudioContextRunning()) {
+      // Only replay direct pad/MIDI hits. Transport callbacks carry an
+      // explicit audio time and must not be shifted to an unrelated moment.
+      if (time === undefined) {
+        const silenceGeneration = this.silenceGeneration;
+        void this.unlock()
+          .then(() => {
+            if (
+              silenceGeneration === this.silenceGeneration &&
+              this.projectTrackSnapshots.has(trackId)
+            ) {
+              this.triggerDrumAt(trackId, piece, velocity);
+            }
+          })
+          .catch(() => { /* the next user gesture can retry */ });
+      }
+      return;
+    }
     // Chop Lab "Use as Kit" routing: redirect to ChopEngine slices.
     if (this.chopKitTrackId === trackId) {
       const sliceIndex = AudioEngine.PIECE_TO_SLICE_INDEX[piece] ?? 0;
@@ -2142,10 +2771,24 @@ class AudioEngine {
     }
 
     this.ensurePlayableTrack(trackId, "live-drum");
+    this.drumPadSampleManager.refreshRouting(trackId);
     const t = time ?? Tone.now();
-    const v = this.voices.get(trackId);
     const lean = this.leanDrumVoices.get(trackId);
-    if (lean && !v) {
+    const padResult = this.drumPadSampleManager.trigger(
+      trackId,
+      piece as DrumPadSamplePiece,
+      t,
+      velocity,
+    );
+    if (padResult !== "fallback") {
+      if (padResult === "played") {
+        lean?.chokeExternal(piece, t);
+        this.noteEverPlayed = true;
+      }
+      return;
+    }
+    const v = this.voices.get(trackId);
+    if (lean && (!v || (!v.kit && !v.drums))) {
       recordLeanDrumTrace("hit-scheduled", { trackId, piece });
       lean.trigger(piece, t, velocity);
       this.noteEverPlayed = true;
@@ -2176,32 +2819,80 @@ class AudioEngine {
 
   // ---- vocals ----
   async startVocalMonitor(trackId: string, deviceId?: string) {
-    const v = this.voices.get(trackId);
-    if (!v?.mic) return;
+    const generation = (this.vocalMonitorGeneration.get(trackId) ?? 0) + 1;
+    const silenceGeneration = this.silenceGeneration;
+    this.vocalMonitorGeneration.set(trackId, generation);
+    await this.unlock();
+    if (
+      this.vocalMonitorGeneration.get(trackId) !== generation ||
+      this.silenceGeneration !== silenceGeneration
+    ) {
+      throw new DOMException("Microphone start was cancelled.", "AbortError");
+    }
+    let v = this.voices.get(trackId);
+    if (!v) {
+      const track = this.projectTrackSnapshots.get(trackId);
+      if (!track || track.kind !== "vocals") {
+        throw new Error("The vocal track is no longer available.");
+      }
+      this.ensureTrack(track, {
+        mode: "tone",
+        reason: "vocal-monitor",
+        allowHeavy: true,
+      });
+      v = this.voices.get(trackId);
+    }
+    if (!v) {
+      throw new Error("The microphone monitor could not create an audio voice.");
+    }
+    const candidate = new Tone.UserMedia();
     try {
-      if (deviceId) await v.mic.open(deviceId);
-      else await v.mic.open();
+      candidate.connect(v.filter);
+      if (deviceId) await candidate.open(deviceId);
+      else await candidate.open();
+      if (
+        this.vocalMonitorGeneration.get(trackId) !== generation ||
+        this.silenceGeneration !== silenceGeneration ||
+        this.voices.get(trackId) !== v
+      ) {
+        try { candidate.close(); } catch { /* ignore stale permission completion */ }
+        try { candidate.dispose(); } catch { /* ignore stale permission completion */ }
+        throw new DOMException("Microphone start was cancelled.", "AbortError");
+      }
+      const previous = v.mic;
+      v.mic = candidate;
       v.micOn = true;
+      if (previous && previous !== candidate) {
+        try { previous.close(); } catch { /* ignore previous device teardown */ }
+        try { previous.dispose(); } catch { /* ignore previous device teardown */ }
+      }
     } catch (err) {
-      v.micOn = false;
+      if (v.mic !== candidate) {
+        try { candidate.close(); } catch { /* ignore failed permission cleanup */ }
+        try { candidate.dispose(); } catch { /* ignore failed permission cleanup */ }
+      }
       throw err;
     }
   }
   stopVocalMonitor(trackId: string) {
+    this.vocalMonitorGeneration.set(
+      trackId,
+      (this.vocalMonitorGeneration.get(trackId) ?? 0) + 1,
+    );
     const v = this.voices.get(trackId);
     if (!v?.mic) return;
-    if (v.micOn) {
-      v.mic.close();
-      v.micOn = false;
-    }
+    try { v.mic.close(); } catch { /* ignore */ }
+    try { v.mic.dispose(); } catch { /* ignore */ }
+    v.mic = undefined;
+    v.micOn = false;
   }
   getMic(trackId: string) {
     return this.voices.get(trackId)?.mic;
   }
 
-  /** Returns the post-fader Tone.Meter for a track, if it exists. */
-  getTrackMeter(trackId: string): Tone.Meter | undefined {
-    return this.voices.get(trackId)?.meter;
+  /** Returns the post-fader meter for either a Tone or native drum voice. */
+  getTrackMeter(trackId: string): LevelMeter | undefined {
+    return this.voices.get(trackId)?.meter ?? this.leanDrumVoices.get(trackId)?.meter;
   }
 
   // ---- clip scheduling ----
@@ -2231,9 +2922,9 @@ class AudioEngine {
       clipId: clip.id,
       noteCount: clip.notes.length,
     });
-    const v = this.voices.get(track.id);
+    const hasToneVoice = this.voices.has(track.id);
     const hasLeanDrumVoice = track.kind === "drums" && this.leanDrumVoices.has(track.id);
-    if (!v && !hasLeanDrumVoice) return ids;
+    if (!hasToneVoice && !hasLeanDrumVoice) return ids;
     const startBeats = clip.start;
     // Merge project-wide groove (global defaults) under track overrides.
     const groove = getGroove(track.groove, this.globalGroove);
@@ -2315,7 +3006,13 @@ class AudioEngine {
           } else {
             this.triggerDrumAt(track.id, piece, baseVel, fireAt);
           }
-        } else if (v?.poly) {
+        } else {
+          // Resolve the current voice at callback time. Sound-set replacement
+          // is transactional and may publish a new instrument after this
+          // event was scheduled; capturing the old object would keep firing a
+          // disposed voice for the remainder of the arrangement.
+          const activeVoice = this.voices.get(track.id);
+          if (!activeVoice?.poly) return;
           const dur = Math.max(0.05, (ev.duration * 60) / bpm);
           if (retrigger > 1) {
             const spacing = stepSec / retrigger;
@@ -2323,7 +3020,7 @@ class AudioEngine {
             for (let i = 0; i < retrigger; i++) {
               const vel = baseVel * (1 - i * 0.1);
               try {
-                v.poly.triggerAttackRelease(
+                activeVoice.poly.triggerAttackRelease(
                   ev.note,
                   subDur,
                   fireAt + spacing * i,
@@ -2335,7 +3032,7 @@ class AudioEngine {
             }
           } else {
             try {
-              v.poly.triggerAttackRelease(ev.note, dur, fireAt, baseVel);
+              activeVoice.poly.triggerAttackRelease(ev.note, dur, fireAt, baseVel);
             } catch {
               // skip
             }
@@ -2640,7 +3337,10 @@ class AudioEngine {
     this.rewireTrackFxChain(v);
   }
 
-  private buildVoice(track: Track): TrackVoice {
+  private buildVoice(
+    track: Track,
+    options: { attachInstrument?: boolean } = {},
+  ): TrackVoice {
     const started = performance.now();
     firstPlayMark("buildVoice:enter", {
       trackId: track.id,
@@ -2690,6 +3390,7 @@ class AudioEngine {
       sends.set(busId, g);
     }
     const voice: TrackVoice = {
+      trackId: track.id,
       channel,
       meter,
       delay,
@@ -2760,11 +3461,15 @@ class AudioEngine {
         untrackVoice();
       },
     };
-    this.attachInstrument(voice, track);
-    if (track.kind === "vocals") {
-      firstPlayMark("audio-node:create", { kind: "user-media", trackId: track.id });
-      voice.mic = new Tone.UserMedia();
-      voice.mic.connect(filter);
+    try {
+      if (options.attachInstrument !== false) this.attachInstrument(voice, track);
+    } catch (error) {
+      // Constructors and cross-context connections can fail independently.
+      // A failed candidate must release its already-created channel, sends,
+      // meters, FX, and partial instrument before the caller keeps the old
+      // working voice or retries on the next user action.
+      try { voice.dispose(); } catch { /* best-effort candidate cleanup */ }
+      throw error;
     }
     firstPlayMeasure("buildVoice", started, performance.now(), {
       trackId: track.id,
@@ -2791,24 +3496,20 @@ class AudioEngine {
     const { kind, preset } = track;
     const target = v.filter;
     if (kind === "drums") {
-      if (track.kitId) {
-        firstPlayMark("instrument-factory:buildKit", {
-          trackId: track.id,
-          kitId: track.kitId,
-        });
-        v.kitId = track.kitId;
-        v.kit = buildKit(findKit(track.kitId), target, this.masterChain.getBus("roomReverb")?.input ?? null, v.delay);
-      } else {
-        firstPlayMark("instrument-factory:buildDrumKit", {
-          trackId: track.id,
-          preset,
-        });
-        const drums = buildDrumKit(preset as import("../../types").DrumsPreset);
-        v.drums = drums;
-        (Object.keys(drums) as DrumPiece[]).forEach((k) =>
-          drums[k].connect(target),
-        );
-      }
+      // A TrackVoice is the bounded mixer shell only. The native drum voice
+      // is created by ensureLeanDrumTrack and feeds this filter; attaching a
+      // full Tone kit here can create thousands of permanent AudioParams.
+      v.kitId = track.kitId ?? (
+        preset === "acoustic"
+          ? "garageband"
+          : preset === "electronic"
+            ? "cyberpunk"
+            : "trap"
+      );
+      firstPlayMark("instrument-factory:native-drum-shell", {
+        trackId: track.id,
+        kitId: v.kitId,
+      });
       firstPlayMeasure("attachInstrument", started, performance.now(), {
         trackId: track.id,
         kind,

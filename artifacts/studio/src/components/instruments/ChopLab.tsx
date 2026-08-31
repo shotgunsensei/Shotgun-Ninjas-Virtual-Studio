@@ -7,7 +7,7 @@
  *   Bottom — per-slice controls + actions (Slice Pattern, Export Kit, Use as Kit)
  */
 import * as Tone from "tone";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getStore, useStore } from "../../store";
 import { DEFAULT_SLICE_SETTING, detectTransients, estimateBpm, getChopEngine, renderSliceToWav } from "../../lib/audio/chopEngine";
 import type { ChopSliceSetting } from "../../lib/audio/chopEngine";
@@ -40,10 +40,18 @@ const CHOKE_COLORS: Record<string, string> = {
   D: "#3b82f6",
 };
 
+// The decoded buffer is session-only, but it must outlive this panel's lazy
+// unmount/remount cycle so an intentional "Use as Kit" route keeps working.
+let liveBufferCache: {
+  projectLoadRevision: number;
+  buffer: AudioBuffer;
+  engineSignature: string | null;
+} | null = null;
+
 export function ChopLab({ track }: { track: Track }) {
   const chopLab = useStore((s) => s.chopLab);
   const projectBpm = useStore((s) => s.project.bpm);
-  const project = useStore((s) => s.project);
+  const projectLoadRevision = useStore((s) => s.projectLoadRevision);
   const { markers, sliceSettings, activeSliceIndex, sensitivity, sampleBpm, syncToBpm } = chopLab;
 
   // Non-serializable AudioBuffer lives here, not in the store.
@@ -60,20 +68,54 @@ export function ChopLab({ track }: { track: Track }) {
 
   const engine = getChopEngine();
   const loadTokenRef = useRef(0);
+  const reusedEngineBufferRef = useRef<AudioBuffer | null>(null);
+  const reusedEngineSignatureRef = useRef<string | null>(null);
 
   // Keep engine tempo-sync state in sync with store.
   useEffect(() => {
     engine.setTempoSync(syncToBpm, sampleBpm, projectBpm);
   }, [syncToBpm, sampleBpm, projectBpm]);
 
-  // Restore persisted ChopLab state when the project loads.  We decode
-  // the sample blob from IDB back into an AudioBuffer so the waveform
-  // and engine come back to life without the user doing anything.
-  const restoredForProjectRef = useRef<string | null>(null);
-  useEffect(() => {
-    const cl = project.chopLab;
-    if (!cl || restoredForProjectRef.current === project.id) return;
-    restoredForProjectRef.current = project.id;
+  // A complete project replacement is a hard ownership boundary even when a
+  // Save/Recover flow reuses the same project id. Clear the non-serializable
+  // buffer and singleton engine synchronously, then optionally restore only
+  // the sample owned by the new project instance.
+  useLayoutEffect(() => {
+    const token = ++loadTokenRef.current;
+    const cl = getStore().state.project.chopLab;
+    const cached =
+      cl?.sampleBlob && liveBufferCache?.projectLoadRevision === projectLoadRevision
+        ? liveBufferCache.buffer
+        : null;
+    if (cached) {
+      // The same project instance is merely remounting the lazy panel. Reuse
+      // the live engine/buffer without stopping currently playing Chop slices.
+      audioBufferRef.current = cached;
+      reusedEngineBufferRef.current = cached;
+      reusedEngineSignatureRef.current = liveBufferCache?.engineSignature ?? null;
+      setSampleName(cl?.sampleName ?? null);
+      setLoadError(null);
+      setRelinkNeeded(false);
+      return () => {
+        loadTokenRef.current += 1;
+      };
+    }
+
+    liveBufferCache = null;
+    reusedEngineBufferRef.current = null;
+    reusedEngineSignatureRef.current = null;
+    audioBufferRef.current = null;
+    engine.dispose();
+    setSampleName(null);
+    setLoadError(null);
+    setRelinkNeeded(false);
+    setPlayingPads(new Set());
+
+    if (!cl) {
+      return () => {
+        loadTokenRef.current += 1;
+      };
+    }
 
     if (!cl.sampleBlob) {
       // Markers/settings exist but blob is gone — prompt the user to relink.
@@ -81,11 +123,12 @@ export function ChopLab({ track }: { track: Track }) {
         setRelinkNeeded(true);
         setSampleName(cl.sampleName ?? null);
       }
-      return;
+      return () => {
+        loadTokenRef.current += 1;
+      };
     }
 
     // Decode the stored blob back to an AudioBuffer.
-    const token = ++loadTokenRef.current;
     (async () => {
       try {
         assertSampleImportAllowed(cl.sampleBlob!);
@@ -95,6 +138,7 @@ export function ChopLab({ track }: { track: Track }) {
         const decoded = await rawCtx.decodeAudioData(arrayBuffer);
         if (token !== loadTokenRef.current) return;
         audioBufferRef.current = decoded;
+        liveBufferCache = { projectLoadRevision, buffer: decoded, engineSignature: null };
         setSampleName(cl.sampleName ?? null);
         setRelinkNeeded(false);
         getStore().setStatus(`Chop Lab restored: ${cl.sampleName ?? "sample"}`, "info");
@@ -103,9 +147,13 @@ export function ChopLab({ track }: { track: Track }) {
         setSampleName(cl.sampleName ?? null);
       }
     })();
-  // Only run when the project id changes (i.e. a new project was loaded).
+
+    return () => {
+      loadTokenRef.current += 1;
+    };
+  // projectLoadRevision changes only for a complete resetStore replacement.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id]);
+  }, [projectLoadRevision]);
 
   // Derive slices boundaries from markers + buffer duration.
   const sliceBoundaries = (() => {
@@ -128,7 +176,19 @@ export function ChopLab({ track }: { track: Track }) {
     const settings = sliceSettings.length >= sliceCount
       ? sliceSettings.slice(0, sliceCount)
       : Array.from({ length: sliceCount }, (_, i) => sliceSettings[i] ?? { ...DEFAULT_SLICE_SETTING });
+    const signature = JSON.stringify([markers, settings]);
+    if (
+      reusedEngineBufferRef.current === buf &&
+      reusedEngineSignatureRef.current === signature
+    ) {
+      return;
+    }
+    reusedEngineBufferRef.current = null;
+    reusedEngineSignatureRef.current = null;
     engine.loadBuffer(buf, markers, settings);
+    if (liveBufferCache?.buffer === buf) {
+      liveBufferCache.engineSignature = signature;
+    }
   }, [markers, sliceSettings, sliceCount]);
 
   useEffect(() => {
@@ -141,13 +201,21 @@ export function ChopLab({ track }: { track: Track }) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const idx = PAD_KEYS[e.key.toLowerCase()];
       if (idx === undefined || idx >= sliceCount) return;
-      triggerPad(idx);
+      void triggerPad(idx);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [sliceCount]);
 
-  function triggerPad(index: number) {
+  async function triggerPad(index: number) {
+    const silenceGeneration = audio.getSilenceGeneration();
+    try {
+      await audio.unlock();
+    } catch (error) {
+      getStore().setStatus(`Chop audio is unavailable: ${(error as Error).message}`, "error");
+      return;
+    }
+    if (silenceGeneration !== audio.getSilenceGeneration()) return;
     engine.triggerSlice(index);
     setPlayingPads((p) => new Set([...p, index]));
     // Flash for 200ms.
@@ -186,6 +254,11 @@ export function ChopLab({ track }: { track: Track }) {
       const decoded = await rawCtx.decodeAudioData(arrayBuffer.slice(0));
       if (token !== loadTokenRef.current) return;
       audioBufferRef.current = decoded;
+      liveBufferCache = {
+        projectLoadRevision: getStore().state.projectLoadRevision,
+        buffer: decoded,
+        engineSignature: JSON.stringify([[], []]),
+      };
       setSampleName(file.name);
       // Auto-estimate BPM from the loaded sample.
       const detectedBpm = estimateBpm(decoded);

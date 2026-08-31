@@ -39,6 +39,18 @@ export interface DrumPieceSettings {
   solo: boolean;
 }
 
+/** Drum pads that may be replaced with a project-library sample. */
+export type DrumPadSamplePiece =
+  | "kick"
+  | "snare"
+  | "hat"
+  | "ohat"
+  | "clap"
+  | "tomLow"
+  | "tomHigh"
+  | "crash"
+  | "fx";
+
 // ---- v2 mixer / effects rack / send buses ----
 
 /** 3-band EQ + high-pass per channel strip. Gains are -12..+12 dB. */
@@ -403,6 +415,8 @@ export interface Track {
   presetId?: string;
   /** Per-drum-piece mixer overrides. Each value can be partial. */
   pieceSettings?: Partial<Record<string, Partial<DrumPieceSettings>>>;
+  /** Project sample-library blob keys that replace individual drum pads. */
+  padSamples?: Partial<Record<DrumPadSamplePiece, string>>;
   /** Per-track sound parameters (ADSR / filter / sends / width). */
   sound?: Partial<SoundParams>;
   /** Per-track groove settings; missing means inherit project default. */

@@ -5,6 +5,9 @@ import { join } from "node:path";
 
 const BASE_URL = process.env.STUDIO_PROFILE_URL ?? "http://127.0.0.1:5173";
 const PLAYBACK_MINUTES = Number(process.env.STUDIO_PROFILE_MINUTES ?? "10");
+if (!Number.isFinite(PLAYBACK_MINUTES) || PLAYBACK_MINUTES <= 0) {
+  throw new Error("STUDIO_PROFILE_MINUTES must be a finite number greater than zero.");
+}
 const PROFILE_MODE = cliArg("mode") ?? process.env.STUDIO_PROFILE_MODE ?? "";
 const MATRIX_ONLY = process.env.STUDIO_PROFILE_MATRIX_ONLY === "1";
 const FRESH_TRAP_ONLY = process.env.STUDIO_PROFILE_FRESH_TRAP_ONLY === "1";
@@ -12,12 +15,100 @@ const REPEATED_LOAD_ONLY = process.env.STUDIO_PROFILE_REPEATED_LOAD_ONLY === "1"
 const PLAYBACK10_ONLY = PROFILE_MODE === "playback10";
 const SAMPLE_IMPORT_ONLY = PROFILE_MODE === "sample-import";
 const PRESET_SWITCHING_ONLY = PROFILE_MODE === "preset-switching";
+const AUDIO_NODE_TRACE_ENABLED = process.env.STUDIO_PROFILE_AUDIO_TRACE !== "0";
+const LISTENER_TRACE_ENABLED = process.env.STUDIO_PROFILE_LISTENER_TRACE !== "0";
+const OPEN_MIXER = process.env.STUDIO_PROFILE_OPEN_MIXER !== "0";
+const OPEN_AUDIO_DIAGNOSTICS = process.env.STUDIO_PROFILE_OPEN_DIAGNOSTICS !== "0";
+const DEBUG_LOGS = process.env.STUDIO_PROFILE_DEBUG === "1";
+const EXTRA_PROFILE_FLAGS = (process.env.STUDIO_PROFILE_QUERY_FLAGS ?? "")
+  .split(/[,&]/)
+  .map((flag) => flag.trim())
+  .filter(Boolean);
 const OUT_DIR = join(process.cwd(), "runtime-profile");
 const RUN_ID = Date.now();
 const OUT_PATH = join(OUT_DIR, `runtime-profile-${RUN_ID}.json`);
 const METRICS_TIMEOUT_MS = 10_000;
+const FAILURE_CAPTURE_TIMEOUT_MS = 5_000;
+const RUN_CONFIG = {
+  profileMode: PROFILE_MODE || "default",
+  playbackMinutes: PLAYBACK_MINUTES,
+  audioNodeTrace: AUDIO_NODE_TRACE_ENABLED,
+  listenerTrace: LISTENER_TRACE_ENABLED,
+  openMixer: OPEN_MIXER,
+  openAudioDiagnostics: OPEN_AUDIO_DIAGNOSTICS,
+  extraQueryFlags: EXTRA_PROFILE_FLAGS,
+};
+
+function debugLog(message) {
+  if (DEBUG_LOGS) console.log(message);
+}
 
 mkdirSync(OUT_DIR, { recursive: true });
+
+function profileTimeoutError(message) {
+  const error = new Error(message);
+  error.name = "ProfileTimeoutError";
+  error.code = "STUDIO_PROFILE_TIMEOUT";
+  return error;
+}
+
+function isProfileTimeout(error) {
+  return error?.code === "STUDIO_PROFILE_TIMEOUT";
+}
+
+async function withTimeout(promise, timeoutMs, message, onTimeout) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = profileTimeoutError(message);
+      onTimeout?.(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function retireTimedOutPage(page, result, reason) {
+  let closeError = null;
+  if (!page.isClosed()) {
+    try {
+      await withTimeout(
+        page.close({ runBeforeUnload: false }),
+        FAILURE_CAPTURE_TIMEOUT_MS,
+        "Timed-out profile page did not close",
+      );
+    } catch (error) {
+      closeError = error?.message || String(error);
+    }
+  }
+  result.pageRetired = true;
+  result.notes.push({ pageRetired: { reason: reason?.message || String(reason), closeError } });
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("Scenario was cancelled.");
+}
+
+function waitWithAbort(timeoutMs, signal) {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timeoutId);
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Scenario was cancelled."));
+    };
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, timeoutMs);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
 
 function cliArg(name) {
   const idx = process.argv.indexOf(`--${name}`);
@@ -135,10 +226,30 @@ async function installProfileHooks(page) {
   });
 }
 
-async function browserMetrics(page, cdp) {
-  const perf = await cdp.send("Performance.getMetrics");
+async function browserMetrics(page, cdp, label = "browser metrics", timeoutMs = METRICS_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  const remaining = (phase) => {
+    const value = deadline - Date.now();
+    if (value <= 0) throw profileTimeoutError(`Metrics collection timed out for ${label} during ${phase}`);
+    return value;
+  };
+  debugLog(`METRICS ${label} cdp:start`);
+  const perf = await withTimeout(
+    cdp.send("Performance.getMetrics"),
+    remaining("CDP snapshot"),
+    `Metrics collection timed out for ${label} during CDP snapshot`,
+  );
+  debugLog(`METRICS ${label} cdp:complete`);
   const metric = Object.fromEntries(perf.metrics.map((m) => [m.name, m.value]));
-  const dom = await page.evaluate(() => ({
+  debugLog(`METRICS ${label} heartbeat:start`);
+  await withTimeout(
+    page.evaluate(() => true),
+    remaining("page heartbeat"),
+    `Metrics collection timed out for ${label} during page heartbeat`,
+  );
+  debugLog(`METRICS ${label} heartbeat:complete`);
+  debugLog(`METRICS ${label} dom:start`);
+  const dom = await withTimeout(page.evaluate(() => ({
     title: document.title,
     url: location.href,
     bodyPerf: document.body.dataset.perf ?? "",
@@ -159,7 +270,19 @@ async function browserMetrics(page, cdp) {
     audioNodeTrace: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
     exportTrace: window.__SN_EXPORT_TRACE__?.snapshot?.() ?? null,
     sampleImportTrace: window.__SN_SAMPLE_IMPORT_TRACE__?.snapshot?.() ?? null,
-    audioEngineStatus: window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null,
+    audioEngineStatus: window.__SN_AUDIO_ENGINE_STATUS__
+      ? {
+          ...window.__SN_AUDIO_ENGINE_STATUS__.voiceModes?.(),
+          playback: window.__SN_AUDIO_ENGINE_STATUS__.playback?.() ?? null,
+          soundSelectors: window.__SN_AUDIO_ENGINE_STATUS__.soundSelectors?.() ?? [],
+        }
+      : null,
+    playbackContinuity: window.__SN_RUNTIME_PROFILE__?.playbackContinuity
+      ? {
+          ...window.__SN_RUNTIME_PROFILE__.playbackContinuity,
+          timer: undefined,
+        }
+      : null,
     objectUrlTrace: window.__SN_OBJECT_URL_TRACE__?.snapshot?.() ?? null,
     waveformDomNodes: document.querySelectorAll('[class*="wavesurfer"], [part*="wave"], wave, canvas').length,
     overlays: Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog, [data-radix-portal], .modal, .overlay'))
@@ -176,7 +299,8 @@ async function browserMetrics(page, cdp) {
         text: (el.textContent ?? "").replace(/\s+/g, " ").slice(0, 160),
       }))
       .slice(0, 10),
-  }));
+  })), remaining("DOM snapshot"), `Metrics collection timed out for ${label} during DOM snapshot`);
+  debugLog(`METRICS ${label} dom:complete`);
   return {
     jsHeapUsedMB: Number(((metric.JSHeapUsedSize ?? 0) / 1024 / 1024).toFixed(2)),
     jsHeapTotalMB: Number(((metric.JSHeapTotalSize ?? 0) / 1024 / 1024).toFixed(2)),
@@ -241,6 +365,7 @@ function emptyMetrics(error) {
       exportTrace: null,
       sampleImportTrace: null,
       audioEngineStatus: null,
+      playbackContinuity: null,
       objectUrlTrace: null,
       waveformDomNodes: 0,
       overlays: [],
@@ -277,30 +402,44 @@ async function scenario(name, page, cdp, fn) {
     result.after = before;
     result.delta = { jsHeapUsedMB: 0, nodes: null, jsEventListeners: null, taskDurationSec: 0 };
     result.longTasks = { count: 0, maxMs: 0, totalMs: 0, top: [] };
+    await captureFailureState(page, result, name);
+    if (isProfileTimeout(err)) await retireTimedOutPage(page, result, err);
+    result.durationMs = Date.now() - started;
     console.log(`END ${name} ${result.status} ${result.durationMs}ms`);
     return result;
   }
+  const abortController = new AbortController();
   try {
     const timeoutMs = scenarioTimeoutMs(name);
-    await prepareScenarioUi(page, result, `${name}:before`);
-    await Promise.race([
-      fn(result),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Scenario timed out after ${timeoutMs} ms`)), timeoutMs),
-      ),
-    ]);
+    await withTimeout(
+      (async () => {
+        await prepareScenarioUi(page, result, `${name}:before`);
+        throwIfAborted(abortController.signal);
+        await fn(result, abortController.signal);
+      })(),
+      timeoutMs,
+      `Scenario timed out after ${timeoutMs} ms`,
+      (error) => abortController.abort(error),
+    );
   } catch (err) {
+    if (!abortController.signal.aborted) abortController.abort(err);
     result.status = "fail";
     result.error = err?.stack || err?.message || String(err);
-    await captureFailureState(page, result, name).catch(() => {});
+    await captureFailureState(page, result, name);
+    if (isProfileTimeout(err)) await retireTimedOutPage(page, result, err);
   }
   let after;
-  try {
-    after = await metricsWithTimeout(page, cdp, `${name}:after`);
-  } catch (err) {
-    result.status = "fail";
-    result.error = `${result.error ? `${result.error}\n` : ""}${err?.stack || err?.message || String(err)}`;
+  if (result.pageRetired) {
     after = before;
+  } else {
+    try {
+      after = await metricsWithTimeout(page, cdp, `${name}:after`);
+    } catch (err) {
+      result.status = "fail";
+      result.error = `${result.error ? `${result.error}\n` : ""}${err?.stack || err?.message || String(err)}`;
+      after = before;
+      if (isProfileTimeout(err)) await retireTimedOutPage(page, result, err);
+    }
   }
   result.durationMs = Date.now() - started;
   result.before = before;
@@ -350,18 +489,19 @@ async function scenario(name, page, cdp, fn) {
 }
 
 async function metricsWithTimeout(page, cdp, label) {
-  return Promise.race([
-    browserMetrics(page, cdp),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Metrics collection timed out for ${label}`)), METRICS_TIMEOUT_MS),
-    ),
-  ]);
+  return browserMetrics(page, cdp, label, METRICS_TIMEOUT_MS);
 }
 
 async function clickMaybe(page, locator, timeout = 2_000) {
   try {
-    await locator.first().click({ timeout, noWaitAfter: true });
-    return true;
+    const count = await locator.count();
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      if (!(await candidate.isVisible().catch(() => false))) continue;
+      await candidate.click({ timeout, noWaitAfter: true });
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -419,7 +559,10 @@ async function prepareScenarioUi(page, result, label) {
 async function captureFailureState(page, result, name) {
   const safeName = name.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
   const screenshotPath = join(OUT_DIR, `${safeName}-${RUN_ID}-failure.png`);
-  const domSummary = await page.evaluate(() => ({
+  let domSummary;
+  let domCaptureError = null;
+  try {
+    domSummary = await withTimeout(page.evaluate(() => ({
     url: location.href,
     title: document.title,
     activeElement: {
@@ -450,9 +593,38 @@ async function captureFailureState(page, result, name) {
         disabled: button.hasAttribute("disabled"),
       }))
       .slice(0, 80),
-  }));
-  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
-  result.notes.push({ failureState: { screenshotPath, domSummary } });
+    })), FAILURE_CAPTURE_TIMEOUT_MS, `Failure DOM capture timed out for ${name}`);
+  } catch (error) {
+    domCaptureError = error?.message || String(error);
+    domSummary = {
+      url: page.isClosed() ? null : page.url(),
+      title: null,
+      activeElement: null,
+      overlays: [],
+      buttons: [],
+    };
+  }
+
+  let screenshotCaptured = false;
+  let screenshotCaptureError = null;
+  try {
+    await withTimeout(
+      page.screenshot({ path: screenshotPath, fullPage: true, timeout: FAILURE_CAPTURE_TIMEOUT_MS }),
+      FAILURE_CAPTURE_TIMEOUT_MS,
+      `Failure screenshot timed out for ${name}`,
+    );
+    screenshotCaptured = true;
+  } catch (error) {
+    screenshotCaptureError = error?.message || String(error);
+  }
+  result.notes.push({ failureState: {
+    screenshotPath: screenshotCaptured ? screenshotPath : null,
+    screenshotAttemptPath: screenshotPath,
+    screenshotCaptured,
+    screenshotCaptureError,
+    domCaptureError,
+    domSummary,
+  } });
 }
 
 async function captureListenerTrace(page, result, label) {
@@ -466,13 +638,35 @@ async function captureListenerTrace(page, result, label) {
 }
 
 async function captureAudioNodeTrace(page, result, label) {
-  const snapshot = await page.evaluate((snapLabel) => ({
-    label: snapLabel,
-    at: Math.round(performance.now()),
-    snapshot: window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null,
-    voiceModes: window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null,
-    topStacks: window.__SN_AUDIO_NODE_TRACE__?.dumpTopStacks?.(10) ?? [],
-  }), label);
+  const traceStats = await withTimeout(
+    page.evaluate(() => window.__SN_AUDIO_NODE_TRACE__?.stats?.() ?? null),
+    METRICS_TIMEOUT_MS,
+    `Audio-node trace stats timed out for ${label}`,
+  );
+  debugLog(`TRACE ${label} stats ${JSON.stringify(traceStats)}`);
+  debugLog(`TRACE ${label} snapshot:start`);
+  const traceSnapshot = await withTimeout(
+    page.evaluate(() => window.__SN_AUDIO_NODE_TRACE__?.snapshot?.() ?? null),
+    METRICS_TIMEOUT_MS,
+    `Audio-node snapshot timed out for ${label}`,
+  );
+  debugLog(`TRACE ${label} snapshot:complete`);
+  const voiceModes = await withTimeout(
+    page.evaluate(() => window.__SN_AUDIO_ENGINE_STATUS__?.voiceModes?.() ?? null),
+    METRICS_TIMEOUT_MS,
+    `Audio voice-mode snapshot timed out for ${label}`,
+  );
+  // `snapshot()` already computes the ranked stacks. Re-sorting the complete
+  // history a second time can dominate the probe while playback is active.
+  const topStacks = traceSnapshot?.topStacks?.slice(0, 10) ?? [];
+  const snapshot = {
+    label,
+    at: Date.now(),
+    snapshot: traceSnapshot,
+    traceStats,
+    voiceModes,
+    topStacks,
+  };
   result.notes.push({ audioNodeTrace: snapshot });
   return snapshot;
 }
@@ -954,9 +1148,60 @@ async function sampleImportProfileProbe(page, cdp, result) {
   result.notes.push({ checkpoint: "after-idle-gc", metrics: await browserMetrics(page, cdp) });
 }
 
-async function playback10Gate(page, cdp, result) {
+async function configureSustainedPlaybackLoop(page, startBeat = 0, endBeat = 16) {
+  const ruler = page.getByTestId("ruler-click-area");
+  await ruler.waitFor({ state: "visible", timeout: 10_000 });
+
+  const dispatchRulerClick = (beat, shiftKey) => page.evaluate(
+    ({ targetBeat, useShift }) => {
+      const target = document.querySelector('[data-testid="ruler-click-area"]');
+      if (!(target instanceof HTMLElement)) return false;
+      const rect = target.getBoundingClientRect();
+      // Timeline.tsx renders 32 px per beat. Dispatching on the ruler uses
+      // the same public interaction path as a user setting loop handles.
+      target.dispatchEvent(new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: rect.left + targetBeat * 32,
+        clientY: rect.top + rect.height / 2,
+        shiftKey: useShift,
+      }));
+      return true;
+    },
+    { targetBeat: beat, useShift: shiftKey },
+  );
+
+  if (!(await dispatchRulerClick(startBeat, true))) {
+    throw new Error("Playback10 could not set the sustained loop start.");
+  }
+  await page.getByTestId("loop-handle-start").waitFor({ timeout: 10_000 });
+  if (!(await dispatchRulerClick(endBeat, false))) {
+    throw new Error("Playback10 could not set the sustained loop end.");
+  }
+  await page.waitForFunction(
+    ({ startPx, endPx }) => {
+      const start = document.querySelector('[data-testid="loop-handle-start"]');
+      const end = document.querySelector('[data-testid="loop-handle-end"]');
+      return (
+        start instanceof HTMLElement &&
+        end instanceof HTMLElement &&
+        Math.abs(Number.parseFloat(start.style.left) - startPx) < 0.1 &&
+        Math.abs(Number.parseFloat(end.style.left) - endPx) < 0.1
+      );
+    },
+    { startPx: startBeat * 32, endPx: endBeat * 32 },
+    { timeout: 10_000 },
+  );
+}
+
+async function playback10Gate(page, cdp, result, signal) {
   await clearBrowserState(page);
-  await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1");
+  const traceFlags = [];
+  if (LISTENER_TRACE_ENABLED) traceFlags.push("snListenerTrace=1");
+  if (AUDIO_NODE_TRACE_ENABLED) traceFlags.push("snAudioNodeTrace=1");
+  traceFlags.push(...EXTRA_PROFILE_FLAGS);
+  await openStudio(page, traceFlags.length > 0 ? `?${traceFlags.join("&")}` : "");
   await prepareScenarioUi(page, result, "playback10:initial");
   await captureListenerTrace(page, result, "playback10:baseline");
   await captureAudioNodeTrace(page, result, "playback10:baseline");
@@ -964,35 +1209,262 @@ async function playback10Gate(page, cdp, result) {
 
   await enableAudio(page);
   await loadDemo(page, "trap-starter");
+  await configureSustainedPlaybackLoop(page, 0, 16);
+  result.notes.push({
+    sustainedPlaybackLoop: {
+      startBeat: 0,
+      endBeat: 16,
+      configuredThroughTimelineControls: true,
+    },
+  });
   await captureAudioNodeTrace(page, result, "playback10:after-load");
   result.notes.push({ checkpoint: "before-playback", metrics: await browserMetrics(page, cdp) });
   const started = Date.now();
   await page.getByRole("button", { name: /^play$/i }).click({ noWaitAfter: true });
   await page.getByRole("button", { name: /^pause$/i }).waitFor({ timeout: 10_000 });
-  await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
-  await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
+  await page.evaluate(() => {
+    const profile = window.__SN_RUNTIME_PROFILE__;
+    const probe = {
+      startedAt: performance.now(),
+      lastTickAt: performance.now(),
+      maxGapMs: 0,
+      ticks: 0,
+      peakDb: -Infinity,
+      longestSilentMs: 0,
+      silentStartedAt: null,
+      timer: 0,
+    };
+    probe.timer = window.setInterval(() => {
+      const now = performance.now();
+      probe.maxGapMs = Math.max(probe.maxGapMs, now - probe.lastTickAt);
+      probe.lastTickAt = now;
+      probe.ticks += 1;
+      const playback = window.__SN_AUDIO_ENGINE_STATUS__?.playback?.();
+      const peaks = playback?.masterLevels?.peakDb ?? [];
+      const peak = peaks.length > 0 ? Math.max(...peaks) : -Infinity;
+      if (Number.isFinite(peak)) probe.peakDb = Math.max(probe.peakDb, peak);
+      if (!Number.isFinite(peak) || peak < -70) {
+        probe.silentStartedAt ??= now;
+        probe.longestSilentMs = Math.max(
+          probe.longestSilentMs,
+          now - probe.silentStartedAt,
+        );
+      } else {
+        probe.silentStartedAt = null;
+      }
+    }, 100);
+    profile.playbackContinuity = probe;
+  });
+  if (!(await clickMaybe(page, page.getByRole("tab", { name: /^library$/i }), 2_000))) {
+    throw new Error("Playback10 could not open the sound library for its in-play switch.");
+  }
+  await page.getByTestId("load-sound-pack-vcsl-tenor-alley").waitFor({ timeout: 10_000 });
+  const requestedSoundPacks = ["vcsl-neon-keys", "demon-truck", "vcsl-tenor-alley"];
+  const switchDurationsMs = [];
+  for (const id of requestedSoundPacks) {
+    const button = page.getByTestId(`load-sound-pack-${id}`);
+    const switchStarted = performance.now();
+    await button.click({ noWaitAfter: true });
+    // Exercise the same event/paint separation as deliberate user input. A
+    // synchronous DOM click burst can hide stale-generation and audio-resume
+    // failures that occur between real sound-set selections.
+    await page.waitForTimeout(250);
+    switchDurationsMs.push(Number((performance.now() - switchStarted).toFixed(1)));
+  }
+  await page.waitForFunction(() => {
+    const selectors = window.__SN_AUDIO_ENGINE_STATUS__?.soundSelectors?.() ?? [];
+    const playback = window.__SN_AUDIO_ENGINE_STATUS__?.playback?.();
+    return (
+      selectors.some((entry) => entry.presetId === "brass.vcsl-tenor-sax-stabs") &&
+      selectors.some(
+        (entry) =>
+          entry.kitId === "garageband" &&
+          entry.hasNativeKit === true &&
+          entry.hasToneKit === false,
+      ) &&
+      playback?.requestedKits?.length === 0 &&
+      playback?.activeKitBuilds?.length === 0 &&
+      playback?.samplerPromotions?.cache?.activeDecodes === 0 &&
+      playback?.samplerPromotions?.cache?.inFlight === 0
+    );
+  }, null, { timeout: 30_000 });
+  result.notes.push({
+    inPlaybackSoundPackSwitch: {
+      requested: requestedSoundPacks,
+      switchDurationsMs,
+      finalKitId: "garageband (native real-time)",
+      finalPresetId: "brass.vcsl-tenor-sax-stabs",
+      livePromotionPolicy: "bounded-native-kit-immediate",
+    },
+  });
+  if (OPEN_MIXER) {
+    await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
+  }
+  if (OPEN_AUDIO_DIAGNOSTICS) {
+    await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
+  }
   await captureAudioNodeTrace(page, result, "playback10:after-play");
 
   const checkpointMinutes = Array.from(
     new Set([1, 5, PLAYBACK_MINUTES].filter((minute) => minute > 0 && minute <= PLAYBACK_MINUTES)),
   ).sort((a, b) => a - b);
-  let previousMinute = 0;
+  let previousContinuityTicks = -1;
   for (const minute of checkpointMinutes) {
-    await page.waitForTimeout((minute - previousMinute) * 60_000);
-    previousMinute = minute;
+    await waitWithAbort(Math.max(0, started + minute * 60_000 - Date.now()), signal);
+    const metrics = await metricsWithTimeout(page, cdp, `playback10:${minute}m`);
+    throwIfAborted(signal);
+    const playback = metrics.dom.audioEngineStatus?.playback;
+    const continuity = metrics.dom.playbackContinuity;
+    const pauseVisible = await page.getByRole("button", { name: /^pause$/i }).isVisible();
+    if (
+      !pauseVisible ||
+      playback?.playbackState !== "playing" ||
+      playback?.transportState !== "started" ||
+      playback?.contextState !== "running"
+    ) {
+      throw new Error(
+        `Playback10 lost transport at ${minute}m: ${JSON.stringify({ pauseVisible, playback })}`,
+      );
+    }
+    if (!continuity || continuity.ticks <= previousContinuityTicks) {
+      throw new Error(`Playback10 heartbeat stopped advancing at ${minute}m.`);
+    }
+    previousContinuityTicks = continuity.ticks;
     result.notes.push({
       checkpoint: `${minute}m`,
       elapsedMs: Date.now() - started,
       responsive: true,
-      metrics: await browserMetrics(page, cdp),
+      metrics,
     });
   }
 
-  await clickMaybe(page, page.getByRole("button", { name: /^stop$/i }), 5_000);
+  const playbackEndedAt = Date.now();
+  const continuity = await page.evaluate(() => {
+    const probe = window.__SN_RUNTIME_PROFILE__?.playbackContinuity;
+    if (!probe) return null;
+    window.clearInterval(probe.timer);
+    const now = performance.now();
+    probe.maxGapMs = Math.max(probe.maxGapMs, now - probe.lastTickAt);
+    if (probe.silentStartedAt !== null) {
+      probe.longestSilentMs = Math.max(
+        probe.longestSilentMs,
+        now - probe.silentStartedAt,
+      );
+    }
+    return { ...probe, timer: undefined };
+  });
+  const clickTransportControl = (name) => withTimeout(
+    page.evaluate((controlName) => {
+      const candidates = Array.from(document.querySelectorAll("button[aria-label]"));
+      const button = candidates.find((candidate) => {
+        const label = candidate.getAttribute("aria-label") ?? "";
+        const rect = candidate.getBoundingClientRect();
+        return (
+          label.toLowerCase().startsWith(controlName.toLowerCase()) &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      });
+      if (!(button instanceof HTMLButtonElement)) return false;
+      button.click();
+      return true;
+    }, name),
+    5_000,
+    `Playback10 ${name} control timed out`,
+  );
+  const stopped = await clickTransportControl("Stop");
   await page.waitForTimeout(500);
-  await clickMaybe(page, page.getByRole("button", { name: /panic/i }), 5_000);
+  const panicked = await clickTransportControl("Panic");
+  if (!stopped || !panicked) {
+    throw new Error(`Playback10 cleanup controls failed: ${JSON.stringify({ stopped, panicked })}`);
+  }
+  await page.waitForFunction(() => {
+    const selectors = window.__SN_AUDIO_ENGINE_STATUS__?.soundSelectors?.() ?? [];
+    const playback = window.__SN_AUDIO_ENGINE_STATUS__?.playback?.();
+    const sampler = playback?.samplerPromotions;
+    return (
+      selectors.some((entry) => entry.kitId === "garageband") &&
+      selectors.some(
+        (entry) =>
+          entry.presetId === "brass.vcsl-tenor-sax-stabs" &&
+          entry.samplePromotionState === "settled",
+      ) &&
+      playback?.requestedKits?.length === 0 &&
+      playback?.activeKitBuilds?.length === 0 &&
+      sampler?.active === null &&
+      sampler?.pending?.length === 0 &&
+      sampler?.cache?.activeDecodes === 0 &&
+      sampler?.cache?.inFlight === 0
+    );
+  }, null, { timeout: 45_000 });
+  const resumed = await clickTransportControl("Play");
+  if (!resumed) throw new Error("Playback10 could not resume the final sound set.");
+  await page.getByRole("button", { name: /^pause$/i }).waitFor({ timeout: 10_000 });
+  const postPromotionPlayback = await page.evaluate(async () => {
+    const startedAt = performance.now();
+    let lastTickAt = startedAt;
+    let maxGapMs = 0;
+    let ticks = 0;
+    let peakDb = -Infinity;
+    const first = window.__SN_AUDIO_ENGINE_STATUS__?.playback?.();
+    await new Promise((resolve) => {
+      const timer = window.setInterval(() => {
+        const now = performance.now();
+        maxGapMs = Math.max(maxGapMs, now - lastTickAt);
+        lastTickAt = now;
+        ticks += 1;
+        const playback = window.__SN_AUDIO_ENGINE_STATUS__?.playback?.();
+        const peaks = playback?.masterLevels?.peakDb ?? [];
+        if (peaks.length > 0) peakDb = Math.max(peakDb, ...peaks);
+      }, 100);
+      window.setTimeout(() => {
+        window.clearInterval(timer);
+        resolve(undefined);
+      }, 3_000);
+    });
+    const last = window.__SN_AUDIO_ENGINE_STATUS__?.playback?.();
+    return {
+      ticks,
+      maxGapMs,
+      peakDb,
+      startPositionBeats: first?.positionBeats ?? null,
+      endPositionBeats: last?.positionBeats ?? null,
+      playbackState: last?.playbackState ?? null,
+      transportState: last?.transportState ?? null,
+      contextState: last?.contextState ?? null,
+    };
+  });
+  result.notes.push({ postPromotionPlayback });
+  if (
+    postPromotionPlayback.ticks < 10 ||
+    postPromotionPlayback.maxGapMs >= 1_000 ||
+    postPromotionPlayback.peakDb <= -60 ||
+    postPromotionPlayback.playbackState !== "playing" ||
+    postPromotionPlayback.transportState !== "started" ||
+    postPromotionPlayback.contextState !== "running" ||
+    !(postPromotionPlayback.endPositionBeats > postPromotionPlayback.startPositionBeats)
+  ) {
+    throw new Error(
+      `Playback10 final sound set failed its resume probe: ${JSON.stringify(postPromotionPlayback)}`,
+    );
+  }
+  const restopped = await clickTransportControl("Stop");
+  await page.waitForTimeout(250);
+  const repanicked = await clickTransportControl("Panic");
+  if (!restopped || !repanicked) {
+    throw new Error(
+      `Playback10 promoted-set cleanup controls failed: ${JSON.stringify({ restopped, repanicked })}`,
+    );
+  }
   await captureAudioNodeTrace(page, result, "playback10:after-stop-panic");
-  result.notes.push({ checkpoint: "after-stop-panic", metrics: await browserMetrics(page, cdp) });
+  const cleanupMetrics = await browserMetrics(page, cdp);
+  if (
+    cleanupMetrics.dom.audioEngineStatus?.playback?.playbackState !== "stopped" ||
+    cleanupMetrics.dom.audioEngineStatus?.playback?.transportState !== "stopped"
+  ) {
+    throw new Error("Playback10 Stop/Panic did not leave both engine and Transport stopped.");
+  }
+  result.notes.push({ checkpoint: "after-stop-panic", metrics: cleanupMetrics });
 
   await page.waitForTimeout(10_000);
   await forceGarbageCollection(cdp);
@@ -1002,20 +1474,36 @@ async function playback10Gate(page, cdp, result) {
   await captureAudioNodeTrace(page, result, "playback10:after-idle");
   result.notes.push({ checkpoint: "after-10s-idle", metrics: idleMetrics });
 
-  const playbackMs = Date.now() - started;
+  const playbackMs = playbackEndedAt - started;
   const audioTrace = idleMetrics.dom.audioNodeTrace;
   const assertions = {
     playbackRanFullDuration: playbackMs >= PLAYBACK_MINUTES * 60_000,
+    audioTraceMeasured: Boolean(audioTrace),
+    continuity,
     activeAudioWorkletNodes: audioTrace?.activeAudioWorkletNodes ?? null,
     activeLeanSources: audioTrace?.leanOneShotSourcesActive ?? null,
     activeScheduledPlayers: audioTrace?.activeScheduledPlayers ?? null,
     activeTransportEvents: audioTrace?.activeTransportEvents ?? null,
+    finalSoundSelectors: idleMetrics.dom.audioEngineStatus?.soundSelectors ?? [],
+    samplerPromotions: idleMetrics.dom.audioEngineStatus?.playback?.samplerPromotions ?? null,
     overlays: idleMetrics.dom.overlays,
     cdpResponsive: true,
   };
   result.notes.push({ playback10Assertions: assertions });
   if (!assertions.playbackRanFullDuration) {
     throw new Error(`Playback10 ended early after ${playbackMs} ms`);
+  }
+  if (AUDIO_NODE_TRACE_ENABLED && !assertions.audioTraceMeasured) {
+    throw new Error("Playback10 audio-node cleanup was not measured.");
+  }
+  if (
+    !continuity ||
+    continuity.ticks < 1 ||
+    continuity.maxGapMs >= 1_000 ||
+    continuity.peakDb <= -60 ||
+    continuity.longestSilentMs >= 2_000
+  ) {
+    throw new Error(`Playback10 continuity failed: ${JSON.stringify(continuity)}`);
   }
   if ((assertions.activeAudioWorkletNodes ?? 0) !== 0) {
     throw new Error(`Playback10 created default AudioWorkletNodes: ${assertions.activeAudioWorkletNodes}`);
@@ -1025,6 +1513,23 @@ async function playback10Gate(page, cdp, result) {
       `Playback10 left active sources after panic: lean=${assertions.activeLeanSources}, scheduled=${assertions.activeScheduledPlayers}`,
     );
   }
+  if ((assertions.activeTransportEvents ?? 0) !== 0) {
+    throw new Error(`Playback10 left Transport events after Panic: ${assertions.activeTransportEvents}`);
+  }
+  if (
+    !assertions.finalSoundSelectors.some((entry) => entry.kitId === "garageband") ||
+    !assertions.finalSoundSelectors.some(
+      (entry) =>
+        entry.presetId === "brass.vcsl-tenor-sax-stabs" &&
+        entry.samplePromotionState === "settled",
+    ) ||
+    assertions.samplerPromotions?.active !== null ||
+    (assertions.samplerPromotions?.pending?.length ?? 0) !== 0 ||
+    (assertions.samplerPromotions?.cache?.activeDecodes ?? 0) !== 0 ||
+    (assertions.samplerPromotions?.cache?.inFlight ?? 0) !== 0
+  ) {
+    throw new Error("Playback10 did not settle the final queued kit/sample promotion after Stop/Panic.");
+  }
 }
 
 async function main() {
@@ -1033,19 +1538,22 @@ async function main() {
     args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"],
   });
   const context = await browser.newContext({ acceptDownloads: true });
-  const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Performance.enable");
-  await installProfileHooks(page);
-
   const consoleMessages = [];
   const pageErrors = [];
-  page.on("console", (msg) => {
-    if (["error", "warning"].includes(msg.type())) {
-      consoleMessages.push({ type: msg.type(), text: msg.text() });
-    }
-  });
-  page.on("pageerror", (err) => pageErrors.push(err.stack || err.message));
+  const createSharedPage = async () => {
+    const nextPage = await context.newPage();
+    const nextCdp = await context.newCDPSession(nextPage);
+    await nextCdp.send("Performance.enable");
+    await installProfileHooks(nextPage);
+    nextPage.on("console", (msg) => {
+      if (["error", "warning"].includes(msg.type())) {
+        consoleMessages.push({ type: msg.type(), text: msg.text() });
+      }
+    });
+    nextPage.on("pageerror", (err) => pageErrors.push(err.stack || err.message));
+    return { page: nextPage, cdp: nextCdp };
+  };
+  let { page, cdp } = await createSharedPage();
 
   const results = [];
   const browserVersion = await browser.version();
@@ -1056,11 +1564,22 @@ async function main() {
       productionPreviewUrl: BASE_URL,
       playbackMinutes: PLAYBACK_MINUTES,
       profileMode: PROFILE_MODE || "default",
+      runConfig: RUN_CONFIG,
       consoleMessages,
       pageErrors,
       scenarios: results,
     };
     writeFileSync(OUT_PATH, JSON.stringify(partial, null, 2));
+  };
+  const runSharedScenario = async (name, fn) => {
+    const activePage = page;
+    const activeCdp = cdp;
+    const result = await scenario(name, activePage, activeCdp, fn);
+    if (result.pageRetired) {
+      ({ page, cdp } = await createSharedPage());
+      result.notes.push({ sharedPageRecreatedAfterTimeout: true });
+    }
+    return result;
   };
 
   const firstPlayMatrix = [
@@ -1074,9 +1593,21 @@ async function main() {
   ];
 
   if (PLAYBACK10_ONLY) {
-    results.push(await scenario("playback10-release-gate", page, cdp, async (r) => {
-      await playback10Gate(page, cdp, r);
-    }));
+    const releaseResult = await scenario("playback10-release-gate", page, cdp, async (r, signal) => {
+      await playback10Gate(page, cdp, r, signal);
+    });
+    const browserErrors = consoleMessages.filter((message) => message.type === "error");
+    if (browserErrors.length > 0 || pageErrors.length > 0) {
+      releaseResult.status = "fail";
+      releaseResult.error = [
+        releaseResult.error,
+        browserErrors.length > 0
+          ? `Browser console errors: ${JSON.stringify(browserErrors)}`
+          : null,
+        pageErrors.length > 0 ? `Page errors: ${JSON.stringify(pageErrors)}` : null,
+      ].filter(Boolean).join("\n");
+    }
+    results.push(releaseResult);
     writeSummary();
     console.log(OUT_PATH);
     await browser.close();
@@ -1155,17 +1686,18 @@ async function main() {
   if (MATRIX_ONLY) {
     console.log(OUT_PATH);
     await browser.close();
+    if (results.some((r) => r.status !== "pass")) process.exitCode = 1;
     return;
   }
 
-  results.push(await scenario("cold-load", page, cdp, async () => {
+  results.push(await runSharedScenario("cold-load", async () => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("body", { timeout: 15_000 });
     await openStudio(page, "?snListenerTrace=1&snAudioNodeTrace=1");
   }));
   writeSummary();
 
-  results.push(await scenario("audio-startup-panic-replay", page, cdp, async (r) => {
+  results.push(await runSharedScenario("audio-startup-panic-replay", async (r) => {
     await captureAudioNodeTrace(page, r, "audio-startup:before-enable");
     await enableAudio(page);
     await captureAudioNodeTrace(page, r, "audio-startup:after-enable");
@@ -1175,19 +1707,29 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("load-trap-and-10-minute-playback-mixer-scope", page, cdp, async (r) => {
+  results.push(await runSharedScenario("load-trap-and-10-minute-playback-mixer-scope", async (r, signal) => {
     await captureAudioNodeTrace(page, r, "trap-starter:before-load");
+    throwIfAborted(signal);
     await loadDemo(page, "trap-starter");
+    throwIfAborted(signal);
     await captureAudioNodeTrace(page, r, "trap-starter:after-load");
+    throwIfAborted(signal);
     await enableAudio(page);
+    throwIfAborted(signal);
     await page.getByRole("button", { name: /^play$/i }).click();
+    throwIfAborted(signal);
     await captureAudioNodeTrace(page, r, "trap-starter:after-play");
+    throwIfAborted(signal);
     await clickMaybe(page, page.getByRole("button", { name: /show mixer/i }), 1_000);
     await clickMaybe(page, page.getByRole("button", { name: /toggle audio diagnostics panel/i }), 2_000);
+    throwIfAborted(signal);
     const checkpoints = Math.max(1, Math.floor(PLAYBACK_MINUTES * 2));
+    const playbackStartedAt = Date.now();
     for (let i = 0; i < checkpoints; i++) {
-      await page.waitForTimeout((PLAYBACK_MINUTES * 60_000) / checkpoints);
-      const snap = await browserMetrics(page, cdp);
+      const checkpointAt = playbackStartedAt + ((i + 1) * PLAYBACK_MINUTES * 60_000) / checkpoints;
+      await waitWithAbort(Math.max(0, checkpointAt - Date.now()), signal);
+      const snap = await metricsWithTimeout(page, cdp, `load-trap-playback:checkpoint-${i + 1}`);
+      throwIfAborted(signal);
       r.notes.push({
         minute: Number((((i + 1) * PLAYBACK_MINUTES) / checkpoints).toFixed(1)),
         heapMB: snap.jsHeapUsedMB,
@@ -1210,7 +1752,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("mixer-stress", page, cdp, async (r) => {
+  results.push(await runSharedScenario("mixer-stress", async (r) => {
     await captureListenerTrace(page, r, "mixer:before-stress");
     await captureAudioNodeTrace(page, r, "mixer:before-stress");
     await toggleMixer(page, 20, r);
@@ -1224,7 +1766,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("visualizer-performance-mode-stress", page, cdp, async (r) => {
+  results.push(await runSharedScenario("visualizer-performance-mode-stress", async (r) => {
     await resetStudioScenario(page, "trap-starter");
     await captureListenerTrace(page, r, "visualizer:before-stress");
     await captureAudioNodeTrace(page, r, "visualizer:before-stress");
@@ -1248,7 +1790,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("repeated-preset-switching", page, cdp, async (r) => {
+  results.push(await runSharedScenario("repeated-preset-switching", async (r) => {
     await resetStudioScenario(page, "trap-starter");
     await captureAudioNodeTrace(page, r, "preset-switch:before");
     await switchPresets(page, 20);
@@ -1256,7 +1798,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("repeated-project-load-unload", page, cdp, async (r) => {
+  results.push(await runSharedScenario("repeated-project-load-unload", async (r) => {
     await resetStudioScenario(page, null);
     const ids = ["trap-starter", "boom-bap-dojo", "cyber-ninja", "lofi-smoke-loop"];
     for (let i = 0; i < 20; i++) {
@@ -1273,7 +1815,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("sample-import-small-and-large", page, cdp, async (r) => {
+  results.push(await runSharedScenario("sample-import-small-and-large", async (r) => {
     await page.evaluate(() => window.__SN_SAMPLE_IMPORT_TRACE__?.clear?.()).catch(() => undefined);
     await resetRuntimeLongTasks(page);
     await captureSampleImportTrace(page, r, "sample-import:baseline");
@@ -1291,7 +1833,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("save-load-autosave", page, cdp, async (r) => {
+  results.push(await runSharedScenario("save-load-autosave", async (r) => {
     await resetStudioScenario(page, "trap-starter");
     await page.keyboard.press("s");
     await page.waitForTimeout(9_500);
@@ -1305,7 +1847,7 @@ async function main() {
   writeSummary();
 
   let exportedJsonPath = null;
-  results.push(await scenario("json-export-import-and-malformed-json", page, cdp, async () => {
+  results.push(await runSharedScenario("json-export-import-and-malformed-json", async () => {
     await resetStudioScenario(page, "trap-starter");
     exportedJsonPath = await exportProjectJson(page);
     await importProjectJson(page, exportedJsonPath);
@@ -1313,7 +1855,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("wav-export-default-and-demo", page, cdp, async (r) => {
+  results.push(await runSharedScenario("wav-export-default-and-demo", async (r) => {
     await resetStudioScenario(page, "trap-starter");
     await captureAudioNodeTrace(page, r, "wav-export:before-default");
     await captureExportTrace(page, r, "wav-export:before-default");
@@ -1331,7 +1873,7 @@ async function main() {
   }));
   writeSummary();
 
-  results.push(await scenario("service-worker-cache-update-simulation", page, cdp, async (r) => {
+  results.push(await runSharedScenario("service-worker-cache-update-simulation", async (r) => {
     await serviceWorkerUpdateSimulation(page, r);
   }));
   writeSummary();
@@ -1342,6 +1884,7 @@ async function main() {
     productionPreviewUrl: BASE_URL,
     playbackMinutes: PLAYBACK_MINUTES,
     profileMode: PROFILE_MODE || "default",
+    runConfig: RUN_CONFIG,
     consoleMessages,
     pageErrors,
     scenarios: results,

@@ -4,6 +4,7 @@ import { SEND_BUS_IDS } from "../../types";
 import { describeError, workletManager } from "./worklet-manager";
 import { trackInterval } from "../../utils/performanceDiagnostics";
 import { DEFAULT_MASTER_BUS } from "./master-defaults";
+import { connectToneCompatible } from "./toneConnection";
 
 export { DEFAULT_MASTER_BUS } from "./master-defaults";
 
@@ -115,54 +116,47 @@ export class MasterChain {
   // ── Phase 6: AudioWorklet integration ───────────────────────────────────
 
   /**
-   * Call after AudioWorklet registration succeeds. Inserts the three worklet
-   * processors into the master chain, replacing the Tone.js WaveShaper and
-   * augmenting the Tone.Limiter. Falls back silently if node creation fails.
+   * Call after AudioWorklet registration succeeds. Inserts a single warmth
+   * processor into the master chain while keeping Tone's native WaveShaper
+   * and Limiter as the safety-critical clip/ceiling owners. A previous three-
+   * node graph exhausted constrained Chromium worklet implementations before
+   * the metronome could be created; one bounded node preserves headroom for
+   * timing and sampled-instrument worklets.
    */
   initWorklets(): void {
     if (workletManager.fallback || !workletManager.ready) return;
     const toneCtx = Tone.getContext() as unknown as AudioContext;
 
-    const clip = workletManager.createNode("soft-clipper", toneCtx);
     const sat  = workletManager.createNode("saturation",   toneCtx);
-    const lim  = workletManager.createNode("limiter",      toneCtx);
 
-    if (!clip || !sat || !lim) {
-      workletManager.disposeNode(clip);
+    if (!sat) {
       workletManager.disposeNode(sat);
-      workletManager.disposeNode(lim);
-      workletManager.markUnavailable("Master worklet node creation returned null");
+      workletManager.markUnavailable(
+        workletManager.lastNodeCreationError ?? "Master worklet node creation returned null",
+      );
       return;
     }
 
-    this.softClipperWorklet = clip;
     this.saturationWorklet  = sat;
-    this.limiterWorklet     = lim;
 
     try {
-      // ── Rewire: glueComp -> softClipperWorklet -> saturationWorklet -> softClipper (identity) -> widener ──
+      // Rewire only the warmth stage. Tone's WaveShaper and Limiter remain in
+      // place so a worklet failure cannot remove clipping/ceiling protection.
       this.glueComp.disconnect(this.softClipper);
-      // Tone.ToneAudioNode.connect accepts raw AudioNodes via the underlying AudioNode.
-      const rawGlue = getOutputNode(this.glueComp);
-      const rawClip = getInputNode(this.softClipper);
+      try {
+        connectToneCompatible(this.glueComp, this.saturationWorklet);
+      } catch (error) {
+        throw new Error("glue-to-saturation routing failed", { cause: error });
+      }
+      try {
+        connectToneCompatible(this.saturationWorklet, this.softClipper);
+      } catch (error) {
+        throw new Error("saturation-to-soft-clip routing failed", { cause: error });
+      }
 
-      rawGlue.connect(this.softClipperWorklet);
-      this.softClipperWorklet.connect(this.saturationWorklet);
-      this.saturationWorklet.connect(rawClip);
-
-      // Set WaveShaper to identity so it becomes a pass-through.
-      this.softClipper.curve = makeIdentityCurve();
-
-      // ── Rewire: safetyComp -> limiterWorklet -> limiter ──
-      this.safetyComp.disconnect(this.limiter);
-      const rawSafety = getOutputNode(this.safetyComp);
-      const rawLim    = getInputNode(this.limiter);
-
-      rawSafety.connect(this.limiterWorklet);
-      this.limiterWorklet.connect(rawLim);
-
-      // Park Tone.Limiter at 0 dBFS so worklet limiter is the active gate.
-      this.limiter.threshold.value = 0;
+      this.softClipper.curve = this.settings.softClip
+        ? makeSoftClipCurve()
+        : makeIdentityCurve();
 
       this.workletsActive = true;
 
@@ -295,6 +289,15 @@ export class MasterChain {
     return this.meter;
   }
 
+  /** Attach/detach visual taps after master processing and limiting. */
+  connectPostMaster(destination: Tone.InputNode): void {
+    this.makeup.connect(destination);
+  }
+
+  disconnectPostMaster(destination: Tone.InputNode): void {
+    this.makeup.disconnect(destination);
+  }
+
   getLevels(): { peakDb: [number, number]; rmsDb: [number, number] } {
     const rms  = this.meter.getValue();
     const peak = this.peakMeter.getValue();
@@ -370,10 +373,10 @@ export class MasterChain {
       this.glueComp.ratio.rampTo(1, 0.01);
     }
 
-    // Soft clip — swap WaveShaper curve (only meaningful in Tone.js fallback mode;
-    // when workletsActive the WaveShaper is an identity pass-through and the
-    // worklet soft-clipper is toggled via its `enabled` AudioParam).
-    if (!this.workletsActive) {
+    // Soft clip remains owned by Tone unless a dedicated clipper worklet is
+    // installed. The bounded worklet graph currently reserves node capacity
+    // for metronome/sample timing and uses only the saturation stage.
+    if (!this.softClipperWorklet) {
       this.softClipper.curve = next.softClip
         ? makeSoftClipCurve()
         : makeIdentityCurve();
@@ -478,23 +481,6 @@ export class MasterChain {
       }
     }
   }
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/** Get the underlying native AudioNode output from a Tone.js node. */
-function getOutputNode(node: Tone.ToneAudioNode): AudioNode {
-  const any = node as unknown as { output?: AudioNode; context?: { rawContext?: AudioContext } };
-  if (any.output instanceof AudioNode) return any.output;
-  // Fallback: return the node's native input/output directly.
-  return node as unknown as AudioNode;
-}
-
-/** Get the underlying native AudioNode input from a Tone.js node. */
-function getInputNode(node: Tone.ToneAudioNode): AudioNode {
-  const any = node as unknown as { input?: AudioNode };
-  if (any.input instanceof AudioNode) return any.input;
-  return node as unknown as AudioNode;
 }
 
 function makeBusFx(id: SendBusId): Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay {

@@ -33,6 +33,8 @@ class MetronomeProcessor extends AudioWorkletProcessor {
         this._queue.sort((a, b) => a.time - b.time);
       } else if (d.type === 'clear') {
         this._queue = [];
+        this._samplesLeft = 0;
+        this._amp = 0;
       } else if (d.type === 'ping') {
         this.port.postMessage({ type: 'pong', sentAt: d.sentAt });
       }
@@ -43,21 +45,19 @@ class MetronomeProcessor extends AudioWorkletProcessor {
     const out = outputs[0];
     if (!out || !out[0]) return true;
     const ch0 = out[0];
-    const blockEnd = currentTime + ch0.length / sampleRate;
-
-    while (this._queue.length > 0 && this._queue[0].time <= blockEnd) {
-      const ev = this._queue.shift();
-      this._freq = ev.accent ? 1400 : 1000;
-      this._amp  = ev.accent ? 0.55 : 0.38;
-      this._phase = 0;
-      const durationSamples = Math.ceil(sampleRate * 0.055);
-      this._samplesLeft = durationSamples;
-      this._decay = Math.pow(0.001, 1 / durationSamples);
-    }
-
-    const omega = 2 * Math.PI * this._freq / sampleRate;
     for (let i = 0; i < ch0.length; i++) {
+      const sampleTime = currentTime + i / sampleRate;
+      while (this._queue.length > 0 && this._queue[0].time <= sampleTime) {
+        const ev = this._queue.shift();
+        this._freq = ev.accent ? 1400 : 1000;
+        this._amp  = ev.accent ? 0.55 : 0.38;
+        this._phase = 0;
+        const durationSamples = Math.ceil(sampleRate * 0.055);
+        this._samplesLeft = durationSamples;
+        this._decay = Math.pow(0.001, 1 / durationSamples);
+      }
       if (this._samplesLeft > 0) {
+        const omega = 2 * Math.PI * this._freq / sampleRate;
         const s = Math.sin(this._phase) * this._amp;
         ch0[i] = s;
         this._phase += omega;
@@ -381,6 +381,7 @@ class WorkletManager {
   private _registering   = false;
   private _fallback      = false;
   private _unavailableReason: string | null = null;
+  private _lastNodeCreationError: string | null = null;
   private _blobUrl: string | null = null;
 
   // CPU round-trip probe state
@@ -405,6 +406,10 @@ class WorkletManager {
 
   get unavailableReason(): string | null {
     return this._unavailableReason;
+  }
+
+  get lastNodeCreationError(): string | null {
+    return this._lastNodeCreationError;
   }
 
   /** True when the worklet module has been successfully registered. */
@@ -442,6 +447,10 @@ class WorkletManager {
       const blob = new Blob([PROCESSOR_CODE], { type: 'application/javascript' });
       const url  = URL.createObjectURL(blob);
       this._blobUrl = url;
+      // Register directly on the native context when available. Tone's
+      // Context caches a single addAudioWorkletModule promise for its own DSP
+      // bundle; calling that wrapper with our second module can resolve without
+      // ever registering these processor names.
       if (nativeContext && "audioWorklet" in nativeContext) {
         await nativeContext.audioWorklet.addModule(url);
       } else if (toneContext?.addAudioWorkletModule) {
@@ -472,15 +481,21 @@ class WorkletManager {
     try {
       const nativeContext = resolveNativeContext(context);
       if (nativeContext) {
-        return new AudioWorkletNode(nativeContext, PROCESSOR_NAMES[kind], options);
+        const node = new AudioWorkletNode(nativeContext, PROCESSOR_NAMES[kind], options);
+        this._lastNodeCreationError = null;
+        return node;
       }
       const toneContext = resolveToneWorkletContext(context);
       if (toneContext?.createAudioWorkletNode) {
-        return toneContext.createAudioWorkletNode(PROCESSOR_NAMES[kind], options);
+        const node = toneContext.createAudioWorkletNode(PROCESSOR_NAMES[kind], options);
+        this._lastNodeCreationError = null;
+        return node;
       }
       throw new TypeError("AudioWorkletNode requires a native or Tone worklet context");
     } catch (err) {
-      console.warn(`[WorkletManager] Failed to create ${kind} node:`, describeError(err), err);
+      const details = describeError(err);
+      this._lastNodeCreationError = `${kind}: ${details.name}: ${details.message}`;
+      console.warn(`[WorkletManager] Failed to create ${kind} node:`, details, err);
       return null;
     }
   }
@@ -528,7 +543,8 @@ class WorkletManager {
     }
     if (!this._registered || this._probeNode) return;
     try {
-      const node = new AudioWorkletNode(context, 'sn-metronome');
+      const node = this.createNode("metronome", context);
+      if (!node) return;
       // Do NOT connect to destination — we only use the message port.
       node.port.onmessage = (e) => {
         if (e.data?.type === 'pong' && this._pingPendingAt !== null) {

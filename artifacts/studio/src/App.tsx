@@ -1,3 +1,4 @@
+import "./lib/audio/toneContext";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
@@ -88,7 +89,7 @@ import { EffectsRack } from "./components/EffectsRack";
 import { TransportProvider, useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
 import { getChopEngine } from "./lib/audio/chopEngine";
-import { vocalRecorder, noteRecorder } from "./lib/audio/recorder";
+import { cancelAllRecorders, vocalRecorder, noteRecorder } from "./lib/audio/recorder";
 import { defaultProject, getStore, resetStore, useStore } from "./store";
 import {
   getLastProjectId,
@@ -222,6 +223,7 @@ function bootstrap() {
       for (const s of (project!.samples ?? [])) {
         if (s.blobKey && !s.blob) {
           missing.push({
+            kind: "library",
             sampleId: s.id,
             blobKey: s.blobKey,
             name: s.name,
@@ -232,9 +234,11 @@ function bootstrap() {
         for (const c of t.audioClips ?? []) {
           if (c.blobKey && !c.blob) {
             missing.push({
+              kind: "clip",
               sampleId: c.id,
               blobKey: c.blobKey,
               name: c.name ?? `Clip on ${t.name}`,
+              trackId: t.id,
               trackName: t.name,
             });
           }
@@ -365,6 +369,7 @@ export default function App() {
       <TooltipProvider delayDuration={250}>
         <StudioErrorBoundary
           onPanic={() => {
+            cancelAllRecorders();
             audio.panicStopAll();
             getStore().set((s) => ({
               transportScheduleRevision: s.transportScheduleRevision + 1,
@@ -535,6 +540,7 @@ function Studio() {
       if (key === "Escape") {
         // Esc is the documented "panic stop" — hard-cuts in-flight audio
         // and any stuck voices in addition to stopping the transport.
+        cancelAllRecorders();
         audio.panicStopAll();
         getStore().set((s) => ({
           transportScheduleRevision: s.transportScheduleRevision + 1,
@@ -733,13 +739,13 @@ function Studio() {
           case "track-volume": {
             if (e.type !== "cc") break;
             const v = e.data2 / 127;
-            store.patchTrack(m.target.trackId, { volume: v });
+            store.setTrackVolume(m.target.trackId, v);
             break;
           }
           case "track-pan": {
             if (e.type !== "cc") break;
             const v = (e.data2 / 127) * 2 - 1;
-            store.patchTrack(m.target.trackId, { pan: v });
+            store.setTrackPan(m.target.trackId, v);
             break;
           }
           case "track-send": {
@@ -1238,7 +1244,7 @@ function Studio() {
       getStore().state.project.tracks.forEach((t) => {
         if (t.kind === "vocals") audio.stopVocalMonitor(t.id);
       });
-      if (vocalRecorder.isActive()) vocalRecorder.stop();
+      cancelAllRecorders();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1508,14 +1514,6 @@ function Studio() {
               setMissingSamples([]);
               clearBootstrapResult("missingSamples");
             }}
-            onMuteTrack={(sampleId) => {
-              const tracks = getStore().state.project.tracks.map((t) => {
-                const hasMissing = t.audioClips.some((c) => c.id === sampleId);
-                if (hasMissing) return { ...t, muted: true };
-                return t;
-              });
-              getStore().patchProject({ tracks });
-            }}
           />
         )}
 
@@ -1649,6 +1647,7 @@ function PendingSampleHost() {
         blob={pending.blob}
         defaultName={pending.defaultName}
         recordedTrackId={pending.recordedTrackId}
+        recordedClipId={pending.recordedClipId}
         onClose={() => getStore().set({ pendingSample: null })}
       />
     </Suspense>

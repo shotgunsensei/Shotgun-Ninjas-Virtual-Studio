@@ -1,5 +1,10 @@
 import { openDB, type IDBPDatabase } from "idb";
-import type { ChopLabPersistedState, Project, SampleLibraryItem } from "../../types";
+import type {
+  ChopLabPersistedState,
+  Project,
+  SampleLibraryItem,
+  Track,
+} from "../../types";
 import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
 import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
 import { countPerf, timePerfAsync } from "../../utils/performanceDiagnostics";
@@ -59,6 +64,41 @@ export interface LastSavedInfo {
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 
+// Project persistence is intentionally process-wide and FIFO. Fingerprinting
+// blobs can finish out of order, so letting each caller enter IndexedDB as soon
+// as its hash resolves can make an older invocation overwrite a newer one.
+// Internal operations call the unqueued implementations below when they are
+// already inside this queue; queuing a public wrapper from a queued operation
+// would wait on itself forever.
+let persistenceWriteTail: Promise<void> = Promise.resolve();
+
+type PersistenceTestGate = (
+  operation: "save-project",
+  project: Project,
+) => void | Promise<void>;
+
+async function waitForPersistenceTestGate(project: Project): Promise<void> {
+  // The gate is compiled out of production builds. It gives the browser race
+  // tests a deterministic boundary without slowing IndexedDB or replacing
+  // native Blob/Worker APIs with timing-sensitive mocks.
+  if (!import.meta.env.DEV) return;
+  const gate = (
+    globalThis as typeof globalThis & {
+      __SN_TEST_PERSISTENCE_GATE__?: PersistenceTestGate;
+    }
+  ).__SN_TEST_PERSISTENCE_GATE__;
+  await gate?.("save-project", project);
+}
+
+function enqueuePersistenceWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const result = persistenceWriteTail.then(operation, operation);
+  persistenceWriteTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 // ── blob fingerprint cache ────────────────────────────────────────────────
 // Tracks which blob keys have already been written to IDB in this session
 // (key → "size:type:lastModified"). If the fingerprint has not changed
@@ -85,27 +125,26 @@ function getDb() {
   return dbPromise;
 }
 
+type BlobWriteKind = "sample" | "choplab" | "audio-clip";
+
+interface PendingBlobWrite {
+  key: string;
+  blob: Blob;
+  fingerprint: string;
+  kind: BlobWriteKind;
+}
+
 /**
- * Serialize a Project to the IDB-friendly shape and flush every blob
- * referenced by the project into the BLOBS_STORE under a stable key.
- * Used by both `saveProject` (writes the project record + meta) and
- * `saveDraft` (writes only the draft slot, keeping the durable record
- * untouched until the user actually saves).
+ * Serialize a Project and fingerprint its blobs before opening an IndexedDB
+ * transaction. Blob.arrayBuffer()/crypto work yields to another event-loop
+ * task; doing it inside a transaction lets browsers auto-commit that
+ * transaction before the first put, which made fresh sample saves fail.
  */
-async function serializeAndFlushBlobs(
-  project: Project,
-  tx: ReturnType<IDBPDatabase<Schema>["transaction"]>,
-): Promise<SerializedProject> {
-  // idb's typed transaction narrows objectStore(...) based on the
-  // store-name tuple it was created with; pulling the store out once
-  // (via a cast) avoids re-narrowing on every blob write.
-  const blobs = (
-    tx as unknown as {
-      objectStore: (name: string) => {
-        put: (value: Blob, key: string) => Promise<unknown>;
-      };
-    }
-  ).objectStore(BLOBS_STORE);
+async function serializeAndCollectBlobs(project: Project): Promise<{
+  serialized: SerializedProject;
+  blobWrites: PendingBlobWrite[];
+}> {
+  const blobWrites = new Map<string, PendingBlobWrite>();
   const serializedSamples = await Promise.all(
     (project.samples ?? []).map(async (s) => {
       if (s.blob) {
@@ -116,14 +155,12 @@ async function serializeAndFlushBlobs(
           { kind: "sample", bytes: sampleBlob.size },
         );
         if (blobFpCache.get(s.blobKey) !== fp) {
-          countPerf("sampleBlobWrites", 1, { kind: "sample", bytes: sampleBlob.size });
-          await timeSampleImport(
-            "indexeddb-blob-write",
-            () => blobs.put(sampleBlob, s.blobKey),
-            { kind: "sample", bytes: sampleBlob.size },
-          );
-          markSampleImport("sample-blob-written", { kind: "sample", bytes: sampleBlob.size });
-          blobFpCache.set(s.blobKey, fp);
+          blobWrites.set(s.blobKey, {
+            key: s.blobKey,
+            blob: sampleBlob,
+            fingerprint: fp,
+            kind: "sample",
+          });
         }
       }
       return {
@@ -148,14 +185,12 @@ async function serializeAndFlushBlobs(
         { kind: "choplab", bytes: sampleBlob.size },
       );
       if (blobFpCache.get(cl.sampleBlobKey) !== fp) {
-        countPerf("sampleBlobWrites", 1, { kind: "choplab", bytes: sampleBlob.size });
-        await timeSampleImport(
-          "indexeddb-blob-write",
-          () => blobs.put(sampleBlob, sampleBlobKey),
-          { kind: "choplab", bytes: sampleBlob.size },
-        );
-        markSampleImport("sample-blob-written", { kind: "choplab", bytes: sampleBlob.size });
-        blobFpCache.set(sampleBlobKey, fp);
+        blobWrites.set(sampleBlobKey, {
+          key: sampleBlobKey,
+          blob: sampleBlob,
+          fingerprint: fp,
+          kind: "choplab",
+        });
       }
     }
     // Strip the in-memory blob from the serialized form.
@@ -164,7 +199,7 @@ async function serializeAndFlushBlobs(
     serializedChopLab = clRest;
   }
 
-  return {
+  const serialized: SerializedProject = {
     ...project,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     updatedAt: Date.now(),
@@ -187,14 +222,12 @@ async function serializeAndFlushBlobs(
                 { kind: "audio-clip", bytes: clipBlob.size },
               );
               if (blobFpCache.get(blobKey) !== fp) {
-                countPerf("sampleBlobWrites", 1, { kind: "audio-clip", bytes: clipBlob.size });
-                await timeSampleImport(
-                  "indexeddb-blob-write",
-                  () => blobs.put(clipBlob, blobKey),
-                  { kind: "audio-clip", bytes: clipBlob.size },
-                );
-                markSampleImport("sample-blob-written", { kind: "audio-clip", bytes: clipBlob.size });
-                blobFpCache.set(blobKey, fp);
+                blobWrites.set(blobKey, {
+                  key: blobKey,
+                  blob: clipBlob,
+                  fingerprint: fp,
+                  kind: "audio-clip",
+                });
               }
             }
             const { blob: _blob, ...persistedClip } = c;
@@ -205,13 +238,49 @@ async function serializeAndFlushBlobs(
       })),
     ),
   };
+  return { serialized, blobWrites: Array.from(blobWrites.values()) };
 }
 
-export async function saveProject(project: Project): Promise<void> {
+async function flushBlobWrites(
+  tx: ReturnType<IDBPDatabase<Schema>["transaction"]>,
+  blobWrites: readonly PendingBlobWrite[],
+): Promise<void> {
+  // Queue every IDB request synchronously before awaiting. This keeps the
+  // transaction active while the browser services the writes.
+  const blobs = (
+    tx as unknown as {
+      objectStore: (name: string) => {
+        put: (value: Blob, key: string) => Promise<unknown>;
+      };
+    }
+  ).objectStore(BLOBS_STORE);
+  await Promise.all(
+    blobWrites.map((write) => {
+      countPerf("sampleBlobWrites", 1, {
+        kind: write.kind,
+        bytes: write.blob.size,
+      });
+      return timeSampleImport(
+        "indexeddb-blob-write",
+        () => blobs.put(write.blob, write.key),
+        { kind: write.kind, bytes: write.blob.size },
+      ).then(() => {
+        markSampleImport("sample-blob-written", {
+          kind: write.kind,
+          bytes: write.blob.size,
+        });
+      });
+    }),
+  );
+}
+
+async function saveProjectUnqueued(project: Project): Promise<void> {
+  await waitForPersistenceTestGate(project);
   return timePerfAsync("project-save", async () => {
     const db = await getDb();
+    const { serialized, blobWrites } = await serializeAndCollectBlobs(project);
     const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE, META_STORE], "readwrite");
-    const serialized = await serializeAndFlushBlobs(project, tx);
+    await flushBlobWrites(tx, blobWrites);
     await tx.objectStore(PROJECTS_STORE).put(serialized, project.id);
     await tx
       .objectStore(META_STORE)
@@ -228,10 +297,17 @@ export async function saveProject(project: Project): Promise<void> {
       await tx.objectStore(META_STORE).delete(META_DRAFT);
     }
     await tx.done;
+    for (const write of blobWrites) {
+      blobFpCache.set(write.key, write.fingerprint);
+    }
   }, {
     tracks: project.tracks.length,
     samples: project.samples?.length ?? 0,
   });
+}
+
+export function saveProject(project: Project): Promise<void> {
+  return enqueuePersistenceWrite(() => saveProjectUnqueued(project));
 }
 
 export async function loadProject(id: string): Promise<Project | null> {
@@ -341,11 +417,12 @@ export async function getLastSavedInfo(): Promise<LastSavedInfo | null> {
  * carries its own timestamp so recovery can decide whether it's newer
  * than the last saved version.
  */
-export async function saveDraft(project: Project): Promise<void> {
+async function saveDraftUnqueued(project: Project): Promise<void> {
   return timePerfAsync("autosave", async () => {
     const db = await getDb();
+    const { serialized, blobWrites } = await serializeAndCollectBlobs(project);
     const tx = db.transaction([BLOBS_STORE, META_STORE], "readwrite");
-    const serialized = await serializeAndFlushBlobs(project, tx);
+    await flushBlobWrites(tx, blobWrites);
     const snapshot: DraftSnapshot = {
       project: serialized,
       ts: Date.now(),
@@ -353,10 +430,17 @@ export async function saveDraft(project: Project): Promise<void> {
     };
     await tx.objectStore(META_STORE).put(snapshot, META_DRAFT);
     await tx.done;
+    for (const write of blobWrites) {
+      blobFpCache.set(write.key, write.fingerprint);
+    }
   }, {
     tracks: project.tracks.length,
     samples: project.samples?.length ?? 0,
   });
+}
+
+export function saveDraft(project: Project): Promise<void> {
+  return enqueuePersistenceWrite(() => saveDraftUnqueued(project));
 }
 
 /** Preserve the current source before replacing it with another project. */
@@ -390,7 +474,7 @@ export async function hydrateDraft(snap: DraftSnapshot): Promise<Project> {
  * user-supplied file. The new blob is written to IDB under the
  * sample's existing blobKey so the next load resolves it cleanly.
  */
-export async function relocateSampleBlob(
+async function relocateSampleBlobUnqueued(
   blobKey: string,
   blob: Blob,
 ): Promise<void> {
@@ -398,12 +482,33 @@ export async function relocateSampleBlob(
   await db.put(BLOBS_STORE, blob, blobKey);
 }
 
+export function relocateSampleBlob(
+  blobKey: string,
+  blob: Blob,
+): Promise<void> {
+  return enqueuePersistenceWrite(() => relocateSampleBlobUnqueued(blobKey, blob));
+}
+
 /**
  * Deep-clone a project under a new id and name so the user can branch
  * a session ("Save As" / "Duplicate"). Blobs are re-keyed and copied so
  * deleting the original doesn't strand the new project.
  */
-export async function duplicateProject(
+function remapPadSampleKeys(
+  padSamples: Track["padSamples"],
+  sampleKeyMap: ReadonlyMap<string, string>,
+): Track["padSamples"] {
+  if (!padSamples) return undefined;
+  return Object.fromEntries(
+    Object.entries(padSamples).flatMap(([piece, sourceKey]) => {
+      if (!sourceKey) return [];
+      const destinationKey = sampleKeyMap.get(sourceKey);
+      return destinationKey ? [[piece, destinationKey]] : [];
+    }),
+  ) as Track["padSamples"];
+}
+
+async function duplicateProjectUnqueued(
   source: Project,
   newName: string,
 ): Promise<Project> {
@@ -412,38 +517,44 @@ export async function duplicateProject(
     .toString(36)
     .slice(2, 8)}`;
 
-  const tx = db.transaction([BLOBS_STORE], "readwrite");
+  const samplePlans = (source.samples ?? []).map((sample) => ({
+    source: sample,
+    destinationKey: `${newId}:sample:${sample.id}`,
+  }));
+  const sampleKeyMap = new Map(
+    samplePlans.map(({ source: sample, destinationKey }) => [
+      sample.blobKey,
+      destinationKey,
+    ]),
+  );
+
   const tracks = await Promise.all(
     source.tracks.map(async (t) => ({
       ...t,
+      padSamples: remapPadSampleKeys(t.padSamples, sampleKeyMap),
       audioClips: await Promise.all(
         t.audioClips.map(async (c) => {
           let blob = c.blob;
           if (!blob && c.blobKey) {
-            blob = (await tx.objectStore(BLOBS_STORE).get(c.blobKey)) as
+            blob = (await db.get(BLOBS_STORE, c.blobKey)) as
               | Blob
               | undefined;
           }
           const newKey = `${newId}:${t.id}:${c.id}`;
-          if (blob) {
-            await tx.objectStore(BLOBS_STORE).put(blob, newKey);
-          }
-          return { ...c, blob, blobKey: blob ? newKey : undefined };
+          return { ...c, blob, blobKey: newKey };
         }),
       ),
     })),
   );
   const samples = await Promise.all(
-    (source.samples ?? []).map(async (s) => {
+    samplePlans.map(async ({ source: s, destinationKey }) => {
       let blob = s.blob;
       if (!blob && s.blobKey) {
-        blob = (await tx.objectStore(BLOBS_STORE).get(s.blobKey)) as
+        blob = (await db.get(BLOBS_STORE, s.blobKey)) as
           | Blob
           | undefined;
       }
-      const newKey = `${newId}:sample:${s.id}`;
-      if (blob) await tx.objectStore(BLOBS_STORE).put(blob, newKey);
-      return { ...s, blob, blobKey: newKey };
+      return { ...s, blob, blobKey: destinationKey };
     }),
   );
   // Copy the ChopLab sample blob under the new project's key.
@@ -451,21 +562,18 @@ export async function duplicateProject(
   if (source.chopLab) {
     let sampleBlob = source.chopLab.sampleBlob;
     if (!sampleBlob && source.chopLab.sampleBlobKey) {
-      sampleBlob = (await tx.objectStore(BLOBS_STORE).get(
+      sampleBlob = (await db.get(
+        BLOBS_STORE,
         source.chopLab.sampleBlobKey,
       )) as Blob | undefined;
     }
     const newChopKey = `${newId}:choplab:sample`;
-    if (sampleBlob) {
-      await tx.objectStore(BLOBS_STORE).put(sampleBlob, newChopKey);
-    }
     dupChopLab = {
       ...source.chopLab,
-      sampleBlobKey: sampleBlob ? newChopKey : source.chopLab.sampleBlobKey,
+      sampleBlobKey: newChopKey,
       sampleBlob,
     };
   }
-  await tx.done;
 
   const dup: Project = {
     ...source,
@@ -477,8 +585,15 @@ export async function duplicateProject(
     updatedAt: Date.now(),
     schemaVersion: CURRENT_SCHEMA_VERSION,
   };
-  await saveProject(dup);
+  await saveProjectUnqueued(dup);
   return dup;
+}
+
+export function duplicateProject(
+  source: Project,
+  newName: string,
+): Promise<Project> {
+  return enqueuePersistenceWrite(() => duplicateProjectUnqueued(source, newName));
 }
 
 // ---------- JSON export / import ----------
@@ -762,28 +877,38 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
     .toString(36)
     .slice(2, 8)}`;
   const p = data.project;
+  const samplePlans = (p.samples ?? []).map((sample) => ({
+    source: sample,
+    destinationKey: `${newId}:sample:${sample.id}`,
+  }));
+  const sampleKeyMap = new Map(
+    samplePlans.map(({ source: sample, destinationKey }) => [
+      sample.blobKey,
+      destinationKey,
+    ]),
+  );
   const tracks = p.tracks.map((t) => ({
     ...t,
+    padSamples: remapPadSampleKeys(t.padSamples, sampleKeyMap),
     audioClips: t.audioClips.map((c) => {
       const blob =
         hydrateBlobs && c.base64 && c.mimeType
           ? base64ToBlob(c.base64, c.mimeType)
           : undefined;
-      const blobKey = blob ? `${newId}:${t.id}:${c.id}` : undefined;
+      const blobKey = `${newId}:${t.id}:${c.id}`;
       const { base64: _b, mimeType: _m, ...rest } = c;
       void _b;
       void _m;
       return { ...rest, blob, blobKey };
     }),
   }));
-  const samples = (p.samples ?? []).map((s) => {
+  const samples = samplePlans.map(({ source: s, destinationKey }) => {
     const blob =
       hydrateBlobs && s.base64 && s.mimeType ? base64ToBlob(s.base64, s.mimeType) : undefined;
-    const blobKey = blob ? `${newId}:sample:${s.id}` : undefined;
     const { base64: _b, mimeType: _m, ...rest } = s;
     void _b;
     void _m;
-    return { ...rest, blob, blobKey } as SampleLibraryItem;
+    return { ...rest, blob, blobKey: destinationKey } as SampleLibraryItem;
   });
   let chopLab: ChopLabPersistedState | undefined;
   if (p.chopLab) {
@@ -791,7 +916,7 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
       hydrateBlobs && p.chopLab.base64 && p.chopLab.mimeType
         ? base64ToBlob(p.chopLab.base64, p.chopLab.mimeType)
         : undefined;
-    const sampleBlobKey = sampleBlob ? `${newId}:choplab` : undefined;
+    const sampleBlobKey = `${newId}:choplab`;
     const { base64: _base64, mimeType: _mimeType, ...persisted } = p.chopLab;
     void _base64;
     void _mimeType;

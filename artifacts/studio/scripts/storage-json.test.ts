@@ -52,6 +52,23 @@ function projectFixture(): Project {
         ],
         fx: { reverb: 0, delay: 0, filter: 1 },
       },
+      {
+        id: "drum-track",
+        name: "Drums",
+        kind: "drums",
+        preset: "acoustic",
+        volume: 0.8,
+        pan: 0,
+        muted: false,
+        solo: false,
+        armed: false,
+        noteClips: [],
+        audioClips: [],
+        padSamples: {
+          kick: "json-fixture:sample:sample-one",
+        },
+        fx: { reverb: 0, delay: 0, filter: 1 },
+      },
     ],
     samples: [
       {
@@ -85,11 +102,15 @@ test("portable JSON preserves clip metadata and all three audio blob classes", a
   assert.equal(await clip.blob?.text(), "clip-audio");
   assert.match(clip.blobKey ?? "", /:vocal-track:clip-one$/);
   assert.equal(await imported.samples?.[0].blob?.text(), "library-audio");
+  assert.equal(
+    imported.tracks[1].padSamples?.kick,
+    imported.samples?.[0].blobKey,
+  );
   assert.equal(await imported.chopLab?.sampleBlob?.text(), "chop-audio");
   assert.match(imported.chopLab?.sampleBlobKey ?? "", /:choplab$/);
 });
 
-test("project-only import reports every non-portable reference and drops stale keys", async () => {
+test("project-only import reports missing audio and retains destination-owned relink keys", async () => {
   const json = await projectToJson(projectFixture(), "project-only");
   const summary = summarizeProjectJson(json);
   const imported = parseProjectJson(json);
@@ -100,7 +121,18 @@ test("project-only import reports every non-portable reference and drops stale k
     "Voice clip",
   ]);
   assert.equal(imported.tracks[0].audioClips[0].blob, undefined);
-  assert.equal(imported.tracks[0].audioClips[0].blobKey, undefined);
-  assert.equal(imported.samples?.[0].blobKey, undefined);
-  assert.equal(imported.chopLab?.sampleBlobKey, undefined);
+  assert.match(
+    imported.tracks[0].audioClips[0].blobKey ?? "",
+    /:vocal-track:clip-one$/,
+  );
+  assert.match(imported.samples?.[0].blobKey ?? "", /:sample:sample-one$/);
+  assert.equal(
+    imported.tracks[1].padSamples?.kick,
+    imported.samples?.[0].blobKey,
+  );
+  assert.match(imported.chopLab?.sampleBlobKey ?? "", /:choplab$/);
+  assert.notEqual(
+    imported.samples?.[0].blobKey,
+    "json-fixture:sample:sample-one",
+  );
 });

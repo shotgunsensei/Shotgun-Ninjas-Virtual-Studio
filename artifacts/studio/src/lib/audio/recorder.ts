@@ -20,9 +20,26 @@ class NoteRecorder {
   private pending = new Map<string, PendingNote>();
 
   start(trackId: string, atBeat: number) {
+    if (this.active) return false;
     this.active = true;
     this.trackId = trackId;
     this.clipStartBeat = atBeat;
+    this.events = [];
+    this.pending.clear();
+    return true;
+  }
+
+  isActive(): boolean {
+    return this.active;
+  }
+
+  getTrackId(): string | null {
+    return this.trackId;
+  }
+
+  cancel(): void {
+    this.active = false;
+    this.trackId = null;
     this.events = [];
     this.pending.clear();
   }
@@ -92,62 +109,172 @@ export const noteRecorder = new NoteRecorder();
  * Vocal recorder. Wraps Tone.UserMedia output through MediaRecorder so we get
  * a Blob the user can play back from the timeline.
  */
+type VocalRecordingResult = {
+  blob: Blob;
+  durationSec: number;
+  startBeat: number;
+};
+
 class VocalRecorder {
   private rec: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private startBeat = 0;
   private startTime = 0;
   private stream: MediaStream | null = null;
+  private trackId: string | null = null;
+  private starting = false;
+  private generation = 0;
+  private stopPromise: Promise<VocalRecordingResult | null> | null = null;
+  private stopResolver: ((result: VocalRecordingResult | null) => void) | null = null;
 
-  async start(deviceId: string | undefined, atBeat: number): Promise<void> {
+  async start(trackId: string, deviceId: string | undefined, atBeat: number): Promise<void> {
+    if (this.starting || this.rec || this.stopPromise) {
+      throw new Error("A vocal recording is already active.");
+    }
+    const generation = ++this.generation;
+    this.starting = true;
+    this.trackId = trackId;
     this.startBeat = atBeat;
-    this.chunks = [];
+    const chunks: Blob[] = [];
     const constraints: MediaStreamConstraints = {
       audio: deviceId
         ? { deviceId: { exact: deviceId } }
         : true,
     };
-    this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-    const mime =
-      MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "";
-    this.rec = mime
-      ? new MediaRecorder(this.stream, { mimeType: mime })
-      : new MediaRecorder(this.stream);
-    this.rec.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) this.chunks.push(e.data);
-    };
-    this.startTime = Tone.now();
-    this.rec.start();
+    let stream: MediaStream | null = null;
+    let recorder: MediaRecorder | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (generation !== this.generation) {
+        throw new DOMException("Vocal recording start was cancelled.", "AbortError");
+      }
+      const mime =
+        MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : MediaRecorder.isTypeSupported("audio/webm")
+            ? "audio/webm"
+            : "";
+      recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.start();
+      if (generation !== this.generation) {
+        throw new DOMException("Vocal recording start was cancelled.", "AbortError");
+      }
+      this.stream = stream;
+      this.rec = recorder;
+      this.chunks = chunks;
+      this.startTime = Tone.now();
+    } catch (error) {
+      if (recorder?.state === "recording") {
+        try { recorder.stop(); } catch { /* ignore */ }
+      }
+      stream?.getTracks().forEach((track) => track.stop());
+      if (generation === this.generation) {
+        this.trackId = null;
+        this.chunks = [];
+      }
+      throw error;
+    } finally {
+      if (generation === this.generation) this.starting = false;
+    }
   }
 
   isActive() {
     return this.rec?.state === "recording";
   }
 
-  async stop(): Promise<{ blob: Blob; durationSec: number; startBeat: number } | null> {
-    if (!this.rec) return null;
+  isBusy() {
+    return this.starting || this.rec !== null;
+  }
+
+  getTrackId(): string | null {
+    return this.trackId;
+  }
+
+  async stop(): Promise<VocalRecordingResult | null> {
+    // Stop is an idempotent ownership boundary. Desktop/mobile controls,
+    // project replacement, and keyboard shortcuts can converge here within
+    // the same event turn; every caller must await the same finalization.
+    if (this.stopPromise) return this.stopPromise;
+    this.generation += 1;
+    this.starting = false;
+    if (!this.rec) {
+      this.stream?.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+      this.trackId = null;
+      return null;
+    }
     const rec = this.rec;
-    return new Promise((resolve) => {
-      rec.onstop = () => {
-        const blob = new Blob(this.chunks, { type: rec.mimeType || "audio/webm" });
-        const dur = Tone.now() - this.startTime;
-        this.stream?.getTracks().forEach((t) => t.stop());
-        this.stream = null;
-        this.rec = null;
-        this.chunks = [];
-        resolve({ blob, durationSec: Math.max(0.1, dur), startBeat: this.startBeat });
-      };
-      try {
-        rec.stop();
-      } catch {
-        resolve(null);
-      }
+    const stream = this.stream;
+    const chunks = this.chunks;
+    const startBeat = this.startBeat;
+    const startTime = this.startTime;
+    let resolveStop!: (result: VocalRecordingResult | null) => void;
+    const stopPromise = new Promise<VocalRecordingResult | null>((resolve) => {
+      resolveStop = resolve;
     });
+    this.stopPromise = stopPromise;
+    this.stopResolver = resolveStop;
+    let finished = false;
+    const finish = (result: VocalRecordingResult | null) => {
+        if (finished) return;
+        finished = true;
+        stream?.getTracks().forEach((track) => track.stop());
+        if (this.rec === rec) this.rec = null;
+        if (this.stream === stream) this.stream = null;
+        this.trackId = null;
+        this.chunks = [];
+        const resolver = this.stopResolver;
+        this.stopResolver = null;
+        if (this.stopPromise === stopPromise) this.stopPromise = null;
+        resolver?.(result);
+    };
+    rec.onstop = () => {
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+      const dur = Tone.now() - startTime;
+      finish({ blob, durationSec: Math.max(0.1, dur), startBeat });
+    };
+    try {
+      rec.stop();
+    } catch {
+      finish(null);
+    }
+    return stopPromise;
+  }
+
+  cancel(): void {
+    this.generation += 1;
+    this.starting = false;
+    const rec = this.rec;
+    if (rec) {
+      rec.ondataavailable = null;
+      rec.onstop = null;
+      try {
+        if (rec.state !== "inactive") rec.stop();
+      } catch {
+        // best-effort recorder cancellation
+      }
+    }
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.rec = null;
+    this.stream = null;
+    this.trackId = null;
+    this.chunks = [];
+    const resolver = this.stopResolver;
+    this.stopResolver = null;
+    this.stopPromise = null;
+    resolver?.(null);
   }
 }
 
 export const vocalRecorder = new VocalRecorder();
+
+/** Synchronous replacement/Panic barrier for every recorder-owned resource. */
+export function cancelAllRecorders(): void {
+  noteRecorder.cancel();
+  vocalRecorder.cancel();
+}

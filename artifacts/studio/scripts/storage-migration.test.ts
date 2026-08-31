@@ -67,6 +67,31 @@ test("v5 migration preserves sound-pack, performance, and Chop Lab state", () =>
   assert.equal(result.project.chopLab?.sampleBlob, sampleBlob);
 });
 
+test("v6 migration preserves drum-pad sample-library assignments", () => {
+  const input = legacyProject({
+    schemaVersion: 5,
+    tracks: [
+      {
+        ...legacyProject().tracks[0],
+        kind: "drums",
+        preset: "trap",
+        padSamples: {
+          kick: "project:sample:kick",
+          snare: "project:sample:snare",
+        },
+      },
+    ],
+  });
+
+  const result = migrateProject(input);
+
+  assert.deepEqual(result.project.tracks[0]?.padSamples, {
+    kick: "project:sample:kick",
+    snare: "project:sample:snare",
+  });
+  assert.equal(result.toVersion, CURRENT_SCHEMA_VERSION);
+});
+
 test("migration rejects invalid and future schema versions without downgrading", () => {
   assert.throws(
     () => migrateProject(legacyProject({ schemaVersion: 0 })),

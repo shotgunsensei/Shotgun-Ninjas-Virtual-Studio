@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { useStore, getStore } from "../store";
 import type { ClipHistoryEntry } from "../store";
 import { audio } from "../lib/audio/engine";
-import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
+import { cancelAllRecorders } from "../lib/audio/recorder";
 import { useTransport } from "../hooks/useTransport";
 import { MidiLearnButton } from "./MidiLearnButton";
 import { Tip } from "./Tip";
@@ -95,22 +95,13 @@ export function TransportBar() {
         <Button
           size="icon"
           variant="outline"
-          onClick={async () => {
+          onClick={() => {
             // Tear down any in-flight recording before silencing the
             // engine so the mic stream / recorder state can't linger.
             const timers = getStore().state.countInTimers;
             if (timers.interval !== null) window.clearInterval(timers.interval);
             if (timers.timeout !== null) window.clearTimeout(timers.timeout);
-            try {
-              if (vocalRecorder.isActive()) await vocalRecorder.stop();
-            } catch {
-              // ignore
-            }
-            try {
-              noteRecorder.stop();
-            } catch {
-              // ignore
-            }
+            cancelAllRecorders();
             audio.panicStopAll();
             getStore().set((s) => ({
               transportScheduleRevision: s.transportScheduleRevision + 1,

@@ -7,8 +7,7 @@ import {
   type PackCategory,
   type SoundPack,
 } from "../lib/audio/sounds/soundLibrary";
-import { DRUM_KITS } from "../lib/audio/sounds/kits";
-import { buildKit } from "../lib/audio/sounds/kits";
+import { createLeanDrumVoice } from "../lib/audio/leanDrumVoice";
 import {
   buildPresetVoice,
   findPreset,
@@ -27,9 +26,9 @@ const ALL_CATEGORY = "All" as const;
 type FilterCategory = typeof ALL_CATEGORY | PackCategory;
 
 /* ── Preview engine ──────────────────────────────────────────
-   Builds a temporary kit and optional melodic voice routed through the
-   studio master chain, fires all hits using absolute audio-clock scheduling,
-   and disposes everything after the pattern completes.
+   Builds one bounded native drum voice and an optional melodic voice routed
+   through the studio master chain, fires all hits using absolute audio-clock
+   scheduling, and disposes everything after the pattern completes.
    Never touches the project's track state.
 ──────────────────────────────────────────────────────────── */
 
@@ -41,24 +40,68 @@ async function startPreview(
   pack: SoundPack,
   bpm: number,
   onStop: () => void,
-): Promise<PreviewHandle> {
+  shouldContinue: () => boolean,
+): Promise<PreviewHandle | null> {
   await audio.unlock();
+  if (!shouldContinue()) return null;
 
-  const kitDef = DRUM_KITS[pack.kitId];
-  const channel = new Tone.Channel({ volume: -3 });
-  audio.connectToMaster(channel);
-  const reverb = new Tone.Freeverb({ roomSize: 0.4, dampening: 3000, wet: 0.15 });
-  reverb.connect(channel);
-  const kitVoice = buildKit(kitDef, channel, reverb, null);
   const preset = findPreset(pack.presetId);
-  const melodicVoice = preset && pack.demoMelody?.length
-    ? (await tryLoadMelodicSampler(preset.layers, {
+  let melodicVoice: ReturnType<typeof buildPresetVoice> | null = null;
+  if (preset && pack.demoMelody?.length) {
+    try {
+      melodicVoice = (await tryLoadMelodicSampler(preset.layers, {
         attack: Math.max(0, preset.synth.attack * 0.4),
         release: Math.max(0.15, preset.synth.release * 2),
         volume: -9,
-      })) ?? buildPresetVoice(preset)
-    : null;
-  melodicVoice?.connect(channel);
+        shouldContinue,
+      })) ?? null;
+    } catch {
+      // Local factory-sample decode is enrichment; the modeled voice remains
+      // an immediate and deterministic fallback.
+    }
+    if (!shouldContinue()) {
+      try { melodicVoice?.dispose(); } catch { /* best effort */ }
+      return null;
+    }
+    melodicVoice ??= buildPresetVoice(preset);
+  }
+
+  let channel: Tone.Channel | null = null;
+  let drumVoice: ReturnType<typeof createLeanDrumVoice> | null = null;
+  try {
+    channel = new Tone.Channel({ volume: -3 });
+    audio.connectToMaster(channel);
+    const previewTrack: Track = {
+      id: makeId(),
+      name: `${pack.name} Preview Drums`,
+      kind: "drums",
+      preset: "trap",
+      volume: 0.82,
+      pan: 0,
+      muted: false,
+      solo: false,
+      armed: false,
+      noteClips: [],
+      audioClips: [],
+      fx: { reverb: 0, delay: 0, filter: 1 },
+      kitId: pack.kitId,
+    };
+    drumVoice = createLeanDrumVoice(previewTrack, channel);
+    if (!drumVoice.isReady()) throw new Error("Preview drum route is unavailable.");
+    melodicVoice?.connect(channel);
+  } catch (error) {
+    try { melodicVoice?.dispose(); } catch { /* best effort */ }
+    try { drumVoice?.dispose(); } catch { /* best effort */ }
+    try { channel?.dispose(); } catch { /* best effort */ }
+    throw error;
+  }
+
+  if (!shouldContinue()) {
+    try { melodicVoice?.dispose(); } catch { /* best effort */ }
+    try { drumVoice.dispose(); } catch { /* best effort */ }
+    try { channel.dispose(); } catch { /* best effort */ }
+    return null;
+  }
 
   const stepSec = 60 / bpm / 4; // 1/16 note duration in seconds
   const bars = 2;
@@ -73,14 +116,12 @@ async function startPreview(
     for (const piece of pieces) {
       const grid = pack.demoPattern[piece];
       if (!grid || !grid[patStep]) continue;
-      const pv = kitVoice.pieces.get(piece);
-      if (!pv) continue;
       const t = startTime + step * stepSec;
       try {
         // Tone/Web Audio schedules against its own clock; queuing the hit now
         // avoids one main-thread timeout per drum event and remains stable if
         // React is busy while the preview is playing.
-        pv.trigger(t, 0.8);
+        drumVoice.trigger(piece, t, 0.8);
       } catch {
         /* ignore a single preview hit */
       }
@@ -110,9 +151,8 @@ async function startPreview(
 
   const disposePreview = () => {
     try { melodicVoice?.dispose(); } catch { /* ignore */ }
-    try { kitVoice.dispose(); } catch { /* ignore */ }
+    try { drumVoice.dispose(); } catch { /* ignore */ }
     try { channel.dispose(); } catch { /* ignore */ }
-    try { reverb.dispose(); } catch { /* ignore */ }
   };
 
   const totalMs = steps * stepSec * 1000 + 2000;
@@ -183,12 +223,18 @@ export function SoundLibraryPanel() {
     setPreviewingId(pack.id);
     const bpm = pack.demoBpm ?? project.bpm ?? 120;
     try {
-      const handle = await startPreview(pack, bpm, () => {
-        if (previewGenerationRef.current === generation) {
-          setPreviewingId(null);
-          previewRef.current = null;
-        }
-      });
+      const handle = await startPreview(
+        pack,
+        bpm,
+        () => {
+          if (previewGenerationRef.current === generation) {
+            setPreviewingId(null);
+            previewRef.current = null;
+          }
+        },
+        () => previewGenerationRef.current === generation,
+      );
+      if (!handle) return;
       if (previewGenerationRef.current !== generation) {
         handle.stop();
         return;
@@ -201,6 +247,9 @@ export function SoundLibraryPanel() {
 
   const handleLoadPack = (pack: SoundPack) => {
     stopPreview();
+    const protectsCurrentPlayback = ["starting", "playing", "paused"].includes(
+      audio.getPlaybackState(),
+    );
 
     const tracks = project.tracks;
     const drumTrack = tracks.find((t) => t.kind === "drums");
@@ -216,7 +265,12 @@ export function SoundLibraryPanel() {
       getStore().applyMelodicPreset(melodicTrack.id, pack.presetId);
     }
     getStore().patchProject({ soundPackId: pack.id });
-    getStore().setStatus(`Pack loaded: ${pack.name}`, "info");
+    getStore().setStatus(
+      protectsCurrentPlayback
+        ? `${pack.name} switched without interrupting playback. Any optional sampled-instrument enrichment finishes after Stop.`
+        : `Pack loaded: ${pack.name}`,
+      "info",
+    );
   };
 
   const handleStartSketch = (pack: SoundPack) => {
@@ -292,6 +346,7 @@ export function SoundLibraryPanel() {
     // create voices while audio is locked. Reconcile only voices that already
     // exist so a Pack A -> Pack B sketch switch cannot keep playing Pack A.
     try {
+      audio.releaseChopKitForTrack(sketch.drum.track.id);
       audio.setKit(sketch.drum.track.id, pack.kitId);
       if (sketch.melodic && pack.presetId) {
         audio.setMelodicPreset(sketch.melodic.track.id, pack.presetId);
@@ -439,6 +494,9 @@ export function SoundLibraryPanel() {
       const restored = tracks.find((track) => track.id === receipt.trackId);
       if (restored) {
         try {
+          if (restored.kind === "drums") {
+            audio.releaseChopKitForTrack(restored.id);
+          }
           audio.changePreset(restored);
         } catch {
           // The restored project snapshot is authoritative and will retry on
@@ -543,6 +601,7 @@ function PackCard({
 }: PackCardProps) {
   return (
     <div
+      data-testid={`sound-pack-${pack.id}`}
       className={`rounded border transition-colors ${
         isActive
           ? "border-primary/70 bg-primary/10"
@@ -611,6 +670,7 @@ function PackCard({
         <button
           type="button"
           onClick={onPreview}
+          data-testid={`preview-sound-pack-${pack.id}`}
           className={`flex-1 py-1 rounded font-mono text-[9px] uppercase tracking-widest transition-colors ${
             isPreviewing
               ? "bg-primary/25 text-primary border border-primary/50"
@@ -623,6 +683,7 @@ function PackCard({
           type="button"
           onClick={onLoad}
           disabled={isActive}
+          data-testid={`load-sound-pack-${pack.id}`}
           className={`flex-1 py-1 rounded font-mono text-[9px] uppercase tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             isActive
               ? "bg-primary/20 text-primary border border-primary/40"

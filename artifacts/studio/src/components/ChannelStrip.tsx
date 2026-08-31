@@ -219,18 +219,12 @@ const ChannelStrip = memo(function ChannelStrip({
 
       <Select
         value={track.preset}
-        onValueChange={(v) => {
-          getStore().patchTrack(track.id, { preset: v as AnyPreset });
-          requestAnimationFrame(() => {
-            const t = getStore().state.project.tracks.find((x) => x.id === track.id);
-            if (t) {
-              audio.ensureTrack(t);
-              audio.changePreset(t);
-            }
-          });
-        }}
+        onValueChange={(v) => getStore().applyLegacyPreset(track.id, v as AnyPreset)}
       >
-        <SelectTrigger className="h-6 text-[10px] bg-background">
+        <SelectTrigger
+          className="h-6 text-[10px] bg-background"
+          data-testid={`legacy-preset-${track.id}`}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -249,7 +243,7 @@ const ChannelStrip = memo(function ChannelStrip({
           value={[track.volume * 100]}
           max={100}
           step={1}
-          onValueChange={([v]) => getStore().patchTrack(track.id, { volume: (v ?? 0) / 100 })}
+          onValueChange={([v]) => getStore().setTrackVolume(track.id, (v ?? 0) / 100)}
           onMouseDown={(e) => {
             if (e.shiftKey) audio.setParamOverride(track.id, "volume", true);
           }}
@@ -267,7 +261,7 @@ const ChannelStrip = memo(function ChannelStrip({
           value={[(track.pan + 1) * 50]}
           max={100}
           step={1}
-          onValueChange={([v]) => getStore().patchTrack(track.id, { pan: ((v ?? 50) / 50) - 1 })}
+          onValueChange={([v]) => getStore().setTrackPan(track.id, ((v ?? 50) / 50) - 1)}
           onMouseDown={(e) => {
             if (e.shiftKey) audio.setParamOverride(track.id, "pan", true);
           }}

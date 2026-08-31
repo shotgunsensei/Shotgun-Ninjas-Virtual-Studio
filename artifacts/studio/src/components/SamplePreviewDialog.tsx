@@ -40,14 +40,110 @@ import {
   formatBytes,
   isLargeSample,
 } from "../lib/storage/performanceGuards";
+import { audio } from "../lib/audio/engine";
+import {
+  assignDrumPadSampleKey,
+  isDrumPadSamplePiece,
+} from "../lib/audio/drumPadSamples";
+import type { AudioClip, DrumPadSamplePiece, Track } from "../types";
 
 type Assign =
   | { kind: "none" }
   | { kind: "track"; trackId: string }
   | { kind: "new-track" }
-  | { kind: "pad"; trackId: string; pad: string };
+  | { kind: "pad"; trackId: string; pad: DrumPadSamplePiece };
 
 const LIGHTWEIGHT_WAVEFORM_BYTES = 2 * 1024 * 1024;
+const QUICK_ASSIGN_PAD_PIECES = ["kick", "snare", "clap", "hat"] as const satisfies readonly DrumPadSamplePiece[];
+
+interface SampleCommitReceipt {
+  projectId: string;
+  projectLoadRevision: number;
+  sampleId: string;
+  createdTrackId?: string;
+  createdClip?: { trackId: string; clipId: string };
+  padAssignment?: {
+    trackId: string;
+    piece: DrumPadSamplePiece;
+    appliedBlobKey: string;
+    previousBlobKey?: string;
+  };
+  recordedClip?: {
+    trackId: string;
+    clipId: string;
+    previous: AudioClip;
+    appliedBlob: Blob;
+  };
+}
+
+function rollbackSampleCommit(receipt: SampleCommitReceipt): void {
+  const store = getStore();
+  if (
+    store.state.project.id !== receipt.projectId ||
+    store.state.projectLoadRevision !== receipt.projectLoadRevision
+  ) return;
+
+  const current = store.state.project;
+  let tracks = current.tracks;
+  if (receipt.createdTrackId) {
+    tracks = tracks.filter((track) => track.id !== receipt.createdTrackId);
+  }
+  if (receipt.createdClip) {
+    tracks = tracks.map((track) =>
+      track.id === receipt.createdClip!.trackId
+        ? {
+            ...track,
+            audioClips: track.audioClips.filter(
+              (clip) => clip.id !== receipt.createdClip!.clipId,
+            ),
+          }
+        : track,
+    );
+  }
+  if (receipt.padAssignment) {
+    const assignment = receipt.padAssignment;
+    tracks = tracks.map((track) => {
+      if (
+        track.id !== assignment.trackId ||
+        track.padSamples?.[assignment.piece] !== assignment.appliedBlobKey
+      ) return track;
+      const padSamples: NonNullable<Track["padSamples"]> = { ...(track.padSamples ?? {}) };
+      if (assignment.previousBlobKey) {
+        padSamples[assignment.piece] = assignment.previousBlobKey;
+      } else {
+        delete padSamples[assignment.piece];
+      }
+      return { ...track, padSamples };
+    });
+  }
+  if (receipt.recordedClip) {
+    const recorded = receipt.recordedClip;
+    tracks = tracks.map((track) => {
+      if (track.id !== recorded.trackId) return track;
+      return {
+        ...track,
+        audioClips: track.audioClips.map((clip) =>
+          clip.id === recorded.clipId && clip.blob === recorded.appliedBlob
+            ? {
+                ...clip,
+                blob: recorded.previous.blob,
+                blobKey: recorded.previous.blobKey,
+                durationSec: recorded.previous.durationSec,
+                sourceDurationSec: recorded.previous.sourceDurationSec,
+                offsetSec: recorded.previous.offsetSec,
+                reversed: recorded.previous.reversed,
+              }
+            : clip,
+        ),
+      };
+    });
+  }
+
+  store.patchProject({
+    samples: (current.samples ?? []).filter((sample) => sample.id !== receipt.sampleId),
+    tracks,
+  });
+}
 
 export interface SamplePreviewProps {
   open: boolean;
@@ -55,6 +151,9 @@ export interface SamplePreviewProps {
   defaultName: string;
   /** If set, the dialog will not show edit controls (used for post-record quick-review). */
   recordedTrackId?: string;
+  /** Exact timeline clip created for a just-recorded take. Saved edits replace
+   * this clip's media instead of silently creating an unrelated library copy. */
+  recordedClipId?: string;
   onClose: () => void;
 }
 
@@ -62,14 +161,16 @@ export function SamplePreviewDialog({
   open,
   blob,
   defaultName,
-  recordedTrackId: _recordedTrackId,
+  recordedTrackId,
+  recordedClipId,
   onClose,
 }: SamplePreviewProps) {
-  void _recordedTrackId;
   const project = useStore((s) => s.project);
+  const panicRevision = useStore((s) => s.panicRevision);
   const [waveformHost, setWaveformHost] = useState<HTMLDivElement | null>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const regionRef = useRef<Region | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [wsFailed, setWsFailed] = useState(false);
   const [duration, setDuration] = useState(0);
   const [region, setRegion] = useState<{ start: number; end: number }>({
@@ -89,9 +190,70 @@ export function SamplePreviewDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [decodeState, setDecodeState] = useState<"decoding" | "ready" | "error">("decoding");
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [fallbackCanvas, setFallbackCanvas] = useState<HTMLCanvasElement | null>(null);
   const importTokenRef = useRef(0);
+
+  // The waveform renderer is visual; this dedicated media element is the
+  // authoritative audible preview and works for both small and large files.
+  const audiblePreviewBlob = previewBlob ?? blob;
+  useEffect(() => {
+    const player = previewAudioRef.current;
+    if (!open || !audiblePreviewBlob) {
+      player?.pause();
+      setPreviewUrl(null);
+      setIsPreviewPlaying(false);
+      return;
+    }
+    const url = URL.createObjectURL(audiblePreviewBlob);
+    setPreviewUrl(url);
+    setIsPreviewPlaying(false);
+    return () => {
+      player?.pause();
+      URL.revokeObjectURL(url);
+    };
+  }, [audiblePreviewBlob, open]);
+
+  useEffect(() => {
+    previewAudioRef.current?.pause();
+    setIsPreviewPlaying(false);
+  }, [panicRevision]);
+
+  const stopPreview = () => {
+    const player = previewAudioRef.current;
+    if (!player) return;
+    player.pause();
+    setIsPreviewPlaying(false);
+  };
+
+  const togglePreview = async () => {
+    const player = previewAudioRef.current;
+    if (!player || !previewUrl) return;
+    if (!player.paused) {
+      stopPreview();
+      return;
+    }
+    if (
+      region.end > region.start &&
+      (player.currentTime < region.start || player.currentTime >= region.end)
+    ) {
+      player.currentTime = region.start;
+    }
+    try {
+      await player.play();
+    } catch (err) {
+      setError(`Sample preview unavailable: ${(err as Error).message}`);
+      setIsPreviewPlaying(false);
+    }
+  };
+
+  const closeDialog = () => {
+    stopPreview();
+    onClose();
+  };
 
   // (Re)mount wavesurfer when the dialog opens with a new blob.
   useEffect(() => {
@@ -102,6 +264,9 @@ export function SamplePreviewDialog({
     setReverse(false);
     setFadeIn(0);
     setFadeOut(0);
+    setDuration(0);
+    setRegion({ start: 0, end: 0 });
+    setDecodeState("decoding");
     setError(null);
     setWarning(null);
     try {
@@ -112,6 +277,7 @@ export function SamplePreviewDialog({
         );
       }
     } catch (err) {
+      setDecodeState("error");
       setError((err as Error).message);
       return;
     }
@@ -159,6 +325,7 @@ export function SamplePreviewDialog({
         const d = ws!.getDuration();
         setDuration(d);
         setRegion({ start: 0, end: d });
+        setDecodeState("ready");
         const r = regionsPlugin!.addRegion({
           start: 0,
           end: d,
@@ -213,6 +380,7 @@ export function SamplePreviewDialog({
   // decoded AudioBuffer so the user can still see + assign the import.
   useEffect(() => {
     if (!wsFailed || !blob || !fallbackCanvas) return;
+    setDecodeState("decoding");
     markSampleImport("fallback-waveform:start", { bytes: blob.size, type: blob.type });
     let cancelled = false;
     const token = ++importTokenRef.current;
@@ -235,6 +403,7 @@ export function SamplePreviewDialog({
         });
         setDuration(buf.duration);
         setRegion({ start: 0, end: buf.duration });
+        setDecodeState("ready");
         const cv = fallbackCanvas;
         const ctx = cv.getContext("2d");
         if (!ctx) return;
@@ -269,6 +438,7 @@ export function SamplePreviewDialog({
           bytes: blob.size,
           error: (err as Error).message,
         });
+        setDecodeState("error");
         setError((err as Error).message);
       } finally {
         endTiming();
@@ -283,13 +453,24 @@ export function SamplePreviewDialog({
 
   const onTrimSilence = async () => {
     if (!blob) return;
+    const token = importTokenRef.current;
+    const store = getStore();
+    const projectId = store.state.project.id;
+    const projectLoadRevision = store.state.projectLoadRevision;
+    stopPreview();
     setBusy(true);
     setError(null);
     try {
       const buf = await decodeBlob(blob);
+      if (
+        token !== importTokenRef.current ||
+        store.state.project.id !== projectId ||
+        store.state.projectLoadRevision !== projectLoadRevision
+      ) return;
       const trimmed = trimSilenceBuffer(buf);
       const newBlob = audioBufferToWavBlob(trimmed);
       setPreviewBlob(newBlob);
+      setDecodeState("ready");
       // Re-render wavesurfer with the trimmed blob
       if (wsRef.current) {
         const url = URL.createObjectURL(newBlob);
@@ -308,6 +489,18 @@ export function SamplePreviewDialog({
   const commit = async () => {
     const source = previewBlob ?? blob;
     if (!source) return;
+    if (decodeState !== "ready") {
+      setError("Wait for audio validation to finish before saving or assigning this sample.");
+      return;
+    }
+    const store = getStore();
+    const projectId = store.state.project.id;
+    const projectLoadRevision = store.state.projectLoadRevision;
+    const isCurrentProject = () =>
+      store.state.project.id === projectId &&
+      store.state.projectLoadRevision === projectLoadRevision;
+    let receipt: SampleCommitReceipt | null = null;
+    let stateMutated = false;
     markSampleImport("commit:start", {
       bytes: source.size,
       edited: source !== blob,
@@ -340,10 +533,37 @@ export function SamplePreviewDialog({
         : null;
       const edited = editedResult?.blob ?? source;
       const sampleDuration = editedResult?.buffer.duration ?? duration;
+      if (!isCurrentProject()) return;
+      if (!Number.isFinite(sampleDuration) || sampleDuration <= 0) {
+        throw new Error("The selected file did not decode into playable audio.");
+      }
 
-      const store = getStore();
+      const baseProject = store.state.project;
+      const previousSamples = baseProject.samples ?? [];
+      const previousTracks = baseProject.tracks;
+      const assignedTrack =
+        assign.kind === "track" || assign.kind === "pad"
+          ? previousTracks.find((track) => track.id === assign.trackId)
+          : undefined;
+      if (assign.kind === "track" && assignedTrack?.kind !== "vocals") {
+        throw new Error("The selected audio track is no longer available.");
+      }
+      if (assign.kind === "pad" && assignedTrack?.kind !== "drums") {
+        throw new Error("The selected drum pad is no longer available.");
+      }
+      const recordedTrack =
+        recordedTrackId && recordedClipId
+          ? previousTracks.find((track) => track.id === recordedTrackId)
+          : undefined;
+      const previousRecordedClip = recordedTrack?.audioClips.find(
+        (clip) => clip.id === recordedClipId,
+      );
+      if (recordedClipId && (!recordedTrack || !previousRecordedClip)) {
+        throw new Error("The recorded take is no longer available on this project.");
+      }
+
       const sampleId = makeId();
-      const blobKey = `${store.state.project.id}:sample:${sampleId}`;
+      const blobKey = `${baseProject.id}:sample:${sampleId}`;
       const sample = {
         id: sampleId,
         name: name.trim() || defaultName,
@@ -352,65 +572,153 @@ export function SamplePreviewDialog({
         createdAt: Date.now(),
         blob: edited,
       };
-      const samples = [...(store.state.project.samples ?? []), sample];
+      const samples = [...previousSamples, sample];
+      let tracks: Track[] = previousTracks;
+      receipt = { projectId, projectLoadRevision, sampleId };
+
+      // A recorded review owns the exact timeline clip created by Stop. Edits
+      // replace that clip's media; the new sample entry is the reusable copy.
+      if (recordedTrack && previousRecordedClip && recordedClipId) {
+        tracks = tracks.map((track) =>
+          track.id === recordedTrack.id
+            ? {
+                ...track,
+                audioClips: track.audioClips.map((clip) =>
+                  clip.id === recordedClipId
+                    ? {
+                        ...clip,
+                        blob: edited,
+                        durationSec: sampleDuration,
+                        sourceDurationSec: sampleDuration,
+                        offsetSec: 0,
+                        reversed: reverse ? false : clip.reversed,
+                      }
+                    : clip,
+                ),
+              }
+            : track,
+        );
+        receipt.recordedClip = {
+          trackId: recordedTrack.id,
+          clipId: recordedClipId,
+          previous: previousRecordedClip,
+          appliedBlob: edited,
+        };
+      }
+
+      // Apply any explicit secondary assignment in the same project mutation.
+      if (assign.kind === "track") {
+        const clipId = makeId();
+        const assignedClip: AudioClip = {
+          id: clipId,
+          start: 0,
+          durationSec: sampleDuration,
+          sourceDurationSec: sampleDuration,
+          blob: edited,
+          blobKey: `${baseProject.id}:${assign.trackId}:${clipId}`,
+        };
+        tracks = tracks.map((track) =>
+          track.id === assign.trackId
+            ? { ...track, audioClips: [...track.audioClips, assignedClip] }
+            : track,
+        );
+        receipt.createdClip = { trackId: assign.trackId, clipId };
+      } else if (assign.kind === "new-track") {
+        const t = makeTrack("vocals", sample.name.slice(0, 16) || "Audio", "clean");
+        t.armed = false;
+        const clipId = makeId();
+        t.audioClips = [{
+          id: clipId,
+          start: 0,
+          durationSec: sampleDuration,
+          sourceDurationSec: sampleDuration,
+          blob: edited,
+          blobKey: `${baseProject.id}:${t.id}:${clipId}`,
+        }];
+        tracks = [...tracks, t];
+        receipt.createdTrackId = t.id;
+      } else if (assign.kind === "pad") {
+        if (!assignedTrack) {
+          throw new Error("The selected drum pad is no longer available.");
+        }
+        tracks = tracks.map((track) =>
+          track.id === assign.trackId
+            ? {
+                ...track,
+                padSamples: assignDrumPadSampleKey(track, assign.pad, blobKey),
+              }
+            : track,
+        );
+        receipt.padAssignment = {
+          trackId: assign.trackId,
+          piece: assign.pad,
+          appliedBlobKey: blobKey,
+          previousBlobKey: assignedTrack.padSamples?.[assign.pad],
+        };
+      }
+
+      if (!isCurrentProject()) return;
       const stateStart = performance.now();
-      store.patchProject({ samples });
+      store.patchProject({ samples, tracks });
+      stateMutated = true;
       measureSampleImport("ui-state:update-project", stateStart, {
         samples: samples.length,
         bytes: edited.size,
       });
 
-      // Apply assignment
-      if (assign.kind === "track") {
-        store.addAudioClip(assign.trackId, {
-          id: makeId(),
-          start: 0,
-          durationSec: sampleDuration,
-          blob: edited,
-        });
-      } else if (assign.kind === "new-track") {
-        const t = makeTrack("vocals", sample.name.slice(0, 16) || "Audio", "clean");
-        t.armed = false;
-        const next = [...store.state.project.tracks, t];
-        store.patchProject({ tracks: next });
-        store.addAudioClip(t.id, {
-          id: makeId(),
-          start: 0,
-          durationSec: sampleDuration,
-          blob: edited,
-        });
-      } else if (assign.kind === "pad") {
-        // Lightweight pad sample override stored on the track for later
-        // engine wiring; for now still saves into the sample library so
-        // the user can drag it onto a track manually.
-        const padOverrides =
-          (
-            store.state.project.tracks.find((t) => t.id === assign.trackId) as
-              | (typeof store.state.project.tracks[number] & {
-                  padSamples?: Record<string, string>;
-                })
-              | undefined
-          )?.padSamples ?? {};
-        store.patchTrack(assign.trackId, {
-          ...(store.state.project.tracks.find((t) => t.id === assign.trackId) ?? {}),
-          padSamples: { ...padOverrides, [assign.pad]: blobKey },
-        } as Partial<(typeof store.state.project.tracks)[number]>);
-      }
-
       // Persist immediately so a reload picks up the new sample/blob.
       try {
+        const projectToSave = store.state.project;
         await timeSampleImport(
           "project-save",
-          () => saveProject(getStore().state.project),
+          () => saveProject(projectToSave),
           { samples: samples.length, bytes: edited.size },
         );
-      } catch {
-        // best-effort
+      } catch (saveError) {
+        if (stateMutated && receipt && isCurrentProject()) {
+          rollbackSampleCommit(receipt);
+        }
+        throw new Error(
+          `Sample could not be saved: ${(saveError as Error).message}`,
+        );
       }
-      store.setStatus(`Saved sample “${sample.name}”`, "info");
+      if (!isCurrentProject()) return;
+
+      const currentProject = store.state.project;
+      const padStillAssigned = receipt.padAssignment
+        ? currentProject.tracks.find((track) => track.id === receipt!.padAssignment!.trackId)
+            ?.padSamples?.[receipt.padAssignment.piece] === receipt.padAssignment.appliedBlobKey
+        : false;
+      if (receipt.padAssignment && padStillAssigned) {
+        // Chop and per-pad assignment share a trigger path. The durable pad
+        // save is now authoritative, so only now relinquish Chop ownership.
+        audio.releaseChopKitForTrack(receipt.padAssignment.trackId);
+      }
+      const recordedTakeUpdated = receipt.recordedClip
+        ? currentProject.tracks
+            .find((track) => track.id === receipt!.recordedClip!.trackId)
+            ?.audioClips.some(
+              (clip) =>
+                clip.id === receipt!.recordedClip!.clipId &&
+                clip.blob === receipt!.recordedClip!.appliedBlob,
+            ) ?? false
+        : false;
+      const assignmentStatus =
+        assign.kind === "pad" && padStillAssigned
+          ? ` and assigned it to ${assignedTrack!.name} ${assign.pad}`
+          : assign.kind === "track"
+            ? ` and placed it on ${assignedTrack!.name}`
+            : assign.kind === "new-track"
+              ? " on a new audio track"
+              : " to the sample library";
+      const recordedStatus = recordedTakeUpdated
+        ? ` and updated the recorded take on ${recordedTrack!.name}`
+        : "";
+      store.setStatus(`Saved sample “${sample.name}”${assignmentStatus}${recordedStatus}`, "info");
       markSampleImport("commit:end", { bytes: edited.size, assign: assign.kind });
-      onClose();
+      closeDialog();
     } catch (err) {
+      if (!isCurrentProject()) return;
       markSampleImport("commit:error", {
         bytes: source.size,
         error: (err as Error).message,
@@ -428,14 +736,16 @@ export function SamplePreviewDialog({
     <Dialog
       open={open}
       onOpenChange={(o) => {
-        if (!o && !busy) onClose();
+        if (!o && !busy) closeDialog();
       }}
     >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Import sample</DialogTitle>
+          <DialogTitle>{recordedClipId ? "Review recorded take" : "Import sample"}</DialogTitle>
           <DialogDescription>
-            Preview, edit and assign the sample to a track or pad.
+            {recordedClipId
+              ? "Preview and edit this take. Saving updates its timeline clip and also keeps a reusable library copy."
+              : "Preview, edit and assign the sample to a track or pad."}
           </DialogDescription>
         </DialogHeader>
 
@@ -470,6 +780,52 @@ export function SamplePreviewDialog({
               className="panel-inset rounded p-2 min-h-[112px]"
             />
           )}
+
+          <div className="flex items-center gap-3">
+            <audio
+              ref={previewAudioRef}
+              src={previewUrl ?? undefined}
+              preload="metadata"
+              className="hidden"
+              data-testid="sample-preview-audio"
+              onPlay={() => setIsPreviewPlaying(true)}
+              onPause={() => setIsPreviewPlaying(false)}
+              onEnded={() => setIsPreviewPlaying(false)}
+              onLoadedMetadata={(event) => {
+                const mediaDuration = event.currentTarget.duration;
+                if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return;
+                setDuration((current) => current || mediaDuration);
+                setRegion((current) =>
+                  current.end > current.start
+                    ? current
+                    : { start: 0, end: mediaDuration },
+                );
+              }}
+              onTimeUpdate={(event) => {
+                const player = event.currentTarget;
+                if (region.end <= region.start || player.currentTime < region.end) return;
+                player.pause();
+                player.currentTime = region.start;
+              }}
+              onError={() => {
+                setIsPreviewPlaying(false);
+                setError("This browser could not play the selected sample format.");
+              }}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void togglePreview()}
+              disabled={busy || !previewUrl}
+              data-testid="sample-preview-toggle"
+            >
+              {isPreviewPlaying ? "Stop preview" : "Play preview"}
+            </Button>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              Plays the selected trim region
+            </span>
+          </div>
 
           {duration > 0 && (
             <div className="grid grid-cols-2 gap-3">
@@ -556,6 +912,7 @@ export function SamplePreviewDialog({
               Assign to
             </div>
             <Select
+              disabled={busy || decodeState !== "ready"}
               value={
                 assign.kind === "none"
                   ? "library"
@@ -572,7 +929,11 @@ export function SamplePreviewDialog({
                   setAssign({ kind: "track", trackId: v.slice(6) });
                 else if (v.startsWith("pad:")) {
                   const [, tid, pad] = v.split(":");
-                  setAssign({ kind: "pad", trackId: tid, pad });
+                  if (tid && pad && isDrumPadSamplePiece(pad)) {
+                    setAssign({ kind: "pad", trackId: tid, pad });
+                  } else {
+                    setError("That drum-pad assignment is not available.");
+                  }
                 }
               }}
             >
@@ -588,7 +949,7 @@ export function SamplePreviewDialog({
                   </SelectItem>
                 ))}
                 {drumTracks.flatMap((t) =>
-                  ["kick", "snare", "clap", "hat"].map((p) => (
+                  QUICK_ASSIGN_PAD_PIECES.map((p) => (
                     <SelectItem
                       key={`${t.id}:${p}`}
                       value={`pad:${t.id}:${p}`}
@@ -607,13 +968,21 @@ export function SamplePreviewDialog({
           {warning && !error && (
             <p className="text-xs text-amber-300 font-mono">{warning}</p>
           )}
+          {decodeState === "decoding" && !error && (
+            <p className="text-xs text-muted-foreground font-mono" data-testid="sample-decode-status">
+              Validating audio… Save and assignment unlock after decoding succeeds.
+            </p>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={onClose} disabled={busy}>
+            <Button variant="outline" onClick={closeDialog} disabled={busy}>
               Cancel
             </Button>
-            <Button onClick={commit} disabled={busy || !blob}>
-              {busy ? "Saving…" : "Save sample"}
+            <Button
+              onClick={commit}
+              disabled={busy || !blob || decodeState !== "ready"}
+            >
+              {busy ? "Saving…" : recordedClipId ? "Save take & sample" : "Save sample"}
             </Button>
           </div>
         </div>

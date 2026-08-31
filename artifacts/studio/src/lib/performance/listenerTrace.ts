@@ -46,6 +46,8 @@ declare global {
 const STORAGE_KEY = "sn:listenerTrace";
 let cachedEnabled: boolean | null = null;
 const records = new Map<number, ListenerRecord>();
+const stackBySignature = new Map<string, string>();
+const MAX_STACK_SIGNATURES = 256;
 let nextId = 1;
 let installed = false;
 const NULL_LISTENER = {};
@@ -96,6 +98,10 @@ function now(): number {
 
 function captureOption(options?: boolean | AddEventListenerOptions): boolean {
   return typeof options === "boolean" ? options : !!options?.capture;
+}
+
+function removesAutomatically(options?: boolean | AddEventListenerOptions): boolean {
+  return typeof options === "object" && !!(options.once || options.signal);
 }
 
 function listenerObject(listener: EventListenerOrEventListenerObject | null): object {
@@ -161,10 +167,16 @@ function targetLabel(target: EventTarget): string {
 function addRecord(record: Omit<ListenerRecord, "id" | "addedAt" | "stack"> & { stack?: string }): number {
   if (!isEnabled()) return 0;
   const id = nextId++;
+  const signature = `${record.source}|${record.label}|${record.type ?? ""}`;
+  let stack = record.stack ?? stackBySignature.get(signature);
+  if (stack === undefined) {
+    stack = stackBySignature.size < MAX_STACK_SIGNATURES ? stackTrace() : "";
+    stackBySignature.set(signature, stack);
+  }
   records.set(id, {
     id,
     addedAt: now(),
-    stack: record.stack ?? stackTrace(),
+    stack,
     ...record,
   });
   return id;
@@ -284,6 +296,7 @@ function api(): ListenerTraceApi {
     dumpTopStacks: (limit = 20) => summarizeStacks(limit),
     clear: () => {
       records.clear();
+      stackBySignature.clear();
       domRecordIds = new WeakMap();
     },
     start: startListenerTrace,
@@ -312,12 +325,20 @@ export function startListenerTrace(): void {
     listener: EventListenerOrEventListenerObject | null,
     options?: boolean | AddEventListenerOptions,
   ): void {
+    // `once` and AbortSignal listeners remove themselves inside the browser;
+    // that native removal does not call the public removeEventListener method.
+    // Excluding them avoids false "active" leaks and unbounded completed-audio
+    // records while still tracing every persistent subscription.
+    if (removesAutomatically(options)) {
+      return originals!.addEventListener.call(this, type, listener, options);
+    }
     const capture = captureOption(options);
+    const target = targetLabel(this);
     const id = addRecord({
       source: "dom",
-      label: `${targetLabel(this)}:${type}`,
+      label: `${target}:${type}`,
       type,
-      target: targetLabel(this),
+      target,
       detail: { capture },
     });
     trackDomRecord(this, type, listener, capture, id);
@@ -343,6 +364,7 @@ export function uninstallListenerTrace(): void {
   EventTarget.prototype.addEventListener = originals.addEventListener;
   EventTarget.prototype.removeEventListener = originals.removeEventListener;
   records.clear();
+  stackBySignature.clear();
   domRecordIds = new WeakMap();
   installed = false;
   originals = null;

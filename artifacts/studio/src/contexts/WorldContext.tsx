@@ -137,19 +137,17 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
               worldId,
               ctx,
               AMBIENT_VOLUME,
-              audio.getMasterNativeInput(),
+              audio.getMasterContextInput(),
             );
           } catch {
             // Non-critical
           }
         };
-        if (ctx.state === "suspended") {
-          ctx.resume().then(doStart).catch(() => {
-            // Audio not unlocked yet — will start on next interaction
-          });
-        } else {
-          doStart();
-        }
+        // Use the engine authority so a suspended context and Panic's held
+        // master attenuation are both recovered before ambience starts.
+        audio.unlock().then(doStart).catch(() => {
+          // Audio not unlocked yet — will start on next interaction
+        });
       } catch {
         // Non-critical
       }
@@ -245,7 +243,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
       }
       try {
         const ctx = getAudioCtx();
-        const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();
+        const resume = audio.unlock();
         resume
           .then(() => {
             if (!ambientEnabledRef.current || _prefersReducedAudio()) {
@@ -259,7 +257,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
               worldId: id,
               contextState: ctx.state,
             });
-            playWorldWelcome(world, ctx, audio.getMasterNativeInput());
+            playWorldWelcome(world, ctx, audio.getMasterContextInput());
             // Start ambient after a short delay (let welcome cue breathe)
             ambientStartTimerRef.current = setTimeout(() => {
               ambientStartTimerRef.current = null;
@@ -280,7 +278,7 @@ export function WorldProvider({ children }: { children: React.ReactNode }) {
                   id,
                   audioCtx,
                   AMBIENT_VOLUME,
-                  audio.getMasterNativeInput(),
+                  audio.getMasterContextInput(),
                 );
               } catch {
                 // Non-critical

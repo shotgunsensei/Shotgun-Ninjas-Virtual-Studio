@@ -28,6 +28,8 @@ export interface FirstPlayFlags {
   useMinimalAudioGraph: boolean;
   disableWorldAudio: boolean;
   disableAnalyzers: boolean;
+  disableKitPromotion: boolean;
+  disableSamplePromotion: boolean;
   leanDrumValidation: boolean;
 }
 
@@ -68,6 +70,8 @@ export function getFirstPlayFlags(): FirstPlayFlags {
     useMinimalAudioGraph: has("snUseMinimalAudioGraph"),
     disableWorldAudio: has("snDisableWorldAudio"),
     disableAnalyzers: has("snDisableAnalyzers"),
+    disableKitPromotion: has("snDisableKitPromotion"),
+    disableSamplePromotion: has("snDisableSamplePromotion"),
     leanDrumValidation: has("snLeanDrumValidation"),
   };
   return cachedFlags;

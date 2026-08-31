@@ -1,14 +1,5 @@
 type AudioTraceMap = Record<string, number>;
 
-interface AudioTraceRecord {
-  id: number;
-  kind: string;
-  type: string;
-  stack: string;
-  addedAt: number;
-  detail?: Record<string, unknown>;
-}
-
 interface AudioNodeTraceSnapshot {
   enabled: boolean;
   installed: boolean;
@@ -36,6 +27,11 @@ interface AudioNodeTraceSnapshot {
   leanOneShotSourcesEnded: number;
   leanOneShotSourcesDisconnected: number;
   leanOneShotSourcesActive: number;
+  eventsRecorded: number;
+  distinctStacks: number;
+  detailedEventsRecorded: number;
+  droppedDetailEvents: number;
+  saturated: boolean;
   violations: Array<{ message: string; detail?: Record<string, unknown>; stack: string }>;
   suspectedLeaks: Array<{ label: string; count: number; stack: string }>;
   topStacks: Array<{ label: string; count: number; stack: string }>;
@@ -43,6 +39,7 @@ interface AudioNodeTraceSnapshot {
 
 interface AudioNodeTraceApi {
   snapshot: () => AudioNodeTraceSnapshot;
+  stats: () => { eventsRecorded: number; distinctStacks: number };
   dumpTopStacks: (limit?: number) => AudioNodeTraceSnapshot["topStacks"];
   clear: () => void;
   start: () => void;
@@ -58,6 +55,8 @@ declare global {
 
 const STORAGE_KEY = "sn:audioNodeTrace";
 let cachedEnabled: boolean | null = null;
+let cachedVerboseEnabled: boolean | null = null;
+const MAX_DETAILED_EVENTS = 2_000;
 
 let installed = false;
 let nextId = 1;
@@ -86,9 +85,16 @@ const toneCreates: AudioTraceMap = {};
 const toneDisposes: AudioTraceMap = {};
 const toneActive: AudioTraceMap = {};
 const leanCounters: AudioTraceMap = {};
-const records = new Map<number, AudioTraceRecord>();
+const stackAggregates = new Map<
+  string,
+  { label: string; count: number; stack: string }
+>();
+let eventsRecorded = 0;
+let detailedEventsRecorded = 0;
+let droppedDetailEvents = 0;
 const nodeIds = new WeakMap<object, number>();
 const nodeTypes = new WeakMap<object, string>();
+const scheduledSourceEndListenerInstalled = new WeakSet<object>();
 const activeWorkletNodes = new Set<number>();
 const activeConstantSourceNodes = new Set<number>();
 const activeSourceNodes = new Set<number>();
@@ -116,8 +122,16 @@ function isEnabled(): boolean {
   }
 }
 
-function now(): number {
-  return typeof performance !== "undefined" ? Math.round(performance.now()) : Date.now();
+function isVerboseEnabled(): boolean {
+  if (cachedVerboseEnabled !== null) return cachedVerboseEnabled;
+  if (typeof window === "undefined") return false;
+  try {
+    cachedVerboseEnabled =
+      new URLSearchParams(window.location.search).get("snAudioNodeTraceVerbose") === "1";
+  } catch {
+    cachedVerboseEnabled = false;
+  }
+  return cachedVerboseEnabled;
 }
 
 function stackTrace(): string {
@@ -149,17 +163,24 @@ function idForNode(node: object, type: string): number {
   return id;
 }
 
-function record(kind: string, type: string, detail?: Record<string, unknown>): void {
+function record(kind: string, type: string, _detail?: Record<string, unknown>): void {
   if (!isEnabled()) return;
-  const id = nextId++;
-  records.set(id, {
-    id,
-    kind,
-    type,
-    stack: stackTrace(),
-    addedAt: now(),
-    detail,
-  });
+  eventsRecorded += 1;
+  if (detailedEventsRecorded >= MAX_DETAILED_EVENTS) {
+    droppedDetailEvents += 1;
+    return;
+  }
+  detailedEventsRecorded += 1;
+  const label = `${kind}:${type}`;
+  const aggregate = stackAggregates.get(label);
+  if (aggregate) aggregate.count += 1;
+  else {
+    // Capturing Error().stack for every AudioNode connect/start/stop can
+    // starve the main thread while a project graph is being realized. One
+    // representative call site per event label preserves actionable leak
+    // attribution while every event still contributes to its exact count.
+    stackAggregates.set(label, { label, stack: stackTrace(), count: 1 });
+  }
 }
 
 function recordNodeCreate(node: object, type: string): void {
@@ -167,16 +188,22 @@ function recordNodeCreate(node: object, type: string): void {
   const id = idForNode(node, type);
   inc(nodeCreates, type);
   if (type === "AudioWorkletNode") activeWorkletNodes.add(id);
-  if (type === "ConstantSourceNode") activeConstantSourceNodes.add(id);
   if (type === "AnalyserNode") activeAnalyzers.add(id);
-  if (
-    type === "AudioBufferSourceNode" ||
-    type === "OscillatorNode" ||
-    type === "ConstantSourceNode"
-  ) {
-    activeSourceNodes.add(id);
-  }
   record("node-create", type);
+}
+
+function recordNodeStarted(node: AudioScheduledSourceNode, type: string): void {
+  const id = idForNode(node, type);
+  activeSourceNodes.add(id);
+  if (type === "ConstantSourceNode") activeConstantSourceNodes.add(id);
+  if (scheduledSourceEndListenerInstalled.has(node)) return;
+  scheduledSourceEndListenerInstalled.add(node);
+  const onEnded = () => recordNodeInactive(node);
+  // Bypass the optional verbose EventTarget wrapper: this private once-listener
+  // is lifetime instrumentation, not an application listener, and should not
+  // appear as a listener leak after the browser removes it automatically.
+  const nativeAddEventListener = originals?.addEventListener ?? EventTarget.prototype.addEventListener;
+  nativeAddEventListener.call(node, "ended", onEnded, { once: true });
 }
 
 function recordNodeInactive(node: object): void {
@@ -215,15 +242,9 @@ function isAudioTraceTarget(target: EventTarget): boolean {
 }
 
 function summarizeStacks(limit = 20): AudioNodeTraceSnapshot["topStacks"] {
-  const grouped = new Map<string, { label: string; count: number; stack: string }>();
-  for (const r of records.values()) {
-    const label = `${r.kind}:${r.type}`;
-    const key = `${label}|${r.stack}`;
-    const current = grouped.get(key);
-    if (current) current.count += 1;
-    else grouped.set(key, { label, stack: r.stack, count: 1 });
-  }
-  return Array.from(grouped.values()).sort((a, b) => b.count - a.count).slice(0, limit);
+  return Array.from(stackAggregates.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
 }
 
 function activeTone(kind: string): number {
@@ -259,6 +280,11 @@ export function getAudioNodeTraceSnapshot(): AudioNodeTraceSnapshot {
     leanOneShotSourcesEnded: leanCounters.leanOneShotSourcesEnded ?? 0,
     leanOneShotSourcesDisconnected: leanCounters.leanOneShotSourcesDisconnected ?? 0,
     leanOneShotSourcesActive: leanCounters.leanOneShotSourcesActive ?? 0,
+    eventsRecorded,
+    distinctStacks: stackAggregates.size,
+    detailedEventsRecorded,
+    droppedDetailEvents,
+    saturated: droppedDetailEvents > 0,
     violations: violations.slice(-50),
     suspectedLeaks: topStacks.filter((entry) => entry.count > 5),
     topStacks,
@@ -284,12 +310,15 @@ export function trackToneDispose(kind: string, label?: string): void {
 export function recordLeanDrumTrace(
   event:
     | "voice-created"
+    | "voice-create-failed"
     | "voice-disposed"
     | "hit-scheduled"
     | "hit-triggered"
+    | "hit-failed"
     | "source-created"
     | "source-ended"
     | "source-disconnected"
+    | "kit-selected"
     | "reused-track-nodes",
   detail?: Record<string, unknown>,
 ): void {
@@ -316,7 +345,11 @@ export function recordLeanDrumTrace(
       break;
     case "source-disconnected":
       inc(leanCounters, "leanOneShotSourcesDisconnected");
-      inc(leanCounters, "leanOneShotSourcesActive", -1);
+      inc(
+        leanCounters,
+        "leanOneShotSourcesActive",
+        -Math.max(1, Number(detail?.sources ?? 1)),
+      );
       break;
     case "reused-track-nodes":
       inc(leanCounters, "leanDrumTrackNodeReuse");
@@ -363,7 +396,10 @@ function clearAudioNodeTrace(): void {
   ]) {
     for (const key of Object.keys(map)) delete map[key];
   }
-  records.clear();
+  stackAggregates.clear();
+  eventsRecorded = 0;
+  detailedEventsRecorded = 0;
+  droppedDetailEvents = 0;
   listenerRecords.clear();
   activeWorkletNodes.clear();
   activeConstantSourceNodes.clear();
@@ -376,6 +412,7 @@ function api(): AudioNodeTraceApi {
   return {
     enabled: isEnabled(),
     snapshot: getAudioNodeTraceSnapshot,
+    stats: () => ({ eventsRecorded, distinctStacks: stackAggregates.size }),
     dumpTopStacks: (limit = 20) => summarizeStacks(limit),
     clear: clearAudioNodeTrace,
     start: startAudioNodeTrace,
@@ -424,16 +461,22 @@ export function startAudioNodeTrace(): void {
     };
   }
 
-  originals.connect = AudioNode.prototype.connect;
+  const verbose = isVerboseEnabled();
+  if (verbose) {
+    originals.connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function patchedConnect(this: AudioNode, ...args: unknown[]) {
+      record("node-connect", typeForNode(this, "AudioNode"));
+      return (originals!.connect as (...callArgs: unknown[]) => unknown).apply(this, args);
+    } as AudioNode["connect"];
+  }
+  // Lifetime counts must remain correct in the default lightweight profiler.
+  // Only stack/event attribution is verbose; retiring disconnected analyzers
+  // and worklets is low-cost and required for trustworthy leak assertions.
   originals.disconnect = AudioNode.prototype.disconnect;
-  AudioNode.prototype.connect = function patchedConnect(this: AudioNode, ...args: unknown[]) {
-    record("node-connect", typeForNode(this, "AudioNode"));
-    return (originals!.connect as (...callArgs: unknown[]) => unknown).apply(this, args);
-  } as AudioNode["connect"];
   AudioNode.prototype.disconnect = function patchedDisconnect(this: AudioNode, ...args: unknown[]) {
     const type = typeForNode(this, "AudioNode");
     inc(nodeDisconnects, type);
-    record("node-disconnect", type);
+    if (verbose) record("node-disconnect", type);
     recordNodeInactive(this);
     return (originals!.disconnect as (...callArgs: unknown[]) => unknown).apply(this, args);
   } as AudioNode["disconnect"];
@@ -446,52 +489,59 @@ export function startAudioNodeTrace(): void {
       ...args: unknown[]
     ) {
       const type = typeForNode(this, "AudioScheduledSourceNode");
+      const result = (originals!.start as (...callArgs: unknown[]) => unknown).apply(this, args);
       inc(nodeStarts, type);
       record("node-start", type);
-      return (originals!.start as (...callArgs: unknown[]) => unknown).apply(this, args);
+      recordNodeStarted(this, type);
+      return result;
     } as AudioScheduledSourceNode["start"];
     AudioScheduledSourceNode.prototype.stop = function patchedStop(
       this: AudioScheduledSourceNode,
       ...args: unknown[]
     ) {
       const type = typeForNode(this, "AudioScheduledSourceNode");
+      const result = (originals!.stop as (...callArgs: unknown[]) => unknown).apply(this, args);
       inc(nodeStops, type);
       record("node-stop", type);
-      recordNodeInactive(this);
-      return (originals!.stop as (...callArgs: unknown[]) => unknown).apply(this, args);
+      // stop(futureTime) only schedules the end. Retire the source when the
+      // browser dispatches `ended`, otherwise pending/playing hits disappear
+      // from active-source diagnostics before they have produced audio.
+      return result;
     } as AudioScheduledSourceNode["stop"];
   }
 
-  originals.addEventListener = EventTarget.prototype.addEventListener;
-  originals.removeEventListener = EventTarget.prototype.removeEventListener;
-  EventTarget.prototype.addEventListener = function patchedAdd(
-    this: EventTarget,
-    type: string,
-    listener: EventListenerOrEventListenerObject | null,
-    options?: boolean | AddEventListenerOptions,
-  ): void {
-    if (isAudioTraceTarget(this)) {
-      const label = `${targetLabel(this)}:${type}`;
-      inc(listenerAdds, label);
-      listenerRecords.set(listenerKey(this, type, listener), 1);
-      record("listener-add", label);
-    }
-    return originals!.addEventListener!.call(this, type, listener, options);
-  };
-  EventTarget.prototype.removeEventListener = function patchedRemove(
-    this: EventTarget,
-    type: string,
-    listener: EventListenerOrEventListenerObject | null,
-    options?: boolean | EventListenerOptions,
-  ): void {
-    if (isAudioTraceTarget(this)) {
-      const label = `${targetLabel(this)}:${type}`;
-      inc(listenerRemoves, label);
-      listenerRecords.delete(listenerKey(this, type, listener));
-      record("listener-remove", label);
-    }
-    return originals!.removeEventListener!.call(this, type, listener, options);
-  };
+  if (isVerboseEnabled()) {
+    originals.addEventListener = EventTarget.prototype.addEventListener;
+    originals.removeEventListener = EventTarget.prototype.removeEventListener;
+    EventTarget.prototype.addEventListener = function patchedAdd(
+      this: EventTarget,
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions,
+    ): void {
+      if (isAudioTraceTarget(this)) {
+        const label = `${targetLabel(this)}:${type}`;
+        inc(listenerAdds, label);
+        listenerRecords.set(listenerKey(this, type, listener), 1);
+        record("listener-add", label);
+      }
+      return originals!.addEventListener!.call(this, type, listener, options);
+    };
+    EventTarget.prototype.removeEventListener = function patchedRemove(
+      this: EventTarget,
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | EventListenerOptions,
+    ): void {
+      if (isAudioTraceTarget(this)) {
+        const label = `${targetLabel(this)}:${type}`;
+        inc(listenerRemoves, label);
+        listenerRecords.delete(listenerKey(this, type, listener));
+        record("listener-remove", label);
+      }
+      return originals!.removeEventListener!.call(this, type, listener, options);
+    };
+  }
 
   if (typeof AudioWorklet !== "undefined" && AudioWorklet.prototype.addModule) {
     originals.addModule = AudioWorklet.prototype.addModule;

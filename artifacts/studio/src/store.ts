@@ -7,6 +7,7 @@ import { DEFAULT_MASTER_BUS } from "./lib/audio/master-defaults";
 import { applyMixPreset, DEFAULTS } from "./lib/audio/mixPresets";
 import { wireTrackAutomationTargets } from "./lib/plugins/automation";
 import { findPreset, presetSoundParams } from "./lib/audio/sounds/presets";
+import { cancelAllRecorders } from "./lib/audio/recorder";
 import type {
   AnyPreset,
   AutomationBreakpoint,
@@ -104,9 +105,10 @@ const DEFAULT_CHOP_LAB: ChopLabState = {
   syncToBpm: false,
 };
 
-/** Compare only fields captured by transport callbacks or used to construct a
- * playable voice. Mixer/UI edits must not invalidate the arrangement, while
- * same-count note edits, clip trims, kit/preset changes, and groove edits must. */
+/** Compare only fields captured by transport callbacks. Instrument selectors
+ * and sound controls are reconciled directly by the audio engine and callbacks
+ * resolve the current voice at fire time, so timbre changes must not force an
+ * otherwise-identical arrangement to be rebuilt. */
 function projectSchedulingChanged(previous: Project, next: Project): boolean {
   if (previous === next) return false;
   if (previous.bpm !== next.bpm || previous.globalGroove !== next.globalGroove) {
@@ -122,14 +124,9 @@ function projectSchedulingChanged(previous: Project, next: Project): boolean {
     if (
       before.id !== after.id ||
       before.kind !== after.kind ||
-      before.preset !== after.preset ||
-      before.presetId !== after.presetId ||
-      before.kitId !== after.kitId ||
       before.noteClips !== after.noteClips ||
       before.audioClips !== after.audioClips ||
-      before.groove !== after.groove ||
-      before.sound !== after.sound ||
-      before.pieceSettings !== after.pieceSettings
+      before.groove !== after.groove
     ) {
       return true;
     }
@@ -164,6 +161,8 @@ class Store {
   state: {
     project: Project;
     projectRevision: number;
+    /** Increments only when the complete in-memory project instance is replaced. */
+    projectLoadRevision: number;
     transportScheduleRevision: number;
     panicRevision: number;
     selectedTrackId: string;
@@ -210,6 +209,7 @@ class Store {
       blob: Blob;
       defaultName: string;
       recordedTrackId?: string;
+      recordedClipId?: string;
     } | null;
     /** Chop Lab panel state. */
     chopLab: ChopLabState;
@@ -230,6 +230,7 @@ class Store {
     this.state = {
       project,
       projectRevision: 0,
+      projectLoadRevision: 0,
       transportScheduleRevision: 0,
       panicRevision: 0,
       selectedTrackId: project.tracks[0]?.id ?? "",
@@ -315,6 +316,9 @@ class Store {
       transportScheduleRevision:
         this.state.transportScheduleRevision + (scheduleChanged ? 1 : 0),
     };
+    if (Object.prototype.hasOwnProperty.call(patch, "samples")) {
+      audio.setProjectSampleLibrary(project.samples ?? []);
+    }
     if (patch.tracks) audio.setProjectTrackSnapshots(project.tracks);
     this.listeners.forEach((l) => l());
   }
@@ -342,12 +346,53 @@ class Store {
   applyDrumKit(trackId: string, kitId: DrumKitId): boolean {
     const track = this.state.project.tracks.find((item) => item.id === trackId);
     if (!track || track.kind !== "drums") return false;
+    audio.releaseChopKitForTrack(trackId);
     this.patchTrack(trackId, { kitId });
     audio.setKit(trackId, kitId);
     return true;
   }
 
+  /**
+   * Apply one of the compact channel strip's legacy presets.
+   *
+   * Modern kit/preset ids intentionally override `track.preset`; clear only
+   * that selector so this visible control cannot appear to change while the
+   * realized instrument silently keeps the previous sound. User-authored
+   * sound shaping and per-piece settings are preserved for round trips.
+   */
+  applyLegacyPreset(trackId: string, preset: AnyPreset): boolean {
+    const track = this.state.project.tracks.find((item) => item.id === trackId);
+    if (!track) return false;
+    const patch: Partial<Track> = { preset };
+    if (track.kind === "drums") {
+      audio.releaseChopKitForTrack(trackId);
+      patch.kitId = undefined;
+    }
+    else if (track.kind !== "vocals") patch.presetId = undefined;
+    this.patchTrack(trackId, patch);
+    const next = this.state.project.tracks.find((item) => item.id === trackId);
+    if (!next) return false;
+    audio.changePreset(next);
+    return true;
+  }
+
   // ---- v2 mixer ops ----
+
+  /** Persist a channel fader and update the currently realized voice. */
+  setTrackVolume(trackId: string, volume: number) {
+    const bounded = Math.max(0, Math.min(1, volume));
+    if (!this.state.project.tracks.some((track) => track.id === trackId)) return;
+    this.patchTrack(trackId, { volume: bounded });
+    audio.setTrackVolume(trackId, bounded);
+  }
+
+  /** Persist a channel pan control and update the currently realized voice. */
+  setTrackPan(trackId: string, pan: number) {
+    const bounded = Math.max(-1, Math.min(1, pan));
+    if (!this.state.project.tracks.some((track) => track.id === trackId)) return;
+    this.patchTrack(trackId, { pan: bounded });
+    audio.setTrackPan(trackId, bounded);
+  }
 
   /** Patch the EQ on a single track and forward the diff to the engine. */
   setTrackEq(trackId: string, patch: Partial<TrackEq>) {
@@ -1295,7 +1340,19 @@ export function resetStore(project: Project) {
     tracks: project.tracks.length,
     name: project.name,
   });
+  // Project replacement is an absolute ownership boundary. Native timers and
+  // MediaRecorder streams live outside React/store serialization, so stop them
+  // before the fresh state overwrites their handles.
+  const countInTimers = storeInstance?.state.countInTimers;
+  if (countInTimers?.interval !== null && countInTimers?.interval !== undefined) {
+    window.clearInterval(countInTimers.interval);
+  }
+  if (countInTimers?.timeout !== null && countInTimers?.timeout !== undefined) {
+    window.clearTimeout(countInTimers.timeout);
+  }
+  cancelAllRecorders();
   audio.replaceProject(project);
+  audio.setMetronome(project.metronome);
   try {
     const endStoreReplace = startPerfTimer("project.resetStore:replace", {
       tracks: project.tracks.length,
@@ -1305,7 +1362,9 @@ export function resetStore(project: Project) {
       // current Store via `useSyncExternalStore`) keep working. This is
       // important for in-place project swaps like `loadDemo` that don't
       // trigger a full page reload.
+      const projectLoadRevision = storeInstance.state.projectLoadRevision + 1;
       const fresh = new Store(project).state;
+      fresh.projectLoadRevision = projectLoadRevision;
       // Seed chopLab runtime state from the project's persisted chopLab field
       // so markers, slice settings, and sample name are available immediately.
       if (project.chopLab) {

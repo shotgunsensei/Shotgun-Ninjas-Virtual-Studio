@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import * as Tone from "tone";
+import type { LevelMeter } from "../lib/audio/meterTypes";
 import { useSettings } from "../lib/settings";
 import { visualTicker } from "../lib/visualTicker";
 
@@ -104,7 +104,7 @@ export function StereoMeter({
   resetKey,
   onClip,
 }: {
-  getMeter?: () => Tone.Meter | undefined;
+  getMeter?: () => LevelMeter | undefined;
   getLevels?: () => { peakDb: [number, number]; rmsDb: [number, number] };
   label?: string;
   showClip?: boolean;

@@ -20,6 +20,8 @@ export function VocalsPanel({ track }: { track: Track }) {
   const setDeviceId = (id: string) =>
     getStore().set({ vocalDeviceId: id || null });
   const [monitoring, setMonitoring] = useState(false);
+  const panicRevision = useStore((s) => s.panicRevision);
+  const projectId = useStore((s) => s.project.id);
   const [permError, setPermError] = useState<string | null>(null);
   const meterRef = useRef<Tone.Meter | null>(null);
   const levelBarRef = useRef<HTMLDivElement>(null);
@@ -81,14 +83,19 @@ export function VocalsPanel({ track }: { track: Track }) {
     };
   }, [monitoring, track.id]);
 
+  // Panic and project replacement are absolute microphone boundaries. Keep
+  // the local button/meter state honest when the engine closes monitoring.
+  useEffect(() => {
+    setMonitoring(false);
+  }, [panicRevision, projectId, track.id]);
+
   const startMon = async () => {
     setPermError(null);
     try {
-      await audio.unlock();
+      await audio.startVocalMonitor(track.id, deviceId || undefined);
       window.requestAnimationFrame(() => {
         getStore().set({ audioUnlocked: true });
       });
-      await audio.startVocalMonitor(track.id, deviceId || undefined);
       setMonitoring(true);
       // After permission, device labels become available
       refreshDevices();

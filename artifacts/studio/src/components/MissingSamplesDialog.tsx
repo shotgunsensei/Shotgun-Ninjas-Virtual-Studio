@@ -6,18 +6,33 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FolderOpen, VolumeX, Music, CheckCircle2 } from "lucide-react";
+import {
+  FolderOpen,
+  VolumeX,
+  Music,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
 import { relocateSampleBlob } from "../lib/storage/db";
+import { decodeBlob } from "../lib/audio/sampleEdits";
+import {
+  buildMissingSampleRecoveryPatch,
+  buildMissingSampleSkipPatch,
+  isMissingSampleRecovered,
+  missingSampleEntryKey,
+  type MissingSampleEntry,
+} from "../lib/audio/missingSampleRecovery";
+import { getStore } from "../store";
 import { useToast } from "@/hooks/use-toast";
 
-export interface MissingSampleEntry {
-  sampleId: string;
-  blobKey: string;
-  name: string;
-  trackName?: string;
-}
+export type { MissingSampleEntry } from "../lib/audio/missingSampleRecovery";
 
-type ItemAction = "pending" | "reimported" | "muted" | "placeholder";
+type ItemAction =
+  | "pending"
+  | "reimported"
+  | "muted"
+  | "skipped"
+  | "placeholder";
 
 // ---------------------------------------------------------------------------
 // Sine-wave placeholder generator
@@ -83,6 +98,61 @@ async function generateSineWaveBlob(
   return audioBufferToWavBlob(buffer);
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "The sample could not be recovered. Check browser storage and try again.";
+}
+
+async function recoverMissingSampleBlob(
+  entry: MissingSampleEntry,
+  blob: Blob,
+): Promise<void> {
+  const store = getStore();
+  const projectId = store.state.project.id;
+  const projectLoadRevision = store.state.projectLoadRevision;
+  const decoded = await decodeBlob(blob);
+
+  if (
+    store.state.project.id !== projectId ||
+    store.state.projectLoadRevision !== projectLoadRevision
+  ) {
+    throw new Error("The project changed while the audio file was being checked. Try again.");
+  }
+
+  const projectRevision = store.state.projectRevision;
+  const patch = buildMissingSampleRecoveryPatch(
+    store.state.project,
+    entry,
+    blob,
+    decoded.duration,
+  );
+
+  // Write first so the wizard can never report success for an in-memory Blob
+  // that will disappear on the next reload.
+  await relocateSampleBlob(entry.blobKey, blob);
+
+  if (
+    store.state.project.id !== projectId ||
+    store.state.projectLoadRevision !== projectLoadRevision ||
+    store.state.projectRevision !== projectRevision
+  ) {
+    throw new Error("The project changed while the sample was being saved. Try again.");
+  }
+
+  // These authoritative store paths also resync the drum-pad sample manager
+  // and arrangement scheduler through Store.patchProject.
+  if (patch.kind === "library") {
+    store.patchProject({ samples: patch.samples });
+  } else {
+    store.patchProject({ tracks: patch.tracks });
+  }
+
+  if (!isMissingSampleRecovered(store.state.project, entry, blob)) {
+    throw new Error("The sample was saved, but the audio engine did not accept it. Try again.");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -99,16 +169,17 @@ export function MissingSamplesDialog({
   open,
   entries,
   onClose,
-  onMuteTrack,
 }: {
   open: boolean;
   entries: MissingSampleEntry[];
   onClose: () => void;
-  onMuteTrack: (sampleId: string) => void;
 }) {
   const { toast } = useToast();
   const [actions, setActions] = useState<Record<string, ItemAction>>({});
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [busyKeys, setBusyKeys] = useState<Record<string, boolean>>({});
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const inFlightKeysRef = useRef(new Set<string>());
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setAction = (id: string, action: ItemAction) => {
@@ -116,39 +187,72 @@ export function MissingSamplesDialog({
   };
 
   const handleReimport = (entry: MissingSampleEntry) => {
-    const input = inputRefs.current[entry.sampleId];
+    const input = inputRefs.current[missingSampleEntryKey(entry)];
     if (!input) return;
     input.click();
   };
 
   const handleFileChosen = async (entry: MissingSampleEntry, file: File) => {
+    const key = missingSampleEntryKey(entry);
+    if (inFlightKeysRef.current.has(key)) return;
+    inFlightKeysRef.current.add(key);
+    setErrors((previous) => ({ ...previous, [key]: undefined }));
+    setBusyKeys((previous) => ({ ...previous, [key]: true }));
     try {
-      await relocateSampleBlob(entry.blobKey, file);
-      setAction(entry.sampleId, "reimported");
-    } catch {
-      /* ignore — IDB write error */
+      await recoverMissingSampleBlob(entry, file);
+      setAction(key, "reimported");
+    } catch (error) {
+      const message = errorMessage(error);
+      setErrors((previous) => ({ ...previous, [key]: message }));
+      toast({ title: "Sample recovery failed", description: message });
+    } finally {
+      inFlightKeysRef.current.delete(key);
+      setBusyKeys((previous) => ({ ...previous, [key]: false }));
     }
   };
 
   const handleMute = (entry: MissingSampleEntry) => {
-    onMuteTrack(entry.sampleId);
-    setAction(entry.sampleId, "muted");
+    const key = missingSampleEntryKey(entry);
+    setErrors((previous) => ({ ...previous, [key]: undefined }));
+    try {
+      const store = getStore();
+      const patch = buildMissingSampleSkipPatch(store.state.project, entry);
+      if (patch.tracks) store.patchProject({ tracks: patch.tracks });
+      setAction(key, patch.action);
+    } catch (error) {
+      const message = errorMessage(error);
+      setErrors((previous) => ({ ...previous, [key]: message }));
+      toast({ title: "Sample could not be skipped", description: message });
+    }
   };
 
   const handlePlaceholder = async (entry: MissingSampleEntry) => {
+    const key = missingSampleEntryKey(entry);
+    if (inFlightKeysRef.current.has(key)) return;
+    inFlightKeysRef.current.add(key);
+    setErrors((previous) => ({ ...previous, [key]: undefined }));
+    setBusyKeys((previous) => ({ ...previous, [key]: true }));
     try {
       const blob = await generateSineWaveBlob();
-      await relocateSampleBlob(entry.blobKey, blob);
-      setAction(entry.sampleId, "placeholder");
-    } catch {
-      setAction(entry.sampleId, "placeholder");
+      await recoverMissingSampleBlob(entry, blob);
+      setAction(key, "placeholder");
+    } catch (error) {
+      const message = errorMessage(error);
+      setErrors((previous) => ({ ...previous, [key]: message }));
+      toast({ title: "Placeholder creation failed", description: message });
+    } finally {
+      inFlightKeysRef.current.delete(key);
+      setBusyKeys((previous) => ({ ...previous, [key]: false }));
     }
   };
 
   const allResolved =
     entries.length > 0 &&
     entries.every(
-      (e) => actions[e.sampleId] && actions[e.sampleId] !== "pending",
+      (entry) => {
+        const action = actions[missingSampleEntryKey(entry)];
+        return action && action !== "pending";
+      },
     );
 
   // Auto-close ~1 s after all items are resolved.
@@ -191,11 +295,15 @@ export function MissingSamplesDialog({
 
         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
           {entries.map((entry) => {
-            const action = actions[entry.sampleId] ?? "pending";
+            const entryKey = missingSampleEntryKey(entry);
+            const action = actions[entryKey] ?? "pending";
             const resolved = action !== "pending";
+            const busy = busyKeys[entryKey] === true;
+            const error = errors[entryKey];
             return (
               <div
-                key={entry.sampleId}
+                key={entryKey}
+                aria-busy={busy}
                 className={`border rounded-md p-3 transition-colors ${
                   resolved
                     ? "border-emerald-600/40 bg-emerald-600/5"
@@ -210,7 +318,7 @@ export function MissingSamplesDialog({
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="font-mono text-xs truncate">{entry.name}</div>
-                    {entry.trackName && (
+                    {entry.kind === "clip" && (
                       <div className="text-[10px] text-muted-foreground">
                         Track: {entry.trackName}
                       </div>
@@ -220,6 +328,7 @@ export function MissingSamplesDialog({
                     <span className="font-mono text-[9px] uppercase tracking-widest text-emerald-500">
                       {action === "reimported" && "Re-imported"}
                       {action === "muted" && "Muted"}
+                      {action === "skipped" && "Skipped"}
                       {action === "placeholder" && "Placeholder"}
                     </span>
                   )}
@@ -230,14 +339,20 @@ export function MissingSamplesDialog({
                     <button
                       type="button"
                       onClick={() => handleReimport(entry)}
+                      disabled={busy}
                       className="flex items-center gap-1 h-6 px-2 rounded border border-primary/50 font-mono text-[9px] uppercase tracking-widest hover:bg-primary/10 text-primary"
                     >
-                      <FolderOpen className="w-2.5 h-2.5" />
-                      Re-import
+                      {busy ? (
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      ) : (
+                        <FolderOpen className="w-2.5 h-2.5" />
+                      )}
+                      {busy ? "Working…" : "Re-import"}
                     </button>
                     <button
                       type="button"
                       onClick={() => handleMute(entry)}
+                      disabled={busy}
                       className="flex items-center gap-1 h-6 px-2 rounded border border-border font-mono text-[9px] uppercase tracking-widest hover:bg-accent/40 text-muted-foreground"
                     >
                       <VolumeX className="w-2.5 h-2.5" />
@@ -246,6 +361,7 @@ export function MissingSamplesDialog({
                     <button
                       type="button"
                       onClick={() => void handlePlaceholder(entry)}
+                      disabled={busy}
                       className="flex items-center gap-1 h-6 px-2 rounded border border-border font-mono text-[9px] uppercase tracking-widest hover:bg-accent/40 text-muted-foreground"
                     >
                       <Music className="w-2.5 h-2.5" />
@@ -254,15 +370,26 @@ export function MissingSamplesDialog({
                   </div>
                 )}
 
+                {error && (
+                  <p
+                    role="alert"
+                    className="mt-2 text-[10px] leading-snug text-destructive"
+                  >
+                    {error}
+                  </p>
+                )}
+
                 <input
                   ref={(el) => {
-                    inputRefs.current[entry.sampleId] = el;
+                    inputRefs.current[entryKey] = el;
                   }}
                   type="file"
                   accept="audio/*"
+                  aria-label={`Choose replacement audio for ${entry.name}`}
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
+                    e.currentTarget.value = "";
                     if (file) void handleFileChosen(entry, file);
                   }}
                 />

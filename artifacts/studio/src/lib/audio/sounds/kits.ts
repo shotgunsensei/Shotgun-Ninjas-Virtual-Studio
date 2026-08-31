@@ -923,6 +923,39 @@ export interface KitVoice {
   dispose: () => void;
 }
 
+function disposePieceVoices(pieces: Map<DrumPiece, PieceVoice>): void {
+  for (const piece of pieces.values()) {
+    try {
+      piece.dispose();
+    } catch {
+      // A partially-built kit must never strand the previously working kit.
+    }
+  }
+}
+
+function finishKitVoice(def: DrumKitDef, pieces: Map<DrumPiece, PieceVoice>): KitVoice {
+  // Hook up choke wiring only after all pieces exist. Keeping this shared
+  // makes the synchronous initial-build and incremental live-swap paths
+  // behaviorally identical.
+  for (const pv of pieces.values()) {
+    if (!pv.chokeGroup) continue;
+    const siblings: PieceVoice[] = [];
+    for (const other of pieces.values()) {
+      if (other !== pv && other.chokeGroup === pv.chokeGroup) siblings.push(other);
+    }
+    const origTrigger = pv.trigger;
+    pv.trigger = (time, velocity) => {
+      for (const sibling of siblings) sibling.choke(time);
+      origTrigger(time, velocity);
+    };
+  }
+  return {
+    id: def.id,
+    pieces,
+    dispose: () => disposePieceVoices(pieces),
+  };
+}
+
 /**
  * Build a kit voice. Caller supplies `output` (the per-track filter
  * input) and the shared `reverbBus` / `delayBus` for sends.
@@ -948,32 +981,16 @@ export function buildKit(
     pieces: Object.keys(def.pieces).length,
   });
   const pieces = new Map<DrumPiece, PieceVoice>();
-  for (const pieceId of Object.keys(def.pieces) as DrumPiece[]) {
-    const pdef = def.pieces[pieceId];
-    pieces.set(pieceId, buildPieceVoice(pdef, output, reverbBus, delayBus));
-  }
-  // Hook up choke wiring once all pieces exist.
-  for (const pv of pieces.values()) {
-    if (!pv.chokeGroup) continue;
-    const siblings: PieceVoice[] = [];
-    for (const other of pieces.values()) {
-      if (other !== pv && other.chokeGroup === pv.chokeGroup) {
-        siblings.push(other);
-      }
+  try {
+    for (const pieceId of Object.keys(def.pieces) as DrumPiece[]) {
+      const pdef = def.pieces[pieceId];
+      pieces.set(pieceId, buildPieceVoice(pdef, output, reverbBus, delayBus));
     }
-    const origTrigger = pv.trigger;
-    pv.trigger = (time, velocity) => {
-      for (const s of siblings) s.choke(time);
-      origTrigger(time, velocity);
-    };
+  } catch (error) {
+    disposePieceVoices(pieces);
+    throw error;
   }
-  const kit = {
-    id: def.id,
-    pieces,
-    dispose: () => {
-      for (const pv of pieces.values()) pv.dispose();
-    },
-  };
+  const kit = finishKitVoice(def, pieces);
   firstPlayMeasure("instrument-factory:buildKit", started, performance.now(), {
     kitId: def.id,
     pieces: pieces.size,
@@ -981,54 +998,167 @@ export function buildKit(
   return kit;
 }
 
-function buildPieceVoice(
+/**
+ * Build a replacement kit one piece per browser task. The current voice keeps
+ * sounding while this runs, avoiding the former 0.4-1.1 second destructive
+ * long task. Returning `null` means a newer selector superseded this build;
+ * every partially-created node is disposed before returning.
+ */
+export async function buildKitIncrementally(
+  def: DrumKitDef,
+  output: Tone.InputNode,
+  reverbBus: Tone.InputNode | null,
+  delayBus: Tone.InputNode | null,
+  shouldContinue: () => boolean,
+): Promise<KitVoice | null> {
+  const started = performance.now();
+  const pieces = new Map<DrumPiece, PieceVoice>();
+  firstPlayMark("instrument-factory:buildKitIncrementally:start", {
+    kitId: def.id,
+    pieces: Object.keys(def.pieces).length,
+  });
+  try {
+    for (const pieceId of Object.keys(def.pieces) as DrumPiece[]) {
+      if (!shouldContinue()) {
+        disposePieceVoices(pieces);
+        return null;
+      }
+      const piece = await buildPieceVoiceIncrementally(
+        def.pieces[pieceId],
+        output,
+        reverbBus,
+        delayBus,
+        shouldContinue,
+      );
+      if (!piece) {
+        disposePieceVoices(pieces);
+        return null;
+      }
+      pieces.set(pieceId, piece);
+      // Also leave a browser task between pieces. This lets transport,
+      // painting, and input run even when a definition has one-layer voices.
+      await cooperativeKitYield();
+    }
+    if (!shouldContinue()) {
+      disposePieceVoices(pieces);
+      return null;
+    }
+    const kit = finishKitVoice(def, pieces);
+    firstPlayMeasure(
+      "instrument-factory:buildKitIncrementally",
+      started,
+      performance.now(),
+      { kitId: def.id, pieces: pieces.size },
+    );
+    return kit;
+  } catch (error) {
+    disposePieceVoices(pieces);
+    throw error;
+  }
+}
+
+interface PieceVoiceGraph {
+  channel: Tone.Channel;
+  filter: Tone.Filter;
+  gate: Tone.AmplitudeEnvelope;
+  reverbSend: Tone.Gain;
+  delaySend: Tone.Gain;
+}
+
+/** Tone's modeled drum voices each own many continuously-running Param source
+ * nodes. Large round-robin pools multiplied that cost across every kit piece
+ * even though short one-shots rarely overlap. Keep two voices only for pieces
+ * that benefit from flams/fast retriggers and one for naturally sparse tails.
+ * Velocity and pitch variation remain per hit, while the graph stays within a
+ * browser-safe real-time budget. */
+function modeledPoolSize(def: DrumPieceDef): number {
+  const requested = Math.max(1, def.synth.layers ?? 3);
+  const needsFastRetriggerOverlap =
+    def.id === "kick" ||
+    def.id === "snare" ||
+    def.id === "hat" ||
+    def.id === "clap";
+  return Math.min(requested, needsFastRetriggerOverlap ? 2 : 1);
+}
+
+function buildPieceVoiceGraph(
   def: DrumPieceDef,
   output: Tone.InputNode,
   reverbBus: Tone.InputNode | null,
   delayBus: Tone.InputNode | null,
-): PieceVoice {
-  const started = performance.now();
+): PieceVoiceGraph {
   firstPlayMark("instrument-factory:buildPieceVoice:start", { piece: def.id });
   // Per-piece chain: pool -> filter -> gate -> channel -> output, plus sends.
-  // The `gate` (AmplitudeEnvelope) is what gives the per-piece "decay"
-  // knob audible effect: each hit re-triggers the envelope and its
-  // release time is scaled by the user `decayMul` setting.
-  firstPlayMark("audio-node:create", { kind: "piece-channel", piece: def.id });
-  const channel = new Tone.Channel({ volume: 0, pan: def.defaultPan });
-  firstPlayMark("effect-node:create", { kind: "piece-filter", piece: def.id });
-  const filter = new Tone.Filter({
-    frequency: cutoffNormToHz(def.defaultCutoff),
-    type: "lowpass",
-    rolloff: -12,
-  });
-  firstPlayMark("effect-node:create", { kind: "piece-gate", piece: def.id });
-  const gate = new Tone.AmplitudeEnvelope({
-    attack: 0.001,
-    decay: 0.01,
-    sustain: 1,
-    release: 0.5,
-  });
-  filter.connect(gate);
-  gate.connect(channel);
-  channel.connect(output);
+  // Build under explicit ownership so a constructor/connect failure cannot
+  // strand the nodes that succeeded before it.
+  let channel: Tone.Channel | undefined;
+  let filter: Tone.Filter | undefined;
+  let gate: Tone.AmplitudeEnvelope | undefined;
+  let reverbSend: Tone.Gain | undefined;
+  let delaySend: Tone.Gain | undefined;
+  try {
+    firstPlayMark("audio-node:create", { kind: "piece-channel", piece: def.id });
+    channel = new Tone.Channel({ volume: 0, pan: def.defaultPan });
+    firstPlayMark("effect-node:create", { kind: "piece-filter", piece: def.id });
+    filter = new Tone.Filter({
+      frequency: cutoffNormToHz(def.defaultCutoff),
+      type: "lowpass",
+      rolloff: -12,
+    });
+    firstPlayMark("effect-node:create", { kind: "piece-gate", piece: def.id });
+    gate = new Tone.AmplitudeEnvelope({
+      attack: 0.001,
+      decay: 0.01,
+      sustain: 1,
+      release: 0.5,
+    });
+    filter.connect(gate);
+    gate.connect(channel);
+    channel.connect(output);
 
-  firstPlayMark("audio-node:create", { kind: "piece-reverb-send", piece: def.id });
-  const reverbSend = new Tone.Gain(def.defaultReverbSend);
-  firstPlayMark("audio-node:create", { kind: "piece-delay-send", piece: def.id });
-  const delaySend = new Tone.Gain(def.defaultDelaySend);
-  channel.connect(reverbSend);
-  channel.connect(delaySend);
-  if (reverbBus) reverbSend.connect(reverbBus);
-  if (delayBus) delaySend.connect(delayBus);
+    firstPlayMark("audio-node:create", { kind: "piece-reverb-send", piece: def.id });
+    reverbSend = new Tone.Gain(def.defaultReverbSend);
+    firstPlayMark("audio-node:create", { kind: "piece-delay-send", piece: def.id });
+    delaySend = new Tone.Gain(def.defaultDelaySend);
+    channel.connect(reverbSend);
+    channel.connect(delaySend);
+    if (reverbBus) reverbSend.connect(reverbBus);
+    if (delayBus) delaySend.connect(delayBus);
+    return { channel, filter, gate, reverbSend, delaySend };
+  } catch (error) {
+    for (const node of [delaySend, reverbSend, gate, filter, channel]) {
+      try { node?.dispose(); } catch { /* best-effort partial graph cleanup */ }
+    }
+    throw error;
+  }
+}
 
-  // Build the round-robin synth pool. Each pool voice slightly varies its
-  // params so successive hits exhibit a tiny tonal variation even without
-  // real sample layers.
-  const poolSize = Math.max(1, def.synth.layers ?? 3);
-  const pool = Array.from({ length: poolSize }, (_, i) =>
-    buildDrumSynth(def.synth, i, poolSize),
-  );
-  for (const v of pool) v.connect(filter);
+function disposeIncompletePiece(
+  graph: PieceVoiceGraph,
+  pool: readonly PoolVoice[],
+): void {
+  for (const voice of pool) {
+    try { voice.dispose(); } catch { /* best-effort candidate cleanup */ }
+  }
+  for (const node of [
+    graph.filter,
+    graph.gate,
+    graph.channel,
+    graph.reverbSend,
+    graph.delaySend,
+  ]) {
+    try { node.dispose(); } catch { /* best-effort candidate cleanup */ }
+  }
+}
+
+function finishPieceVoice(
+  def: DrumPieceDef,
+  graph: PieceVoiceGraph,
+  pool: PoolVoice[],
+  started: number,
+): PieceVoice {
+  const { channel, filter, gate, reverbSend, delaySend } = graph;
+  const poolSize = pool.length;
   let rr = 0;
 
   // Natural per-piece decay seconds — used as the base for the gate's
@@ -1079,7 +1209,11 @@ function buildPieceVoice(
     }
   };
 
-  pv.trigger = triggerSynth;
+  // Choke wiring wraps pv.trigger after every piece is built. Keep that public
+  // function stable and swap only this delegate when samples finish loading;
+  // replacing pv.trigger later used to silently remove hi-hat choking.
+  let playbackTrigger = triggerSynth;
+  pv.trigger = (time, velocity) => playbackTrigger(time, velocity);
 
   pv.choke = (time: number) => {
     for (const v of pool) v.release(time);
@@ -1091,8 +1225,8 @@ function buildPieceVoice(
     if (sampleBank) sampleBank.release(time);
   };
 
-  // Attempt to resolve real sample layers. When successful we replace
-  // the trigger function so subsequent hits use the loaded samples.
+  // Attempt to resolve real sample layers. When successful we replace the
+  // internal playback delegate so subsequent hits use the loaded samples.
   // Falls back silently to synth when no layers / no files / decode errors.
   let sampleBank: DrumSampleBank | null = null;
   let disposed = false;
@@ -1103,7 +1237,7 @@ function buildPieceVoice(
       return;
     }
     sampleBank = bank;
-    pv.trigger = (time, velocity) => {
+    playbackTrigger = (time, velocity) => {
       try {
         bank.trigger(time, velocity, pv.pitchSemis);
         const rel = Math.max(0.03, naturalDecaySec * Math.max(0.05, pv.decayMul));
@@ -1120,12 +1254,84 @@ function buildPieceVoice(
   pv.dispose = () => {
     if (disposed) return;
     disposed = true;
+    playbackTrigger = () => {};
     pv.trigger = () => {};
     if (sampleBank) sampleBank.dispose();
     baseDispose();
   };
 
   return pv;
+}
+
+function buildPieceVoice(
+  def: DrumPieceDef,
+  output: Tone.InputNode,
+  reverbBus: Tone.InputNode | null,
+  delayBus: Tone.InputNode | null,
+): PieceVoice {
+  const started = performance.now();
+  const graph = buildPieceVoiceGraph(def, output, reverbBus, delayBus);
+
+  // Build the round-robin synth pool. Each pool voice slightly varies its
+  // params so successive hits exhibit a tiny tonal variation even without
+  // real sample layers.
+  const poolSize = modeledPoolSize(def);
+  const pool: PoolVoice[] = [];
+  try {
+    for (let index = 0; index < poolSize; index += 1) {
+      const voice = buildDrumSynth(def.synth, index, poolSize);
+      pool.push(voice);
+      voice.connect(graph.filter);
+    }
+    return finishPieceVoice(def, graph, pool, started);
+  } catch (error) {
+    disposeIncompletePiece(graph, pool);
+    throw error;
+  }
+}
+
+function cooperativeKitYield(): Promise<void> {
+  // A non-zero delay guarantees an input/paint/CDP turn between constructors;
+  // chained zero-delay timers can still monopolize Chromium's timer queue.
+  return new Promise((resolve) => globalThis.setTimeout(resolve, 16));
+}
+
+async function buildPieceVoiceIncrementally(
+  def: DrumPieceDef,
+  output: Tone.InputNode,
+  reverbBus: Tone.InputNode | null,
+  delayBus: Tone.InputNode | null,
+  shouldContinue: () => boolean,
+): Promise<PieceVoice | null> {
+  const started = performance.now();
+  await cooperativeKitYield();
+  if (!shouldContinue()) return null;
+  const graph = buildPieceVoiceGraph(def, output, reverbBus, delayBus);
+  const poolSize = modeledPoolSize(def);
+  const pool: PoolVoice[] = [];
+  try {
+    // Separate the per-piece routing graph from the first synth constructor.
+    // This caps the largest uninterrupted chunk on slower mobile CPUs.
+    await cooperativeKitYield();
+    for (let index = 0; index < poolSize; index += 1) {
+      if (!shouldContinue()) {
+        disposeIncompletePiece(graph, pool);
+        return null;
+      }
+      const voice = buildDrumSynth(def.synth, index, poolSize);
+      pool.push(voice);
+      voice.connect(graph.filter);
+      await cooperativeKitYield();
+    }
+    if (!shouldContinue()) {
+      disposeIncompletePiece(graph, pool);
+      return null;
+    }
+    return finishPieceVoice(def, graph, pool, started);
+  } catch (error) {
+    disposeIncompletePiece(graph, pool);
+    throw error;
+  }
 }
 
 interface PoolVoice {

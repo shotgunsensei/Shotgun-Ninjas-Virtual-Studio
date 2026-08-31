@@ -264,10 +264,25 @@ export async function tryLoadDrumSamples(
  */
 export async function tryLoadMelodicSampler(
   layers: SampleLayer[] | undefined,
-  options: { release?: number; attack?: number; volume?: number } = {},
+  options: {
+    release?: number;
+    attack?: number;
+    volume?: number;
+    shouldContinue?: () => boolean;
+  } = {},
 ): Promise<Tone.Sampler | null> {
   if (!layers || layers.length === 0) return null;
-  const decoded = await loadSampleLayers(layers);
+  const decoded: DecodedSampleLayer[] = [];
+  // Melodic factory instruments can contain several multi-megabyte zones.
+  // Decode them one at a time and re-check ownership between files so a rapid
+  // pack change cannot leave an obsolete preset saturating the decode queue.
+  for (const layer of layers) {
+    if (options.shouldContinue && !options.shouldContinue()) return null;
+    const loaded = await loadLayer(layer);
+    if (options.shouldContinue && !options.shouldContinue()) return null;
+    if (loaded) decoded.push(loaded);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+  }
   if (decoded.length === 0) return null;
 
   // Build a { note -> decoded buffer } map. Layers without rootNote are ignored
@@ -277,6 +292,7 @@ export async function tryLoadMelodicSampler(
     if (layer.rootNote) urls[layer.rootNote] = buffer;
   }
   if (Object.keys(urls).length === 0) return null;
+  if (options.shouldContinue && !options.shouldContinue()) return null;
 
   try {
     return new Tone.Sampler({

@@ -16,8 +16,10 @@ const chromiumExecutablePath = (() => {
   }
 })();
 
-const TEST_PORT = 5174;
+const requestedPort = Number.parseInt(process.env.STUDIO_TEST_PORT ?? "5174", 10);
+const TEST_PORT = Number.isFinite(requestedPort) ? requestedPort : 5174;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
+const REUSE_EXISTING_SERVER = process.env.STUDIO_TEST_REUSE_SERVER === "1";
 const viteCli = fileURLToPath(new URL("./node_modules/vite/bin/vite.js", import.meta.url));
 
 function quoteArg(value: string): string {
@@ -72,7 +74,7 @@ export default defineConfig({
     ].join(" "),
     url: BASE_URL,
     timeout: 120_000,
-    reuseExistingServer: false,
+    reuseExistingServer: REUSE_EXISTING_SERVER,
     env: {
       PORT: String(TEST_PORT),
       BASE_PATH: "/",

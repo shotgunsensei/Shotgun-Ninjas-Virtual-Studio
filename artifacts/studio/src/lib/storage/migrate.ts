@@ -23,8 +23,9 @@ import { DEFAULT_MASTER_BUS } from "../audio/master-defaults";
  *        modulationRoutings at project level.
  *   v5 — Preserve Sound Library, Performance Mode, and Chop Lab project
  *        state across every IndexedDB, draft-recovery, and JSON load path.
+ *   v6 — Preserve project sample-library assignments to individual drum pads.
  */
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 /** Known FX module ids — anything else is dropped (with a warning) by
  *  `checkProjectHealth`. Kept in sync with `FxModuleId`. */
@@ -129,6 +130,14 @@ function migrateTrack(t: unknown): Track {
     kitId: raw.kitId,
     presetId: raw.presetId,
     pieceSettings: raw.pieceSettings,
+    padSamples:
+      raw.padSamples && typeof raw.padSamples === "object"
+        ? Object.fromEntries(
+            Object.entries(raw.padSamples).filter(
+              ([, blobKey]) => typeof blobKey === "string" && blobKey.length > 0,
+            ),
+          )
+        : undefined,
     sound: raw.sound,
     groove: raw.groove,
     eq: raw.eq ?? { ...FLAT_EQ },

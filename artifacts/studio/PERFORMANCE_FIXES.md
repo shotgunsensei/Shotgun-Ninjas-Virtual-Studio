@@ -16,12 +16,50 @@ This pass stabilizes the existing browser DAW first, then adds performance-safe 
 - Removed redundant per-hit lean-drum AudioParam writes. A primitive settings
   cache reapplies volume, pan, mute, cutoff, and resonance only when those
   values change and is cleared on removal, promotion, and project teardown.
-- Made async drum-bank and melodic-sample swaps generation-safe so late loads cannot replace or revive disposed voices.
+- Made asynchronous melodic sampled-voice replacement generation-safe and made
+  custom-pad resources track-owned and disposable, so late loads cannot replace
+  or revive a disposed route.
+- Changed melodic and sampled-instrument replacement to build-before-swap. The
+  previous playable voice remains connected until its replacement is ready,
+  and sampler identity/generation checks reject every stale completion.
+- Made the native lean drum voice authoritative for named kits. Kit selection
+  updates recipe/timbre and per-piece bus targets on the existing graph; it does
+  not construct per-piece Tone voices or rebuild/swap the track mixer.
+- Resolved drum and melodic trigger callbacks against the current registered
+  voice at trigger time, preventing scheduled callbacks from retaining a sampler
+  that a later sound-set change disposed.
+- Centralized kit, melodic preset, legacy preset, fader, and pan application in
+  authoritative store actions that immediately hydrate the live engine.
+- Added bounded audio-context suspension recovery to live notes, drum pads,
+  previews, and vocal realization, with a silence generation that prevents
+  post-Panic async work from reviving audio.
+- Added a Tone/native connection compatibility layer for lean voices and native
+  AudioWorklet leaves. Custom processors register on the actual Web Audio
+  context; the default master remains on the proven Tone/native path while
+  sampled and metronome worklets retain transparent fallback.
+- Installed Tone on one browser-owned interactive `AudioContext` before any
+  Studio graph is constructed. This removes standardized-audio-context's
+  recursive cycle scan from live voice connections, keeps the user-gesture
+  resume contract, and reuses the same context across Vite HMR.
+- Made vocal monitoring transactional and recorder ownership explicit. Pending
+  microphone permission, duplicate stop, project replacement, reset, Panic, and
+  unmount now cancel or coalesce without attaching a take to the wrong track.
+- Made Chop and Performance Mode ownership track project replacement and panel
+  lifecycle without destroying an intentional in-project Chop buffer on a normal
+  tab remount.
 - Routed Chop Lab, sound-pack preview, and world/welcome audio through the master chain and Panic ownership.
 - Removed a second full Chop PCM copy and stopped rebuilding Chop audio on every marker pointer move.
 - Removed the remote Salamander piano download dependency; Grand Piano is now an immediate offline modeled piano with optional local licensed-layer hot swap.
 
-Primary files: `src/hooks/useTransport.ts`, `src/lib/audio/engine.ts`, `src/lib/audio/master.ts`, `src/lib/audio/leanDrumVoice.ts`, `src/lib/audio/leanDrumTrackSettings.ts`, `src/lib/audio/lookahead-scheduler.ts`, `src/lib/audio/chopEngine.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/worldAudio.ts`, `src/contexts/WorldContext.tsx`, and instrument components.
+Primary files: `src/hooks/useTransport.ts`, `src/lib/audio/engine.ts`,
+`src/lib/audio/master.ts`, `src/lib/audio/toneConnection.ts`,
+`src/lib/audio/toneContext.ts`,
+`src/lib/audio/leanDrumVoice.ts`, `src/lib/audio/leanDrumTrackSettings.ts`,
+`src/lib/audio/lookahead-scheduler.ts`, `src/lib/audio/chopEngine.ts`,
+`src/lib/audio/worklet-manager.ts`, `src/lib/audio/worklet-sample-player.ts`,
+`src/lib/audio/sounds/kits.ts`, `src/lib/audio/sounds/samples.ts`,
+`src/lib/audio/recorder.ts`, `src/lib/worldAudio.ts`,
+`src/contexts/WorldContext.tsx`, and instrument components.
 
 ## Startup, Rendering, and PWA
 
@@ -38,24 +76,29 @@ Primary files: `src/hooks/useTransport.ts`, `src/lib/audio/engine.ts`, `src/lib/
 
 Final bundle-budget measurements:
 
-| Budget | Final |
-| --- | ---: |
-| Landing initial JS | 230.32 kB raw / 73.74 kB gzip |
-| Studio initial JS | 1,175.99 kB raw / 337.10 kB gzip |
-| Core Studio App chunk | 673.23 kB raw / 197.96 kB gzip |
-| Shared CSS | 156.17 kB raw / 23.22 kB gzip |
-| Largest lazy chunk | 58.39 kB gzip |
+| Budget             |                            Final |
+| ------------------ | -------------------------------: |
+| Landing initial JS |    231.04 kB raw / 74.09 kB gzip |
+| Studio initial JS  | 1,193.80 kB raw / 342.35 kB gzip |
+| Shared CSS         |    156.17 kB raw / 23.22 kB gzip |
+| Largest lazy chunk |                    58.39 kB gzip |
 
 Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `src/components/Footer.tsx`, `src/components/LeftBrowser.tsx`, `src/components/TransportBar.tsx`, `src/components/ChannelStrip.tsx`, `public/sw.js`, and `vite.config.ts`.
 
 ## Storage, Autosave, and Export
 
-- Advanced project storage to schema v5 while preserving `soundPackId`, performance state, and Chop Lab Blob/state.
+- Advanced project storage to schema v6 while preserving `soundPackId`,
+  performance state, Chop Lab Blob/state, and custom per-track `padSamples`.
+  Schema-v5 projects migrate additively.
 - Reject invalid and future schema versions instead of silently downgrading them.
 - Preserved full audio-clip metadata in IndexedDB.
 - Made portable JSON embed track clips, sample-library blobs, and Chop Lab audio.
 - Made project-only import explicitly report all nonportable references and remove stale blob keys.
-- Serialized autosave work so overlapping writes cannot race.
+- Moved Blob fingerprinting outside IndexedDB transactions and serialized all
+  project/draft save, duplicate, relocate, and import writes through one
+  rejection-safe FIFO so transactions cannot expire or overtake one another.
+- Re-keyed and re-owned library samples, timeline clips, Chop audio, and custom
+  pad samples during duplicate/import, including formerly missing keys.
 - Skipped unchanged blob writes and added guarded page-hide/visibility/unload draft flush.
 - Replaced the disconnected millisecond/seconds autosave controls with one
   enabled flag and a bounded 15/30/60-second durable cadence. Both recovery
@@ -68,10 +111,29 @@ Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `sr
   covered the World Picker path, and made same-project Load/Restore save before
   reading so a stale IndexedDB object cannot overwrite the newest edit.
 - Moved lightweight filename/download helpers out of the heavy audio exporter.
-- Loaded Tone/export logic and the MP3 encoder only when a user exports.
+- Loaded native export logic and the MP3 encoder only when a user exports.
 - Reused MP3 frame buffers and yielded during encoding to keep UI progress responsive.
+- Predecoded sampled source banks before native offline graph construction. WAV
+  and MP3 share the same bounded `OfflineAudioContext` render, and MP3 only
+  encodes that PCM buffer; export never calls `Tone.setContext` or swaps the live
+  context.
+- Added exact missing-sample recovery: decode validation and durable persistence
+  happen before an exact library/clip patch, guarded by project identity and
+  revision so replacement projects cannot be mutated by late completions.
+- Made sample preview genuinely audible, decode-gated, and project-atomic. Pad
+  assignment creates a track-scoped resource routed into the native piece input,
+  preserving its EQ, effects, sends, and meter; bounded master routing is used
+  only when the owning route is unavailable or cannot connect, and decode
+  failure returns to the named native kit. Recorded preview updates target the
+  exact timeline clip while
+  retaining the reusable library copy.
 
-Primary files: `src/lib/storage/migrate.ts`, `src/lib/storage/db.ts`, `src/App.tsx`, `src/components/Header.tsx`, `src/lib/audio/export.ts`, `src/lib/export/download.ts`, and `src/lib/audio/master-defaults.ts`.
+Primary files: `src/lib/storage/migrate.ts`, `src/lib/storage/db.ts`,
+`src/lib/storage/missingSampleRecovery.ts`, `src/lib/audio/drumPadSamples.ts`,
+`src/lib/audio/export.ts`, `src/components/SamplePreviewDialog.tsx`,
+`src/components/MissingSamplesDialog.tsx`, `src/components/LeftBrowser.tsx`,
+`src/App.tsx`, `src/components/Header.tsx`, `src/lib/export/download.ts`, and
+`src/lib/audio/master-defaults.ts`.
 
 ## Sound, Preset, Pack, Extension, and Creative-Learning Expansion
 
@@ -99,7 +161,7 @@ Factory-content controls:
 - Same-origin zones load only on preview/load/export; the global queue allows three concurrent decodes, de-duplicates in-flight URLs, and bounds reusable decoded PCM to 64 MiB.
 - The service worker runtime-caches selected factory zones for offline reuse without eagerly downloading 24.07 MiB on installation.
 - Sampled preview cancellation is generation-safe; Panic and engine disposal stop active preview tails.
-- Native WAV export chooses the nearest sampled root, applies playback-rate transposition and a bounded envelope, and falls back to the model only if no zone decodes.
+- The shared native WAV/MP3 render chooses the nearest sampled root, applies playback-rate transposition and a bounded envelope, and falls back to the model only if no zone decodes.
 
 Primary files: `src/lib/audio/sounds/factorySamples.ts`, `src/lib/audio/sounds/presets.ts`, `src/lib/audio/sounds/samples.ts`, `src/lib/audio/sounds/soundLibrary.ts`, `src/lib/audio/export.ts`, `src/lib/plugins/builtins.ts`, `src/components/PresetBrowser.tsx`, `src/components/SoundLibraryPanel.tsx`, `src/components/LessonsPanel.tsx`, `public/samples/factory/vcsl/*`, `public/sw.js`, and `scripts/fetch-vcsl-factory-samples.mjs`.
 
@@ -122,9 +184,9 @@ Primary files: `src/lib/audio/sounds/factorySamples.ts`, `src/lib/audio/sounds/p
   lazy browser-tab unmounts, removes only exact generated track/clip pairs,
   and restores prior sound/project metadata only when later edits have not
   superseded those generated values.
-- Reconciled already-realized kit/preset voices after a pack sketch so Pack B
-  cannot continue playing Pack A; an audio-enabled Play/Panic regression covers
-  the live engine path.
+- Reconciled already-realized melodic voices and updated the persistent native
+  kit selector after a pack sketch so Pack B cannot continue playing Pack A; an
+  audio-enabled Play/Panic regression covers the live engine path.
 - Reapplied merged preset sound parameters to realized voices and to preset
   rebuilds, so Undo restores both the persisted track and its audible ADSR,
   filter, glide, and send state.
@@ -171,49 +233,56 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 
 ## Verification Completed
 
-| Check | Result |
-| --- | --- |
-| Frozen pnpm install | Pass |
-| Root workspace typecheck | Pass |
-| Studio production + SSR/prerender build | Pass |
-| Focused unit tests | 35/35 pass |
-| Select-value static guard | Pass |
-| Bundle budgets | Pass |
-| Playwright browser acceptance | 19/19 pass |
-| Production dependency audit | No known vulnerabilities |
-| Production runtime matrix | 19/19 pass |
-| Ten-minute playback/Panic/cleanup gate | Pass in 604.3 sec |
-| Diff whitespace validation | Pass before documentation update; rerun at handoff |
-| Factory sample integrity | 26/26 hashes and PCM headers pass; license/manifest/preset links pass |
-| Factory browser path | 4/4 zones, max 3 concurrent, guide/preview/load and sampled WAV pass |
+| Check                                                       | Result                                                                              |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Frozen pnpm install                                         | Pass                                                                                |
+| Root workspace typecheck                                    | Pass across four packages                                                           |
+| Studio production + SSR/prerender build                     | Pass                                                                                |
+| Focused unit tests                                          | 48/48 pass                                                                          |
+| Select-value static guard                                   | Pass                                                                                |
+| Bundle budgets                                              | Pass                                                                                |
+| Playwright browser acceptance                               | 55 discovered; 54 pass plus 1 intentional default-worklet skip; exit reporter 55/55 |
+| Opt-in real AudioWorklet audibility                         | 1/1 pass                                                                            |
+| Production dependency audit                                 | No known vulnerabilities                                                            |
+| Current exact-source production runtime matrix              | Pass; 618,208 ms with zero console/page errors                                       |
+| Current exact-source ten-minute playback/Panic/cleanup gate | Pass; 5,997 ticks, 121.1 ms max gap, 0 ms silence, zero active sources/events        |
+| Diff whitespace validation                                  | Pass before documentation update; rerun at handoff                                  |
+| Factory sample integrity                                    | 26/26 hashes and PCM headers pass; license/manifest/preset links pass               |
+| Factory browser path                                        | 4/4 zones, max 3 concurrent, guide/preview/load and sampled WAV pass                |
 
 ## Required Manual Checklist Status
 
-| Acceptance item | Status |
-| --- | --- |
-| App load, no console/page errors | Automated pass |
-| Enable Audio, spacebar play/pause, Stop, Panic | Automated pass |
-| Demo load and playback responsiveness | Automated pass |
-| Ten-minute playback | Automated pass |
-| Mixer/visualizer during playback | Automated pass |
-| Normal and large sample import responsiveness | Automated pass |
-| Project save/load and unchanged autosave behavior | Automated pass |
-| JSON export/import | Automated pass |
-| WAV export | Automated pass for default/demo projects and a sampled tenor-sax preset |
-| Repeated preset and project replacement cleanup | Automated pass |
-| Performance Mode reduction | Automated pass |
-| Service-worker update/cache path | Automated production-preview pass |
-| Audible sound-quality review | Human check required |
-| Real microphone and MIDI device | Hardware check required |
-| Safari/iOS, Android, low-memory hardware | Device check required |
-| Factory instrument request/decode/export path | Automated pass |
-| Very long/dense sampled export | Remaining product/performance work |
+| Acceptance item                                          | Status                                                                  |
+| -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| App load, no console/page errors                         | Automated pass                                                          |
+| Enable Audio, spacebar play/pause, Stop, Panic           | Automated pass                                                          |
+| Demo load and short-path playback/replay                 | Automated browser pass                                                  |
+| Ten-minute playback on current exact source              | Automated production-preview pass                                      |
+| Mixer/visualizer during playback                         | Automated pass                                                          |
+| Normal and large sample import responsiveness            | Automated pass                                                          |
+| Project save/load and unchanged autosave behavior        | Automated pass                                                          |
+| JSON export/import                                       | Automated pass                                                          |
+| WAV export                                               | Automated pass for default/demo projects and a sampled tenor-sax preset |
+| Repeated preset and project replacement cleanup          | Automated pass                                                          |
+| Performance Mode reduction                               | Automated pass                                                          |
+| Service-worker update/cache path                         | Automated production-preview pass                                       |
+| Audible sound-quality review                             | Human check required                                                    |
+| Real microphone and MIDI device                          | Hardware check required                                                 |
+| Safari/iOS, Android, low-memory hardware                 | Device check required                                                   |
+| Factory instrument request/decode/export path            | Automated pass                                                          |
+| Very long/dense sampled export                           | Remaining product/performance work                                      |
+| Audible continuity through rapid kit/preset/pack changes | Automated signal/continuity pass; human listening check still required  |
 
 ## Rollback Notes
 
 - Project schema changes are additive for current data, but future-version imports intentionally fail closed.
+- Schema v6 adds `padSamples`; rollback to a schema-v5 reader would ignore that
+  custom-pad state even though the original library/clip data remains intact.
 - Remote WAM loading can only be restored after an isolated host exists; reverting to page-origin dynamic import would reintroduce the security issue.
 - The audio scheduling ownership change should be reverted as a unit with its `TransportProvider` wiring, not piecemeal.
+- Melodic build-before-swap, the persistent native kit selector, Panic
+  generations, and project-revision fences form one continuity contract;
+  reverting only one can restore the silent-after-sound-set race.
 - New presets/packs are data additions using existing engines and can be removed without migrating saved projects; unknown preset IDs already fall back safely.
 - Factory assets are additive static files. Remove their preset definitions and packs before deleting files; retained saved preset IDs will still fail safely to the normal model.
 - Keep the service-worker factory-path exception and cache-budget changes together. Removing only one can either break offline reuse or accidentally broaden sample caching.

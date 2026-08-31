@@ -70,6 +70,7 @@ import {
   studioExportFilename,
   studioProjectFilename,
 } from "../lib/export/download";
+import { formatExportWarnings } from "../lib/export/warnings";
 import { encodeMidiFile, encodeSingleTrackMidi } from "../lib/export/midi";
 import { encodeMusicXml, hasMelodicTracks } from "../lib/export/musicxml";
 import { parseMidiFile, midiToTrackPartials } from "../lib/import/midi";
@@ -407,9 +408,8 @@ export function Header() {
         downloadBlob(result.blob, filename);
         getStore().setStatus(`Exported ${format.toUpperCase()}`, "info");
       }
-      if (result.warnings?.length) {
-        getStore().setStatus(result.warnings[0], "warn");
-      }
+      const exportWarnings = formatExportWarnings(result.warnings);
+      if (exportWarnings) getStore().setStatus(exportWarnings, "warn");
       if (format === "wav") setLastWav({ blob: result.blob, filename });
       // Offer the share card after any successful export
       setShareCardData({

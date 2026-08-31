@@ -13,7 +13,11 @@ import { audio } from "../lib/audio/engine";
 import { getStore, useStore, makeId } from "../store";
 import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
 import { startPerfTimer } from "../utils/performanceDiagnostics";
-import { firstPlayMark, firstPlayMeasure, getFirstPlayFlags } from "../lib/performance/firstPlayTrace";
+import {
+  firstPlayMark,
+  firstPlayMeasure,
+  getFirstPlayFlags,
+} from "../lib/performance/firstPlayTrace";
 import { useSettings } from "../lib/settings";
 
 /**
@@ -46,12 +50,18 @@ function useTransportController(): TransportActions {
 
   // Separate mute/solo signal — cheap string comparison, no reschedule.
   const muteKey = useStore((s) =>
-    s.project.tracks.map((t) => `${t.id}:${t.muted ? 1 : 0}:${t.solo ? 1 : 0}`).join('|'),
+    s.project.tracks
+      .map((t) => `${t.id}:${t.muted ? 1 : 0}:${t.solo ? 1 : 0}`)
+      .join("|"),
   );
 
   // Schedule existing clips on play. Re-schedule only when clip structure
   // or BPM actually changes (scheduleKey), not on every fader/mute move.
-  const scheduledRef = useRef<{ noteIds: number[]; audioPlayers: Array<Tone.Player>; audioIds: number[] }>({
+  const scheduledRef = useRef<{
+    noteIds: number[];
+    audioPlayers: Array<Tone.Player>;
+    audioIds: number[];
+  }>({
     noteIds: [],
     audioPlayers: [],
     audioIds: [],
@@ -60,25 +70,44 @@ function useTransportController(): TransportActions {
   const preparationGenerationRef = useRef(0);
   const preparationRef = useRef<{
     revision: number;
+    generation: number;
     promise: Promise<boolean>;
   } | null>(null);
+  // User transport intents are separate from engine-level Panic generations.
+  // Stop must be able to revoke a Play/Record action while it is awaiting
+  // AudioContext resume, project preparation, or microphone permission.
+  const transportIntentGenerationRef = useRef(0);
   const handledPanicRevisionRef = useRef(panicRevision);
 
   // View-independent project → engine synchronization. Keeping this beside
   // the sole transport owner makes desktop and mobile playback identical.
-  useEffect(() => { audio.setBpm(bpm); }, [bpm]);
-  useEffect(() => { audio.setMaster(masterVolume); }, [masterVolume]);
+  useEffect(() => {
+    audio.setBpm(bpm);
+  }, [bpm]);
+  useEffect(() => {
+    audio.setMaster(masterVolume);
+  }, [masterVolume]);
   useEffect(() => {
     audio.setLoop(loopEnabled, loopStartBeat, loopEndBeat);
   }, [loopEnabled, loopStartBeat, loopEndBeat]);
-  useEffect(() => { audio.setMetronome(metronome); }, [metronome]);
-  useEffect(() => { audio.setMetronomeVolume(metronomeVolume); }, [metronomeVolume]);
-  useEffect(() => { audio.setSwing(globalSwing); }, [globalSwing]);
+  useEffect(() => {
+    audio.setMetronome(metronome);
+  }, [metronome]);
+  useEffect(() => {
+    audio.setMetronomeVolume(metronomeVolume);
+  }, [metronomeVolume]);
+  useEffect(() => {
+    audio.setSwing(globalSwing);
+  }, [globalSwing]);
 
   const ensureUnlocked = useCallback(async () => {
+    // The store flag records that audio worked once; it cannot represent an
+    // OS sleep, Bluetooth/output switch, or background-tab suspension. Verify
+    // the actual context on every user Play/Record action. `unlock()` is a
+    // cheap no-op while already running.
+    firstPlayMark("useTransport.ensureUnlocked:before", { audioUnlocked });
+    await audio.unlock();
     if (!audioUnlocked) {
-      firstPlayMark("useTransport.ensureUnlocked:before");
-      await audio.unlock();
       window.requestAnimationFrame(() => {
         firstPlayMark("useTransport.ensureUnlocked:set-audioUnlocked");
         getStore().set({ audioUnlocked: true });
@@ -103,10 +132,16 @@ function useTransportController(): TransportActions {
   const prepareProjectSchedules = useCallback(async (): Promise<boolean> => {
     const revision = getStore().state.transportScheduleRevision;
     if (preparedRevisionRef.current === revision) return true;
-    if (audio.getPlaybackState() === "playing" || audio.getPlaybackState() === "starting") {
+    if (
+      audio.getPlaybackState() === "playing" ||
+      audio.getPlaybackState() === "starting"
+    ) {
       return false;
     }
-    if (preparationRef.current?.revision === revision) {
+    if (
+      preparationRef.current?.revision === revision &&
+      preparationRef.current.generation === preparationGenerationRef.current
+    ) {
       return preparationRef.current.promise;
     }
 
@@ -157,8 +192,22 @@ function useTransportController(): TransportActions {
           }
         }
 
-        for (const track of tracks) {
-          if (generation !== preparationGenerationRef.current) {
+        for (const capturedTrack of tracks) {
+          if (
+            generation !== preparationGenerationRef.current ||
+            getStore().state.transportScheduleRevision !== revision
+          ) {
+            cleanupPending();
+            return false;
+          }
+          // Selector-only edits intentionally do not invalidate transport
+          // callbacks. Resolve the authoritative track immediately before
+          // realizing it so a sound-pack change during yielded preparation
+          // cannot be overwritten by this run's older project snapshot.
+          const track = getStore().state.project.tracks.find(
+            (candidate) => candidate.id === capturedTrack.id,
+          );
+          if (!track) {
             cleanupPending();
             return false;
           }
@@ -191,7 +240,7 @@ function useTransportController(): TransportActions {
 
         // Solo is a project-wide decision; apply it once with the complete set
         // after every track voice exists so ordering cannot affect audibility.
-        audio.refreshAllMutes(allTracks);
+        audio.refreshAllMutes(getStore().state.project.tracks);
 
         if (audioReady.length > 0) {
           let timeoutId: number | null = null;
@@ -234,7 +283,7 @@ function useTransportController(): TransportActions {
     };
 
     const promise = run();
-    preparationRef.current = { revision, promise };
+    preparationRef.current = { revision, generation, promise };
     try {
       return await promise;
     } finally {
@@ -247,6 +296,10 @@ function useTransportController(): TransportActions {
   const play = useCallback(async () => {
     const endTiming = startPerfTimer("transport-play");
     const startedAt = performance.now();
+    const intentGeneration = ++transportIntentGenerationRef.current;
+    const intentIsCurrent = () =>
+      transportIntentGenerationRef.current === intentGeneration;
+    const silenceGeneration = audio.getSilenceGeneration();
     firstPlayMark("useTransport.play:start", {
       audioUnlocked,
       transportState: audio.state,
@@ -254,15 +307,29 @@ function useTransportController(): TransportActions {
     });
     try {
       await ensureUnlocked();
+      if (
+        !intentIsCurrent() ||
+        audio.getSilenceGeneration() !== silenceGeneration
+      )
+        return;
       firstPlayMark("useTransport.play:before-engine-play", {
         transportState: audio.state,
         playbackState: audio.getPlaybackState(),
       });
       const prepared = await prepareProjectSchedules();
+      if (!intentIsCurrent()) return;
       if (!prepared) {
-        getStore().setStatus("Playback changed while preparing. Press Play again.", "warn");
+        getStore().setStatus(
+          "Playback changed while preparing. Press Play again.",
+          "warn",
+        );
         return;
       }
+      if (audio.getSilenceGeneration() !== silenceGeneration) {
+        clearProjectSchedules();
+        return;
+      }
+      if (!intentIsCurrent()) return;
       const started = audio.play();
       firstPlayMark("useTransport.play:after-engine-play", {
         started,
@@ -272,9 +339,13 @@ function useTransportController(): TransportActions {
       if (started) {
         getStore().set({ isPlaying: true });
       } else {
-        getStore().setStatus("Audio is still starting. Try Play again in a moment.", "warn");
+        getStore().setStatus(
+          "Audio is still starting. Try Play again in a moment.",
+          "warn",
+        );
       }
     } catch (error) {
+      if (!intentIsCurrent()) return;
       const message = error instanceof Error ? error.message : String(error);
       firstPlayMark("useTransport.play:error", { message });
       getStore().setStatus(`Playback preparation failed: ${message}`, "error");
@@ -285,7 +356,12 @@ function useTransportController(): TransportActions {
       });
       endTiming();
     }
-  }, [audioUnlocked, ensureUnlocked, prepareProjectSchedules]);
+  }, [
+    audioUnlocked,
+    clearProjectSchedules,
+    ensureUnlocked,
+    prepareProjectSchedules,
+  ]);
 
   const pause = useCallback(() => {
     audio.pause();
@@ -293,6 +369,14 @@ function useTransportController(): TransportActions {
   }, []);
 
   const stop = useCallback(async () => {
+    // Revoke pending async Play/Record work before Stop itself awaits recorder
+    // finalization. Also detach any in-flight preparation generation so a new
+    // user action can start a fresh run without inheriting the cancelled one.
+    transportIntentGenerationRef.current += 1;
+    if (preparationRef.current) {
+      preparationGenerationRef.current += 1;
+      preparedRevisionRef.current = null;
+    }
     const endTiming = startPerfTimer("transport-stop");
     try {
       // cancel any pending count-in BEFORE doing anything else so deferred
@@ -306,76 +390,140 @@ function useTransportController(): TransportActions {
         countInBeat: 0,
       });
 
-      // commit any in-progress recording first
-      const armed = getStore().state.project.tracks.find((t) => t.armed);
-      if (armed) {
-        if (armed.kind === "vocals") {
-          if (vocalRecorder.isActive()) {
-            const result = await vocalRecorder.stop();
-            if (result) {
-              getStore().addAudioClip(armed.id, {
-                id: makeId(),
-                start: result.startBeat,
-                durationSec: result.durationSec,
-                blob: result.blob,
-              });
-              // Surface the take in the sample preview dialog so the user
-              // can trim silence / normalize / fade and save it to the
-              // sample library or re-assign it.
-              getStore().set({
-                pendingSample: {
-                  blob: result.blob,
-                  defaultName: `${armed.name} take ${new Date().toLocaleTimeString()}`,
-                  recordedTrackId: armed.id,
-                },
-              });
-            }
-          }
-        } else if (noteRecorder.isActiveFor(armed.id)) {
-          const result = noteRecorder.stop();
-          if (result && result.events.length > 0) {
-            getStore().addNoteClip(armed.id, {
-              id: makeId(),
-              start: result.startBeat,
-              length: Math.max(result.lengthBeats, 1),
-              notes: result.events,
-            });
-          }
+      // Commit recordings to the track that actually owns the recorder. The
+      // currently armed track is UI state and can change during a take.
+      const vocalOwner = vocalRecorder.getTrackId();
+      if (vocalRecorder.isBusy()) {
+        const result = await vocalRecorder.stop();
+        const ownerTrack = vocalOwner
+          ? getStore().state.project.tracks.find(
+              (track) => track.id === vocalOwner,
+            )
+          : undefined;
+        if (result && ownerTrack) {
+          const recordedClipId = makeId();
+          getStore().addAudioClip(ownerTrack.id, {
+            id: recordedClipId,
+            start: result.startBeat,
+            durationSec: result.durationSec,
+            blob: result.blob,
+          });
+          // Surface the take in the sample preview dialog so the user can
+          // trim silence / normalize / fade and save it to the library.
+          getStore().set({
+            pendingSample: {
+              blob: result.blob,
+              defaultName: `${ownerTrack.name} take ${new Date().toLocaleTimeString()}`,
+              recordedTrackId: ownerTrack.id,
+              recordedClipId,
+            },
+          });
+        }
+      }
+
+      const noteOwner = noteRecorder.getTrackId();
+      if (noteRecorder.isActive()) {
+        const result = noteRecorder.stop();
+        const ownerTrack = noteOwner
+          ? getStore().state.project.tracks.find(
+              (track) => track.id === noteOwner,
+            )
+          : undefined;
+        if (result && result.events.length > 0 && ownerTrack) {
+          getStore().addNoteClip(ownerTrack.id, {
+            id: makeId(),
+            start: result.startBeat,
+            length: Math.max(result.lengthBeats, 1),
+            notes: result.events,
+          });
         }
       }
       audio.stop();
-      getStore().set({ isPlaying: false, isRecording: false, countingIn: false, countInBeat: 0 });
+      getStore().set({
+        isPlaying: false,
+        isRecording: false,
+        countingIn: false,
+        countInBeat: 0,
+      });
     } finally {
       endTiming();
     }
   }, []);
 
   const record = useCallback(async () => {
+    const state = getStore().state;
+    if (
+      state.isRecording ||
+      state.countingIn ||
+      noteRecorder.isActive() ||
+      vocalRecorder.isBusy()
+    ) {
+      getStore().setStatus(
+        "Recording is already active. Press Stop or Panic first.",
+        "warn",
+      );
+      return;
+    }
+    const intentGeneration = ++transportIntentGenerationRef.current;
+    const intentIsCurrent = () =>
+      transportIntentGenerationRef.current === intentGeneration;
+    const silenceGeneration = audio.getSilenceGeneration();
     await ensureUnlocked();
+    if (
+      !intentIsCurrent() ||
+      audio.getSilenceGeneration() !== silenceGeneration
+    )
+      return;
     const proj = getStore().state.project;
     const armed = proj.tracks.find((t) => t.armed);
     if (!armed) {
-      getStore().setStatus("Arm a track (record dot on the channel) to record.", "warn");
+      getStore().setStatus(
+        "Arm a track (record dot on the channel) to record.",
+        "warn",
+      );
       return;
     }
     try {
-      if (!(await prepareProjectSchedules())) {
-        getStore().setStatus("Project changed while preparing to record. Try again.", "warn");
+      const prepared = await prepareProjectSchedules();
+      if (!intentIsCurrent()) return;
+      if (!prepared) {
+        getStore().setStatus(
+          "Project changed while preparing to record. Try again.",
+          "warn",
+        );
+        return;
+      }
+      if (audio.getSilenceGeneration() !== silenceGeneration) {
+        clearProjectSchedules();
         return;
       }
     } catch (error) {
+      if (!intentIsCurrent()) return;
       const message = error instanceof Error ? error.message : String(error);
       getStore().setStatus(`Recording preparation failed: ${message}`, "error");
       return;
     }
 
     const startRecording = async () => {
+      if (
+        !intentIsCurrent() ||
+        audio.getSilenceGeneration() !== silenceGeneration
+      )
+        return;
       const beat = audio.positionBeats();
       if (armed.kind === "vocals") {
         try {
           const dev = getStore().state.vocalDeviceId ?? undefined;
-          await vocalRecorder.start(dev, beat);
+          await vocalRecorder.start(armed.id, dev, beat);
+          if (
+            !intentIsCurrent() ||
+            audio.getSilenceGeneration() !== silenceGeneration
+          ) {
+            vocalRecorder.cancel();
+            return;
+          }
         } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
           getStore().setStatus(
             `Mic permission required: ${(err as Error).message}`,
             "error",
@@ -383,8 +531,17 @@ function useTransportController(): TransportActions {
           return;
         }
       } else {
-        noteRecorder.start(armed.id, beat);
+        if (
+          !intentIsCurrent() ||
+          audio.getSilenceGeneration() !== silenceGeneration
+        )
+          return;
+        if (!noteRecorder.start(armed.id, beat)) {
+          getStore().setStatus("A note recording is already active.", "warn");
+          return;
+        }
       }
+      if (!intentIsCurrent()) return;
       getStore().set({ isRecording: true });
     };
 
@@ -397,7 +554,10 @@ function useTransportController(): TransportActions {
       const countInBeats = (proj.countInBars ?? 1) * 4;
       const started = audio.play();
       if (!started) {
-        getStore().setStatus("Audio is still starting. Try Record again in a moment.", "warn");
+        getStore().setStatus(
+          "Audio is still starting. Try Record again in a moment.",
+          "warn",
+        );
         return;
       }
       let n = 0;
@@ -408,7 +568,24 @@ function useTransportController(): TransportActions {
       const timeoutId = window.setTimeout(async () => {
         const cur = getStore().state.countInTimers;
         // if stop() already cleared us, abort
-        if (cur.timeout !== timeoutId) return;
+        if (cur.timeout !== timeoutId) {
+          window.clearInterval(intervalId);
+          audio.setMetronome(getStore().state.project.metronome);
+          return;
+        }
+        if (
+          !intentIsCurrent() ||
+          audio.getSilenceGeneration() !== silenceGeneration
+        ) {
+          window.clearInterval(intervalId);
+          getStore().set({
+            countingIn: false,
+            countInBeat: 0,
+            countInTimers: { interval: null, timeout: null },
+          });
+          audio.setMetronome(getStore().state.project.metronome);
+          return;
+        }
         window.clearInterval(intervalId);
         getStore().set({
           countingIn: false,
@@ -433,10 +610,13 @@ function useTransportController(): TransportActions {
         getStore().set({ isPlaying: true });
         await startRecording();
       } else {
-        getStore().setStatus("Audio is still starting. Try Record again in a moment.", "warn");
+        getStore().setStatus(
+          "Audio is still starting. Try Record again in a moment.",
+          "warn",
+        );
       }
     }
-  }, [ensureUnlocked, prepareProjectSchedules]);
+  }, [clearProjectSchedules, ensureUnlocked, prepareProjectSchedules]);
 
   useEffect(() => {
     if (panicRevision !== handledPanicRevisionRef.current) {
@@ -463,7 +643,10 @@ function useTransportController(): TransportActions {
     audio.refreshAllMutes(getStore().state.project.tracks);
   }, [muteKey]);
 
-  return useMemo(() => ({ play, pause, stop, record }), [pause, play, record, stop]);
+  return useMemo(
+    () => ({ play, pause, stop, record }),
+    [pause, play, record, stop],
+  );
 }
 
 /** Owns the sole project scheduler for the mounted Studio. All desktop,

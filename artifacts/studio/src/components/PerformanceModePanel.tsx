@@ -32,6 +32,20 @@ function getPerf(settings: PerformanceSettings | undefined): PerformanceSettings
   return { ...DEFAULT_PERF, ...(settings ?? {}) };
 }
 
+function syncPerformanceRouter(settings: PerformanceSettings | undefined) {
+  const next = getPerf(settings);
+  performanceRouter.configure({
+    active: next.open,
+    inputSource: next.inputSource,
+    scaleLock: next.scaleLock,
+    scaleRoot: next.scaleRoot,
+    scaleId: next.scaleId,
+    chordMode: next.chordMode,
+    chordType: next.chordType,
+    gamepadMappings: next.gamepadMappings ?? DEFAULT_GAMEPAD_MAPPINGS,
+  });
+}
+
 export function PerformanceModePanel() {
   const rawPerf = useStore((s) => s.project.performance);
   const perf = getPerf(rawPerf);
@@ -41,32 +55,19 @@ export function PerformanceModePanel() {
   const patch = (delta: Partial<PerformanceSettings>) => {
     const next = { ...getPerf(getStore().state.project.performance), ...delta };
     getStore().patchProject({ performance: next });
-    // Sync router config
-    performanceRouter.configure({
-      active: next.open,
-      inputSource: next.inputSource,
-      scaleLock: next.scaleLock,
-      scaleRoot: next.scaleRoot,
-      scaleId: next.scaleId,
-      chordMode: next.chordMode,
-      chordType: next.chordType,
-      gamepadMappings: next.gamepadMappings ?? DEFAULT_GAMEPAD_MAPPINGS,
-    });
+    syncPerformanceRouter(next);
   };
 
-  // Keep router in sync with persisted settings on mount
+  // A project can be replaced in place without remounting this panel. Treat
+  // the persisted object as authoritative on every such change.
   useEffect(() => {
-    const p = getPerf(getStore().state.project.performance);
-    performanceRouter.configure({
-      active: p.open,
-      inputSource: p.inputSource,
-      scaleLock: p.scaleLock,
-      scaleRoot: p.scaleRoot,
-      scaleId: p.scaleId,
-      chordMode: p.chordMode,
-      chordType: p.chordType,
-      gamepadMappings: p.gamepadMappings ?? DEFAULT_GAMEPAD_MAPPINGS,
-    });
+    syncPerformanceRouter(rawPerf);
+  }, [rawPerf]);
+
+  // The parent stops rendering the panel when `open` becomes false. Release
+  // keyboard/gamepad ownership even though no closed panel remains to sync it.
+  useEffect(() => {
+    return () => performanceRouter.configure({ active: false });
   }, []);
 
   if (!perf.open) return null;

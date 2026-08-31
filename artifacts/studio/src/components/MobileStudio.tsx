@@ -40,7 +40,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import { noteRecorder, vocalRecorder } from "../lib/audio/recorder";
+import { cancelAllRecorders } from "../lib/audio/recorder";
 import { usePwaInstallAction } from "./PwaInstallControls";
 
 /**
@@ -130,20 +130,11 @@ export function MobileStudio() {
         </button>
         <button
           type="button"
-          onClick={async () => {
+          onClick={() => {
             const timers = getStore().state.countInTimers;
             if (timers.interval !== null) window.clearInterval(timers.interval);
             if (timers.timeout !== null) window.clearTimeout(timers.timeout);
-            try {
-              if (vocalRecorder.isActive()) await vocalRecorder.stop();
-            } catch {
-              /* ignore */
-            }
-            try {
-              noteRecorder.stop();
-            } catch {
-              /* ignore */
-            }
+            cancelAllRecorders();
             audio.panicStopAll();
             getStore().set((s) => ({
               transportScheduleRevision: s.transportScheduleRevision + 1,
