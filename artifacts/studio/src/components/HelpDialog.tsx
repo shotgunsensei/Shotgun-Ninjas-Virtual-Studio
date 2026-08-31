@@ -179,12 +179,13 @@ function CoachStep({
         <Kbd>Space</Kbd> plays/pauses. <Kbd>Enter</Kbd> stops.{" "}
         <Kbd>R</Kbd> arms recording. <Kbd>?</Kbd> shows every shortcut.
       </Section>
-      <Section title="4 · Follow your Creative Compass">
-        Open <span className="font-mono text-primary-readable">Creative Compass</span>{" "}
+      <Section title="4 · Step into The Dojo">
+        Open <span className="font-mono text-primary-readable">The Dojo</span>{" "}
         from <span className="font-mono">Learn</span> on larger screens or{" "}
         <span className="font-mono">Create</span> on phones for one clear next
         move, editable musical seeds, and short explanations of why each choice
-        works.
+        works. If inspiration arrives before Record, use Never Lose the Jam to
+        recover your latest played notes as a clip.
       </Section>
       <Section title="5 · Save &amp; export">
         Press <Kbd>S</Kbd> to save. Hit <Kbd>B</Kbd> (or the{" "}

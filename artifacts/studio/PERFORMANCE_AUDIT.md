@@ -77,22 +77,22 @@ audio continuity separately from renderer responsiveness.
 
 ## Performance and Load Findings
 
-- The initial 605.11 kB gzip monolith is replaced by a 74.09 kB gzip landing startup and a 342.35 kB gzip Studio startup.
-- The verified current route totals are 231.04 kB raw for landing and 1,193.80 kB raw for Studio; the audio-continuity coverage adds only bounded route code and preserves the lazy factory-audio contract.
-- Creative Compass remains lazy: 3.75 kB gzip for the panel and 3.79 kB gzip for its pure musical recipes.
+- The initial 605.11 kB gzip monolith is replaced by a 74.42 kB gzip landing startup and a 344.71 kB gzip Studio startup.
+- The verified current route totals are 231.74 kB raw for landing and 1,201.03 kB raw for Studio; the audio-continuity coverage adds only bounded route code and preserves the lazy factory-audio contract.
+- The Dojo and bounded jam-recovery panel remain lazy at 6.88 kB gzip; its pure musical recipes remain a separate 3.79 kB gzip chunk.
 - Default public source maps were removed; a diagnostic opt-in remains.
 - Bundle budgets enforce route payloads, CSS, lazy-chunk size, no public maps, and no eager service-worker caching of Tone/Studio/export chunks.
 - The current deterministic gate passes root typecheck across four packages,
-  48/48 unit tests, 55/55 resolved browser outcomes (54 pass plus one intentional
+  52/52 unit tests, 56/56 resolved browser outcomes (55 pass plus one intentional
   default-worklet skip), a separate 1/1 opt-in real AudioWorklet test, production
   build/SSR/prerender, select-value and bundle guards, and a zero-vulnerability
   production audit.
-- The exact-source `runtime-profile-1788138360240.json` gate passed in 618,208
+- The exact-source `runtime-profile-1788144189876.json` gate passed in 618,582
   ms. During ten minutes of looped playback it changed three packs in
-  339.6/341.2/328.7 ms, recorded 5,997 continuity ticks with a 121.1 ms maximum
+  355.8/309.6/326.4 ms, recorded 5,997 continuity ticks with a 123.1 ms maximum
   gap and zero sustained silence, then reached zero active one-shots, players,
-  worklets, and Transport events after Stop/Panic. Heap returned from 38.87 MiB
-  at ten minutes to 15.45 MiB after idle garbage collection.
+  worklets, and Transport events after Stop/Panic. Heap returned from 41.43 MiB
+  at ten minutes to 16.05 MiB after idle garbage collection.
 
 Cold-load wall time varied materially across runs (234 ms before; 678, 916,
 1,269, 920, and 935 ms in post-fix Chromium samples) even as the deterministic
@@ -111,6 +111,9 @@ kalimba requests and no more than three simultaneous decode jobs.
 - No secret, private endpoint, or user project content is sent to an analytics service.
 - Remote executable plugin code is disabled rather than pretending to be safely supported.
 - User projects retain forward-version protection, explicit import errors, and portable-blob reporting.
+- The Dojo and jam recovery are deterministic and browser-local. No project,
+  performance, or guidance data is uploaded, and no account or remote model is
+  required.
 - Recorded factory content is pinned to VCSL commit `c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e`, ships with the CC0 license and exact source/hash manifest, and never fetches a third-party origin at runtime.
 
 ## Remaining Risks
@@ -124,6 +127,9 @@ kalimba requests and no more than three simultaneous decode jobs.
 7. The 64 MiB cache bounds reusable decoded buffers, not buffers still referenced by actively loaded track samplers. A project intentionally loading many distinct sampled instruments can exceed that amount while those tracks remain active.
 8. Headless Chromium proves sample requests, decode routing, preview state, and WAV structure, but cannot judge musical fidelity, real microphone/MIDI hardware behavior, Safari/iOS compatibility, or low-end mobile thermals.
 9. The repository has no lint script. TypeScript, focused static guards, unit tests, and browser tests cover this pass, but lint policy remains absent.
+10. Retrospective note capture intentionally excludes vocals/audio and formal
+   recording takes. It recovers played MIDI-style note events, not microphone
+   audio, and is bounded rather than an unlimited session archive.
 
 ## Release Assessment
 

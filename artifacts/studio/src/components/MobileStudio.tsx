@@ -340,7 +340,7 @@ export function MobileStudio() {
             />
             <MenuItem
               icon={<Sparkles className="w-4 h-4" />}
-              label="Creative Compass"
+              label="The Dojo"
               onClick={() => {
                 setMenuOpen(false);
                 window.dispatchEvent(new CustomEvent("studio:open-creative"));

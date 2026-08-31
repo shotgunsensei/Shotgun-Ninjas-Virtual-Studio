@@ -49,7 +49,52 @@ async function projectSnapshot(page: Page) {
   });
 }
 
-test.describe("Creative Compass", () => {
+test.describe("The Dojo", () => {
+  test("adapts its guidance and recovers an unrecorded jam as an undoable clip", async ({
+    page,
+  }) => {
+    await openStudio(page);
+    const before = await projectSnapshot(page);
+
+    await page.evaluate(async () => {
+      const [{ getStore }, { jamCapture }] = await Promise.all([
+        import("/src/store.ts"),
+        import("/src/lib/performance/jamCapture.ts"),
+      ]);
+      const project = getStore().state.project;
+      const track = project.tracks.find(
+        (item) => item.kind !== "drums" && item.kind !== "vocals",
+      );
+      if (!track) throw new Error("expected a melodic recovery target");
+      jamCapture.setActiveProject(project.id, project.bpm);
+      jamCapture.captureOneShot(track.id, "C4", 0.3, 0.82);
+      jamCapture.captureOneShot(track.id, "E4", 0.35, 0.76);
+      jamCapture.captureOneShot(track.id, "G4", 0.4, 0.88);
+    });
+
+    await page.getByTestId("learn-menu").click();
+    await page.getByTestId("open-creative-compass").click();
+    const dojo = page.getByTestId("creative-compass");
+    await expect(dojo).toContainText("The Dojo");
+    await page.getByTestId("dojo-guidance-surprise").click();
+    await expect(dojo).toContainText("Creative dare:");
+    await expect(page.getByTestId("jam-recovery-ready")).toBeVisible();
+
+    await page.getByTestId("jam-recover").click();
+    await expect(page.getByTestId("compass-created-status")).toContainText("Recovered jam");
+    const recovered = await projectSnapshot(page);
+    expect(recovered.clips).toHaveLength(before.clips.length + 1);
+    expect(
+      recovered.clips.find((clip) => clip.id === recovered.selectedClipId)?.name,
+    ).toMatch(/^Recovered Jam/);
+    expect(recovered.isPlaying).toBe(false);
+
+    await page.getByTestId("compass-undo").click();
+    const undone = await projectSnapshot(page);
+    expect(undone.clips).toHaveLength(before.clips.length);
+    await expect(page.getByTestId("jam-recovery-ready")).toBeVisible();
+  });
+
   test("adds and develops an editable idea without replacing work or starting audio", async ({
     page,
   }) => {
@@ -70,7 +115,7 @@ test.describe("Creative Compass", () => {
     expect(afterSeed.revision).toBe(before.revision + 1);
     expect(afterSeed.isPlaying).toBe(false);
     const seed = afterSeed.clips.find((clip) => clip.id === afterSeed.selectedClipId);
-    expect(seed?.name).toMatch(/^Compass ·/);
+    expect(seed?.name).toMatch(/^Dojo ·/);
     expect(seed?.length).toBe(8);
     expect(seed?.noteCount).toBeGreaterThan(0);
     expect(afterSeed.loopEndBeat).toBeGreaterThan(before.loopEndBeat);

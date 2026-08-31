@@ -78,9 +78,9 @@ Final bundle-budget measurements:
 
 | Budget             |                            Final |
 | ------------------ | -------------------------------: |
-| Landing initial JS |    231.04 kB raw / 74.09 kB gzip |
-| Studio initial JS  | 1,193.80 kB raw / 342.35 kB gzip |
-| Shared CSS         |    156.17 kB raw / 23.22 kB gzip |
+| Landing initial JS |    231.74 kB raw / 74.42 kB gzip |
+| Studio initial JS  | 1,201.03 kB raw / 344.71 kB gzip |
+| Shared CSS         |    157.23 kB raw / 23.36 kB gzip |
 | Largest lazy chunk |                    58.39 kB gzip |
 
 Primary files: `src/router.tsx`, `src/App.tsx`, `src/components/Header.tsx`, `src/components/Footer.tsx`, `src/components/LeftBrowser.tsx`, `src/components/TransportBar.tsx`, `src/components/ChannelStrip.tsx`, `public/sw.js`, and `vite.config.ts`.
@@ -238,14 +238,14 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 | Frozen pnpm install                                         | Pass                                                                                |
 | Root workspace typecheck                                    | Pass across four packages                                                           |
 | Studio production + SSR/prerender build                     | Pass                                                                                |
-| Focused unit tests                                          | 48/48 pass                                                                          |
+| Focused unit tests                                          | 52/52 pass                                                                          |
 | Select-value static guard                                   | Pass                                                                                |
 | Bundle budgets                                              | Pass                                                                                |
-| Playwright browser acceptance                               | 55 discovered; 54 pass plus 1 intentional default-worklet skip; exit reporter 55/55 |
+| Playwright browser acceptance                               | 56 discovered; 55 pass plus 1 intentional default-worklet skip; exit reporter 56/56 |
 | Opt-in real AudioWorklet audibility                         | 1/1 pass                                                                            |
 | Production dependency audit                                 | No known vulnerabilities                                                            |
-| Current exact-source production runtime matrix              | Pass; 618,208 ms with zero console/page errors                                       |
-| Current exact-source ten-minute playback/Panic/cleanup gate | Pass; 5,997 ticks, 121.1 ms max gap, 0 ms silence, zero active sources/events        |
+| Current exact-source production runtime matrix              | Pass; 618,582 ms with zero console/page errors                                       |
+| Current exact-source ten-minute playback/Panic/cleanup gate | Pass; 5,997 ticks, 123.1 ms max gap, 0 ms silence, zero active sources/events        |
 | Diff whitespace validation                                  | Pass before documentation update; rerun at handoff                                  |
 | Factory sample integrity                                    | 26/26 hashes and PCM headers pass; license/manifest/preset links pass               |
 | Factory browser path                                        | 4/4 zones, max 3 concurrent, guide/preview/load and sampled WAV pass                |
@@ -286,3 +286,33 @@ Primary files: `src/lib/export/midi.ts`, `src/lib/plugins/wam-loader.ts`, `src/l
 - New presets/packs are data additions using existing engines and can be removed without migrating saved projects; unknown preset IDs already fall back safely.
 - Factory assets are additive static files. Remove their preset definitions and packs before deleting files; retained saved preset IDs will still fail safely to the normal model.
 - Keep the service-worker factory-path exception and cache-budget changes together. Removing only one can either break offline reuse or accidentally broaden sample caching.
+
+## The Dojo and Never Lose the Jam
+
+- Evolved Creative Compass into **The Dojo** without replacing its lazy chunk,
+  pure recipe engine, editable clips, or scoped Undo contract.
+- Added Teach, Surprise, and Quiet guidance levels. The local deterministic
+  session reads the current project's foundations and changes its explanation,
+  creative constraint, target, and recipe without mutating the arrangement.
+- Added a bounded retrospective performance buffer at the successful live-audio
+  trigger boundary. One-shot notes, held notes, chords, drums, MIDI, QWERTY,
+  gamepad, and on-screen instruments converge there; scheduled transport events
+  remain outside it.
+- Formal note recording explicitly suspends retrospective capture, preventing a
+  normal recorded take from appearing twice.
+- Added 15/30/60/120-second recovery windows, natural or light 1/16 timing,
+  compatible destination-track selection, exact-event consumption, explicit
+  discard, and restoration of claimed events when the recovered clip is undone.
+- Stored only bounded event metadata in local browser storage, with debounced
+  writes and page-hide flushing. No audio Blob, project export, network request,
+  account, or telemetry path was added.
+- Removed Tone Transport look-ahead from direct drum and custom-pad gestures;
+  live hits now use the audio context's immediate time, while scheduled events
+  retain their explicit timestamp. Lean automation ramps use the same immediate
+  clock so a mute lane and a human hit cannot cross by 100 ms.
+
+Primary files: `src/lib/creative/dojo.ts`,
+`src/lib/performance/jamCapture.ts`, `src/lib/audio/engine.ts`,
+`src/lib/audio/recorder.ts`, `src/components/CreativeCompassPanel.tsx`,
+`src/components/Header.tsx`, `src/components/MobileStudio.tsx`, and
+`scripts/dojo-and-jam-capture.test.ts`.

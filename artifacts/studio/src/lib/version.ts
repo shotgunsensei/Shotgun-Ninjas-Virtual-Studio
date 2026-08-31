@@ -4,7 +4,7 @@
  * Bumped manually as each Phase 3 task lands. Surfaced in the footer,
  * the About dialog, and any future PWA update toast.
  */
-export const APP_VERSION = "4.2.0-compass";
+export const APP_VERSION = "4.3.0-dojo";
 export const APP_NAME = "Shotgun Ninjas Virtual Studio";
 /** Canonical landing URL stamped on exported projects so a JSON file
  *  always tells you where it came from. The browser preview rewrites
@@ -26,6 +26,17 @@ export interface ChangelogEntry {
  * Newest entry first.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "4.3.0-dojo",
+    date: "2026-08-30",
+    highlights: [
+      "The Dojo turns Creative Compass into a project-aware local mentor with Teach, Surprise, and Quiet guidance levels.",
+      "Never Lose the Jam captures a bounded history of successful live notes while formal Record is off, without recording scheduled playback.",
+      "Recover the latest 15 seconds to two minutes as an editable clip with natural timing or optional 1/16 tightening.",
+      "Recovered ideas are consumed only after placement and return to the recovery buffer when the scoped clip Undo is used.",
+      "Jam history stays in this browser, flushes on page hide, spans at most four recent projects and 2,048 events, and can be discarded at any time.",
+    ],
+  },
   {
     version: "4.2.0-compass",
     date: "2026-08-30",

@@ -434,7 +434,7 @@ export function createCreativeSeed({
     start,
     length: 8,
     notes,
-    name: `Compass · ${CREATIVE_RECIPE_COPY[safeRecipe].label}`,
+    name: `Dojo · ${CREATIVE_RECIPE_COPY[safeRecipe].label}`,
     color: track.meta?.color,
     bars: 2,
     division: "1/16",
@@ -556,15 +556,15 @@ export function createCreativeVariation({
   const name =
     track.kind === "drums"
       ? variation === "answer"
-        ? "Compass · Turnaround fill"
+        ? "Dojo · Turnaround fill"
         : variation === "lift"
-          ? "Compass · Half-time space"
-          : "Compass · Ghost pocket"
+          ? "Dojo · Half-time space"
+          : "Dojo · Ghost pocket"
       : variation === "answer"
-        ? "Compass · Answer phrase"
+        ? "Dojo · Answer phrase"
         : variation === "lift"
-          ? "Compass · Octave lift"
-          : "Compass · Pocket edit";
+          ? "Dojo · Octave lift"
+          : "Dojo · Pocket edit";
   return {
     id,
     start,

@@ -175,27 +175,50 @@ test.describe("real-audio continuity", () => {
     await openRealAudioStudio(page);
     await realizeDrumTrack(page);
 
-    await page.evaluate(async () => {
-      const [{ audio }, { getStore }, Tone] = await Promise.all([
+    const drumId = await page.evaluate(async () => {
+      const [{ audio }, { getStore }, { jamCapture }, Tone] = await Promise.all([
         import("/src/lib/audio/engine.ts"),
         import("/src/store.ts"),
+        import("/src/lib/performance/jamCapture.ts"),
         import("/node_modules/.vite/deps/tone.js"),
       ]);
       const drums = getStore().state.project.tracks.find(
         (track) => track.kind === "drums",
       );
       if (!drums) throw new Error("Default project has no drum track.");
+      jamCapture.discardTrack(getStore().state.project.id, drums.id);
       audio.panicStopAll();
       audio.triggerDrumAt(drums.id, "kick", 1, Tone.now() + 0.05);
+      return drums.id;
     });
 
     const heldOutput = await captureOutput(page, 500);
     expect(heldOutput.peakDb).toBeLessThan(-70);
+    const scheduledCaptureCount = await page.evaluate(async (trackId) => {
+      const [{ getStore }, { jamCapture }] = await Promise.all([
+        import("/src/store.ts"),
+        import("/src/lib/performance/jamCapture.ts"),
+      ]);
+      return jamCapture
+        .getProjectEvents(getStore().state.project.id)
+        .filter((event) => event.trackId === trackId).length;
+    }, drumId);
+    expect(scheduledCaptureCount).toBe(0);
 
     // A new direct pad gesture intentionally releases the hold.
     const directPeak = await measurePeak(page, "live-drum");
     expect(directPeak).not.toBeNull();
     expect(directPeak!).toBeGreaterThan(-55);
+    const directCaptureCount = await page.evaluate(async (trackId) => {
+      const [{ getStore }, { jamCapture }] = await Promise.all([
+        import("/src/store.ts"),
+        import("/src/lib/performance/jamCapture.ts"),
+      ]);
+      return jamCapture
+        .getProjectEvents(getStore().state.project.id)
+        .filter((event) => event.trackId === trackId).length;
+    }, drumId);
+    expect(directCaptureCount).toBe(1);
   });
 
   test("Sound Library preview stays bounded, audible, and Panic-owned", async ({

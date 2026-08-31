@@ -119,7 +119,7 @@ export class DrumPadSampleManager {
   trigger(
     trackId: string,
     piece: DrumPadSamplePiece,
-    time: number,
+    time: number | undefined,
     velocity: number,
   ): PadSampleTriggerResult {
     if (velocity <= 0.001) return "suppressed";
@@ -147,9 +147,10 @@ export class DrumPadSampleManager {
     // stop an assigned open-hat just as an assigned hit stops the modeled
     // sibling, even when the incoming piece has no ready custom resource.
     if (piece === "hat" || piece === "ohat") {
+      const chokeTime = time ?? Tone.immediate();
       for (const sibling of ["hat", "ohat"] as const) {
         const siblingResource = this.resources.get(this.key(trackId, sibling));
-        if (siblingResource) this.stopResourceSources(siblingResource, time);
+        if (siblingResource) this.stopResourceSources(siblingResource, chokeTime);
       }
     }
 
@@ -183,7 +184,12 @@ export class DrumPadSampleManager {
         resource.durationSec * Math.max(0.05, Math.min(1, settings?.decay ?? 1)),
       );
       resource.activeSources.add(source);
-      source.start(time, 0, duration, Math.max(0.001, Math.min(1, velocity)));
+      // Direct gestures resolve `now` after source construction. Reusing a
+      // timestamp captured by the engine before this work can put the first
+      // hit in the past under load, even though the decoded resource is ready.
+      // Transport callers still pass an explicit audio time and remain exact.
+      const startTime = time ?? Tone.immediate();
+      source.start(startTime, 0, duration, Math.max(0.001, Math.min(1, velocity)));
       return "played";
     } catch {
       if (source) {

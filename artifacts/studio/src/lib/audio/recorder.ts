@@ -1,6 +1,7 @@
 import * as Tone from "tone";
 import { audio } from "./engine";
 import type { NoteEvent } from "../../types";
+import { jamCapture } from "../performance/jamCapture";
 
 /**
  * Note recorder. Captures attack/release events while transport is rolling
@@ -26,6 +27,7 @@ class NoteRecorder {
     this.clipStartBeat = atBeat;
     this.events = [];
     this.pending.clear();
+    jamCapture.setFormalRecordingActive(true);
     return true;
   }
 
@@ -42,6 +44,7 @@ class NoteRecorder {
     this.trackId = null;
     this.events = [];
     this.pending.clear();
+    jamCapture.setFormalRecordingActive(false);
   }
 
   isActiveFor(trackId: string): boolean {
@@ -93,6 +96,7 @@ class NoteRecorder {
     this.pending.clear();
     this.active = false;
     this.trackId = null;
+    jamCapture.setFormalRecordingActive(false);
     const events = this.events;
     this.events = [];
     return {

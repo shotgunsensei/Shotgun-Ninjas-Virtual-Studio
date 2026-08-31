@@ -12,10 +12,14 @@ every visible knob, slider, button, and pad is wired to real audio.
   TX81Z piano, folk harp, vibraphone, Tanzanian kalimba, ocarina, and tenor sax
   stabs. Zones load on demand and are cached for offline reuse instead of being
   added to the startup bundle.
-- **Creative Compass** with arrangement-aware next moves, deterministic
-  editable motif/chord/pulse/groove seeds, related variations, musical
-  explanations, and scoped undo. Pack previews can become ordinary two-bar
-  drum/melody clips without changing tempo or replacing user work.
+- **The Dojo**, a project-aware local musical mentor with Teach, Surprise, and
+  Quiet guidance levels, arrangement-aware next moves, editable musical seeds,
+  playful constraints, explanations, and scoped undo. Nothing is generated or
+  played unless the musician asks for it.
+- **Never Lose the Jam** keeps a bounded, browser-local history of notes played
+  while formal Record is off. Recover the latest 15 seconds to two minutes as
+  an ordinary editable clip, preserve natural feel or tighten to a 1/16 grid,
+  undo safely, or discard it at any time. Scheduled playback is never captured.
 - **Creative practice tools** with instrument listening guides, pack prompts,
   melodic preview phrases, and lessons on motifs, timbre/register,
   call-and-response, and harmony.

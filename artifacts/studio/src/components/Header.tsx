@@ -1129,7 +1129,7 @@ export function Header() {
               className="font-mono text-xs"
               data-testid="open-creative-compass"
             >
-              <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Creative Compass
+              <Sparkles className="w-3.5 h-3.5 mr-1.5" /> The Dojo
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setLessonsOpen(true)}

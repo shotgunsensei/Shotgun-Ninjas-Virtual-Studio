@@ -23,9 +23,9 @@ The pre-change build placed almost the entire application in one initial JavaScr
 | Measurement        |                           Before |                            Final |
 | ------------------ | -------------------------------: | -------------------------------: |
 | Monolithic main JS | 2,123.67 kB raw / 605.11 kB gzip |   Replaced by route-aware chunks |
-| Landing initial JS |             Included in monolith |    231.04 kB raw / 74.09 kB gzip |
-| Studio initial JS  |             Included in monolith | 1,193.80 kB raw / 342.35 kB gzip |
-| Shared CSS         |                    153.13 kB raw |    156.17 kB raw / 23.22 kB gzip |
+| Landing initial JS |             Included in monolith |    231.74 kB raw / 74.42 kB gzip |
+| Studio initial JS  |             Included in monolith | 1,201.03 kB raw / 344.71 kB gzip |
+| Shared CSS         |                    153.13 kB raw |    157.23 kB raw / 23.36 kB gzip |
 | Public source map  |                      8,176.30 kB |           Not emitted by default |
 | Largest lazy chunk |                              N/A |       MP3 encoder, 58.39 kB gzip |
 
@@ -51,12 +51,13 @@ Runtime decode behavior is bounded independently of transfer size:
 - The shared native WAV/MP3 render reuses decoded zones and selects/repitches
   the nearest chromatic root rather than exporting the modeled approximation.
 
-## Creative Compass Follow-up Baseline
+## The Dojo and Jam Recovery Baseline
 
-The 4.2 follow-up adds a deterministic, data-only composition coach and keeps
-it outside the initial Studio route. `CreativeCompassPanel` is a 3.75 kB gzip
-lazy chunk; the pure recipe converter is a separate 3.79 kB gzip chunk. No new
-audio package, worker, sample, scheduler, or project-schema field was added.
+The 4.3 follow-up evolves the deterministic, data-only composition coach into
+The Dojo and adds bounded retrospective note capture. The combined Dojo and
+jam-recovery panel remains outside the initial Studio route at 6.88 kB gzip;
+the pure recipe converter remains a separate 3.79 kB gzip chunk. No new audio
+package, worker, sample, scheduler, or project-schema field was added.
 
 The Sound Library's new **Start editable sketch** path converts the same
 two-bar preview data into ordinary note clips. It performs one project patch,
@@ -71,7 +72,7 @@ side effects.
 Responsive production checks at 600, 768, 1,024, 1,366, and 1,440 CSS pixels
 measured `header.scrollWidth === header.clientWidth`; Project, Load, Export,
 and Learn remained pointer-accessible. Eligible PWA install actions remain
-reachable from More and the phone menu. The Creative Compass stayed within
+reachable from More and the phone menu. The Dojo stayed within
 320- and 390-pixel mobile viewports without horizontal or vertical escape.
 
 ## Audio-Continuity Baseline
@@ -146,18 +147,18 @@ requirement rather than being hidden as a deterministic runtime win.
 
 Current exact-source status: **pass**.
 
-`runtime-profile/runtime-profile-1788138360240.json` completed the production
-release gate in 618,208 ms. It configured a real 16-beat loop through Timeline
+`runtime-profile/runtime-profile-1788144189876.json` completed the production
+release gate in 618,582 ms. It configured a real 16-beat loop through Timeline
 controls, kept Mixer and Audio Diagnostics open, changed through three sound
 packs during playback, and then exercised Stop, Panic, settled sample promotion,
 replay, second cleanup, ten seconds idle, and forced garbage collection.
 
-- Three live pack changes completed in 339.6, 341.2, and 328.7 ms.
-- The 100 ms continuity probe advanced 5,997 times; its largest gap was 121.1
-  ms, peak was -1.11 dBFS, and longest measured silence was 0 ms.
-- Heap samples at 1/5/10 minutes were 25.77/33.37/38.87 MiB and returned to
-  15.45 MiB after cleanup, idle, and forced garbage collection.
-- Five long tasks totaled 635 ms; the largest was 314 ms during startup/setup.
+- Three live pack changes completed in 355.8, 309.6, and 326.4 ms.
+- The 100 ms continuity probe advanced 5,997 times; its largest gap was 123.1
+  ms, peak was -1.01 dBFS, and longest measured silence was 0 ms.
+- Heap samples at 1/5/10 minutes were 21.58/17.27/41.43 MiB and returned to
+  16.05 MiB after cleanup, idle, and forced garbage collection.
+- Four long tasks totaled 629 ms; the largest was 342 ms during startup/setup.
 - Final cleanup reported zero active lean one-shots, scheduled players,
   AudioWorklet nodes, or Transport events.
 - The final context diagnostic was browser-native `AudioContext` with no
@@ -166,10 +167,10 @@ replay, second cleanup, ten seconds idle, and forced garbage collection.
 ## Current Automated Matrix
 
 - Root typecheck: pass across four packages.
-- Focused unit suite: 48/48 pass.
-- Browser suite: 55 tests discovered; 54 pass and the default AudioWorklet test
+- Focused unit suite: 52/52 pass.
+- Browser suite: 56 tests discovered; 55 pass and the default AudioWorklet test
   intentionally skips when the opt-in is absent. The exit reporter records
-  55/55 resolved outcomes.
+  56/56 resolved outcomes.
 - Opt-in real AudioWorklet audibility test: 1/1 pass.
 - Production build, SSR, and prerender: pass.
 - Bundle budget, select-value guard, and production dependency audit: pass.
@@ -187,13 +188,13 @@ continuous output, live sound-set convergence, replay, and final cleanup.
 | `corepack pnpm install --frozen-lockfile` | Pass; lockfile current                                                                                                                                                               |
 | `corepack pnpm typecheck` (root)          | Pass across four packages                                                                                                                                                            |
 | `corepack pnpm build` (Studio)            | Pass, including SSR/prerender                                                                                                                                                        |
-| `corepack pnpm test:unit`                 | Pass, 48/48, including audio ownership/routing, recorder lifecycle, storage FIFO, custom pad samples, missing-sample recovery, export context, factory integrity, and creative tools |
+| `corepack pnpm test:unit`                 | Pass, 52/52, including audio ownership/routing, recorder lifecycle, bounded jam recovery, storage FIFO, custom pad samples, missing-sample recovery, export context, factory integrity, and creative tools |
 | `corepack pnpm test:select-values`        | Pass                                                                                                                                                                                 |
 | `corepack pnpm test:bundle`               | Pass                                                                                                                                                                                 |
-| `corepack pnpm test`                      | Pass: 55 discovered, 54 passed, 1 intentional default-worklet skip; exit reporter 55/55                                                                                              |
+| `corepack pnpm test`                      | Pass: 56 discovered, 55 passed, 1 intentional default-worklet skip; exit reporter 56/56                                                                                              |
 | Opt-in AudioWorklet browser gate          | Pass, 1/1 real-worklet audibility test                                                                                                                                               |
 | `corepack pnpm audit --prod`              | Pass, no known vulnerabilities                                                                                                                                                       |
-| `node scripts/runtime-profile.mjs`        | Pass: exact-source 618,208 ms production gate; 5,997 continuity ticks, 121.1 ms max gap, 0 ms sustained silence, and zero active sources/events after cleanup                          |
+| `node scripts/runtime-profile.mjs`        | Pass: exact-source 618,582 ms production gate; 5,997 continuity ticks, 123.1 ms max gap, 0 ms sustained silence, and zero active sources/events after cleanup                          |
 | Focused factory browser gate              | Pass: guide, 4/4 local zones, max 3 concurrent, sampled preview/load, native WAV                                                                                                     |
 
 ## Manual Acceptance Boundary
@@ -222,3 +223,24 @@ corepack pnpm --filter @workspace/studio serve
 ```
 
 Use production preview for performance acceptance. Development HMR and React development checks are not representative audio-performance measurements.
+
+## Dojo and Jam-Recovery Performance Contract
+
+The v4.3 Dojo expansion does not create an audio node, scheduler, worker,
+network request, or high-frequency React store update. The panel remains lazy
+and subscribes to the recovery service only while it is mounted.
+
+- Live capture is attached only after a direct audio trigger succeeds. Drum
+  callbacks carrying an explicit scheduler time are excluded, so transport
+  playback cannot record itself.
+- Formal note recording suspends the retrospective buffer and clears pending
+  held-note ownership before the recorded take begins.
+- Recovery retains at most 2,048 completed events across the four most recently
+  used project ids. Persistence is debounced and flushed on page hide instead
+  of synchronously writing storage in the live-trigger hot path.
+- Dojo analysis is deterministic, synchronous project-data inspection. Seed or
+  recovery clips enter the existing store and transport lifecycle as ordinary
+  note clips; no parallel playback owner was added.
+- Direct drum/custom-pad gestures use `Tone.immediate()` instead of Transport
+  look-ahead. Five consecutive assigned-open-hat runs passed after this repair;
+  scheduled callbacks continue to use their explicit audio-clock time.

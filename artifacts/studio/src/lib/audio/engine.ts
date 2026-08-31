@@ -74,6 +74,7 @@ import {
 } from "../performance/firstPlayTrace";
 import { recordLeanDrumTrace, trackToneCreate, trackToneDispose } from "../performance/audioNodeTrace";
 import { markStartupSound } from "../performance/startupSoundTrace";
+import { jamCapture } from "../performance/jamCapture";
 
 const AUDIO_WORKLETS_ENABLED = import.meta.env?.VITE_STUDIO_ENABLE_AUDIO_WORKLETS === "1";
 const AUDIO_START_TIMEOUT_MS = 5_000;
@@ -2438,7 +2439,7 @@ class AudioEngine {
           value = Math.max(0, Math.min(1, value + r.depth * (modOut - 0.5)));
         }
         if (voice) this.applyAutomationParam(voice, lane.param, value);
-        else lean?.applyAutomation(lane.param, value, Tone.now() + 0.02);
+        else lean?.applyAutomation(lane.param, value, Tone.immediate() + 0.02);
       }
     }
   }
@@ -2638,6 +2639,7 @@ class AudioEngine {
     if (!v?.poly) return;
     try {
       v.poly.triggerAttackRelease(note, durationSec, undefined, velocity);
+      jamCapture.captureOneShot(trackId, note, durationSec, velocity);
       if (source) this.notifyFirstNote(source);
       else this.noteEverPlayed = true;
     } catch {
@@ -2687,6 +2689,7 @@ class AudioEngine {
     if (!v?.poly) return;
     try {
       (v.poly as Tone.PolySynth).triggerAttack(note, undefined, velocity);
+      jamCapture.noteOn(trackId, note, velocity);
       if (source) this.notifyFirstNote(source);
       else this.noteEverPlayed = true;
     } catch {
@@ -2697,12 +2700,16 @@ class AudioEngine {
   endNote(trackId: string, note: string) {
     this.pendingHeldNotes.delete(`${trackId}:${note}`);
     const v = this.voices.get(trackId);
-    if (!v?.poly) return;
+    if (!v?.poly) {
+      jamCapture.noteOff(trackId, note);
+      return;
+    }
     try {
       (v.poly as Tone.PolySynth).triggerRelease(note);
     } catch {
       // ignore
     }
+    jamCapture.noteOff(trackId, note);
   }
 
   /** Map drum piece names to Chop Lab slice indices (for "Use as Kit"). */
@@ -2766,23 +2773,28 @@ class AudioEngine {
     if (this.chopKitTrackId === trackId) {
       const sliceIndex = AudioEngine.PIECE_TO_SLICE_INDEX[piece] ?? 0;
       getChopEngine().triggerSlice(sliceIndex, time);
+      if (time === undefined) jamCapture.captureDrum(trackId, piece, velocity);
       this.noteEverPlayed = true;
       return;
     }
 
     this.ensurePlayableTrack(trackId, "live-drum");
     this.drumPadSampleManager.refreshRouting(trackId);
-    const t = time ?? Tone.now();
     const lean = this.leanDrumVoices.get(trackId);
     const padResult = this.drumPadSampleManager.trigger(
       trackId,
       piece as DrumPadSamplePiece,
-      t,
+      time,
       velocity,
     );
+    // Direct pad gestures should sound at the native context's current time.
+    // Tone.now() adds scheduler look-ahead, which is correct for Transport but
+    // makes a live hit feel late and can miss a short first-output probe.
+    const t = time ?? Tone.immediate();
     if (padResult !== "fallback") {
       if (padResult === "played") {
         lean?.chokeExternal(piece, t);
+        if (time === undefined) jamCapture.captureDrum(trackId, piece, velocity);
         this.noteEverPlayed = true;
       }
       return;
@@ -2791,6 +2803,7 @@ class AudioEngine {
     if (lean && (!v || (!v.kit && !v.drums))) {
       recordLeanDrumTrace("hit-scheduled", { trackId, piece });
       lean.trigger(piece, t, velocity);
+      if (time === undefined) jamCapture.captureDrum(trackId, piece, velocity);
       this.noteEverPlayed = true;
       return;
     }
@@ -2801,6 +2814,7 @@ class AudioEngine {
         const pv = v.kit.pieces.get(piece);
         if (pv) {
           pv.trigger(t, velocity);
+          if (time === undefined) jamCapture.captureDrum(trackId, piece, velocity);
           this.noteEverPlayed = true;
         }
         return;
@@ -2809,6 +2823,7 @@ class AudioEngine {
         const inst = v.drums[piece];
         if (inst) {
           inst.trigger(t, velocity);
+          if (time === undefined) jamCapture.captureDrum(trackId, piece, velocity);
           this.noteEverPlayed = true;
         }
       }

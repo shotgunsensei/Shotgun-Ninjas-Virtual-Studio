@@ -35,6 +35,7 @@ import type {
   Track,
   TrackEq,
 } from "./types";
+import { jamCapture } from "./lib/performance/jamCapture";
 import { AUTOMATION_PARAM_DEFAULTS, SEND_BUS_LABELS } from "./types";
 
 import type { ChopSliceSetting } from "./lib/audio/chopEngine";
@@ -227,6 +228,7 @@ class Store {
   };
 
   constructor(project: Project) {
+    jamCapture.setActiveProject(project.id, project.bpm);
     this.state = {
       project,
       projectRevision: 0,
@@ -308,6 +310,9 @@ class Store {
       keys: Object.keys(patch),
     });
     const project = { ...this.state.project, ...patch, updatedAt: Date.now() };
+    if (patch.id !== undefined || patch.bpm !== undefined) {
+      jamCapture.setActiveProject(project.id, project.bpm);
+    }
     const scheduleChanged = projectSchedulingChanged(this.state.project, project);
     this.state = {
       ...this.state,

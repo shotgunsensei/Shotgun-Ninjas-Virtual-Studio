@@ -27,7 +27,7 @@ const FEATURES = [
   {
     icon: "🧠",
     title: "Learn by creating",
-    desc: "Instrument listening guides, composition prompts, and creative-practice lessons teach ideas inside the workflow.",
+    desc: "The local Dojo mentor, jam recovery, listening guides, prompts, and creative-practice lessons teach inside the workflow.",
   },
   {
     icon: "⚡",

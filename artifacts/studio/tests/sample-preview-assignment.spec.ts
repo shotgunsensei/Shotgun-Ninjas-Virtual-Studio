@@ -405,15 +405,30 @@ test("modeled closed hat chokes a playing assigned open hat", async ({ page }) =
     audio.triggerDrum(trackId, "ohat", 0.9);
     await new Promise((resolve) => window.setTimeout(resolve, 40));
     const assignedOpenPeak = await capturePeak(80);
+    const beforeClosedPadState = window.__SN_AUDIO_ENGINE_STATUS__
+      ?.padSamples()
+      .find((entry) => entry.trackId === trackId && entry.piece === "ohat") ?? null;
 
     audio.triggerDrum(trackId, "hat", 0.9);
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     const afterModeledClosedPeak = await capturePeak(80);
+    const contextState = (window as Window & {
+      __SN_NATIVE_TONE_CONTEXT__?: AudioContext;
+    }).__SN_NATIVE_TONE_CONTEXT__?.state ?? "missing";
+    const padState = window.__SN_AUDIO_ENGINE_STATUS__
+      ?.padSamples()
+      .find((entry) => entry.trackId === trackId && entry.piece === "ohat") ?? null;
     audio.panicStopAll();
-    return { assignedOpenPeak, afterModeledClosedPeak };
+    return {
+      assignedOpenPeak,
+      afterModeledClosedPeak,
+      contextState,
+      beforeClosedPadState,
+      padState,
+    };
   }, drumId);
 
-  expect(result.assignedOpenPeak).toBeGreaterThan(0.01);
+  expect(result.assignedOpenPeak, JSON.stringify(result)).toBeGreaterThan(0.01);
   expect(result.afterModeledClosedPeak).toBeLessThan(0.001);
 });
 
