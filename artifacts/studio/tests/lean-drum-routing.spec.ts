@@ -6,6 +6,7 @@ test("a pack loaded while stopped keeps lean drums audible on first Play", async
   test.setTimeout(60_000);
   await page.addInitScript(() => {
     localStorage.setItem("studio.onboardingShown", "1");
+    localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
     localStorage.setItem("studio.browser.tab", "tracks");
   });
   await page.goto("/studio?snAudioNodeTrace=1&snFirstPlayTrace=1", {

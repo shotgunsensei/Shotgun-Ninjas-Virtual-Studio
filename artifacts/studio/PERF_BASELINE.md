@@ -1,5 +1,98 @@
 # Performance Baseline
 
+## 2026-09-12 — Basic/Advanced and tutor acceptance
+
+Scope: progressive disclosure and optional integrated teaching on the existing
+engine. No before/after audio-latency measurement was taken. Basic mounts fewer
+panels and animations; this is a structural observation, not a measured speedup.
+
+### Commands and outcomes
+
+The repo enforces pnpm, so its equivalents were used instead of npm install.
+
+| Check | Result |
+| --- | --- |
+| `pnpm install --frozen-lockfile --config.confirmModulesPurge=false` | Pass; locked versions unchanged; required network/cache permission |
+| `pnpm run typecheck` | Pass across the workspace |
+| `PORT=5173 BASE_PATH=/ pnpm run build` | Pass: workspace typechecks and mockup/video/API/studio builds, including studio SSR/prerender |
+| `pnpm --filter @workspace/studio build` | Pass, client + SSR + prerender |
+| `pnpm --filter @workspace/studio run --if-present lint` | No lint script is defined; TypeScript and select-value guards run |
+| `pnpm --filter @workspace/studio test:unit` | 73/73 pass, including 11 new preservation/preference cases |
+| Full browser suite | Pass: 82 passed, 3 expected opt-in skips (85 resolved), fresh server and no concurrent source edits; final keyboard/phone and backup refinements checked separately |
+| Basic plus suspended-context regression run | 9/9 pass |
+| Final keyboard/phone regressions | 3/3 pass: native Space, Basic Delete/Backspace protection with Advanced deletion retained, and phone tutor practice preserving song/lesson |
+| Production workflow | Pass: real Save/Load, JSON backup download → restore → reload → re-export equality, audible WAV, retained settings, 390px phone |
+| Ten-minute production playback | Pass: 600 seconds, 20 responsiveness checks with advancing transport, version changes and mixer open/close; no page errors |
+| `test:bundle`, `test:select-values`, `git diff --check` | Pass |
+| `pnpm --filter @workspace/studio serve --port 5175` | Pass; production preview verified in the in-app browser |
+
+The browser tests use installed Google Chrome via
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=C:/Program Files/Google/Chrome/Application/chrome.exe`.
+The final full dev run let Playwright start a fresh Vite server at 5174. To use
+an already running server, set `STUDIO_TEST_REUSE_SERVER=1`. Production tests
+set `STUDIO_PRODUCTION_TEST=1`, `STUDIO_TEST_PORT=5175`,
+`STUDIO_TEST_REUSE_SERVER=1`, and `STUDIO_LEARNING_SOAK=1`, then run
+`test -- basic-production.spec.ts --output=test-results-production` against the
+built preview. Both production cases passed; they are skipped in the ordinary
+dev suite along with the existing opt-in worklet case. Production tests load
+no `/src/` modules. Screenshots and actual
+downloaded WAV/JSON outputs are in ignored `test-results-production/`.
+
+Final bundle guard: landing initial JS 75.21 kB gzip; studio initial JS
+353.48 kB gzip; CSS 23.53 kB gzip. Existing large-chunk warning remains. Tutor
+and Basic workspace are lazy chunks, with no new dependencies or audio owner.
+
+### Required manual checklist (current evidence and boundaries)
+
+Automated browser coverage and direct in-app checks are identified explicitly.
+
+| Requirement | Current result |
+| --- | --- |
+| App loads without console errors | Pass: production workflow and direct in-app production inspection |
+| Enable Audio works | Pass: Basic/Advanced real-audio tests and in-app production |
+| Spacebar play/pause works | Pass: direct production keyboard check; focused grid buttons retain native Space behavior |
+| Stop releases audio | Pass: real-audio regression and production transport |
+| Panic stops all audio | Pass: real-audio output falls below -80 dB and late scheduled callbacks remain revoked |
+| Demo loads without freezing | Pass: welcome/Remix and production blank/demo loads |
+| Playback runs 10 minutes | Pass: ten-minute production check, 20 responsive UI checkpoints, no page errors or unresponsive page |
+| Mixer opens during playback | Pass: opens/closes at every production checkpoint and in Advanced regressions |
+| Visualizer opens during playback | Advanced MasterScope mounts during production mode switches; independent visualizer stress not separately profiled |
+| Normal sample import does not freeze | Pass: existing real custom-sample import/rejection/assignment tests rerun |
+| Project save does not freeze | Pass: actual production Save and portable persistence tests |
+| Project load does not freeze | Pass: production reload/Load and replacement-safety tests |
+| JSON export works | Pass: actual production download parsed and editable track notes verified |
+| WAV export works or limits documented | Pass: 6,174,044-byte PCM WAV, peak 22,175; existing synthesis/FX approximation warning remains visible |
+| Autosave skips unchanged projects | Existing policy/unit guards pass; timed unchanged-project write-count profiling not repeated in this pass |
+| Hidden panels stop animation loops | Basic unmounts Advanced mixer/scope and tutor removes its listener; background-tab ticker profiling not repeated |
+| Kit/instrument switching does not steadily leak | Bounded voice/cancellation regressions pass; no new long-duration heap-slope profile |
+| Project load/unload does not stack events | Ownership/replacement regressions pass; extended schedule-count soak not repeated |
+| Performance Mode reduces visual load | Existing visual throttles unchanged; toggling persisted performance state covered, FPS reduction not remeasured |
+| Production behaves better or equal to dev | Same Basic workflow passes in both; no comparative latency benchmark claimed |
+
+Still requires human/device acceptance: children/teen usability sessions,
+headphone/speaker listening, real MIDI/microphone hardware, Safari/iOS, and a
+low-memory Android phone. Basic intentionally exposes only some note/timing and
+sound controls; Advanced preserves the remainder. Whole-song export follows
+the project's full timeline length; use the visible loop/custom range controls
+to omit unused bars. Tutor completion is self-paced, not assessment or proof of
+a successful save/export.
+
+Test setup corrections: development file watching now ignores generated
+downloads/reports to avoid Windows `EBUSY` errors on locked WAV files. Empty
+`REPL_ID` no longer enables Replit-only development plugins. Advanced tests
+explicitly select Advanced; startup setup no longer deletes a live IndexedDB
+database and then navigates again. Earlier HMR/store-identity and startup
+failures passed on isolated checks and on the final fresh-server full run.
+The soak checks responsiveness and transport progression; it does not measure
+continuous acoustic output, heap growth, or latency. Downloads exercise the
+browser fallback; the native operating-system save picker was not tested.
+The final three-test keyboard/phone run collapses the Advanced mixer through
+its normal control so timeline clips remain reachable at a 720px-high viewport.
+The final production workflow was rerun after these source refinements and
+passes, including the backup restore comparison. The in-app preview also
+accepted its service-worker update and reloaded with Basic/tutor visible,
+no pending update, and no console errors.
+
 ## 2026-09-12 — Sample instrument expansion (4.5.0)
 
 The user explicitly requested additional instruments and creating an instrument

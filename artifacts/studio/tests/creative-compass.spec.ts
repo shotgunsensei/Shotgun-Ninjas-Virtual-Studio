@@ -5,6 +5,7 @@ const STUDIO_URL = "/studio?disableAudio=1";
 async function openStudio(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("studio.onboardingShown", "1");
+    localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
   });
   await page.goto(STUDIO_URL, { waitUntil: "domcontentloaded" });
   await page.locator("header").waitFor({ state: "visible", timeout: 15_000 });
@@ -143,6 +144,7 @@ test.describe("The Dojo", () => {
     test.slow();
     await page.addInitScript(() => {
       localStorage.setItem("studio.onboardingShown", "1");
+      localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
     });
 
     for (const width of [600, 768, 1024, 1440]) {
@@ -191,6 +193,7 @@ test.describe("The Dojo", () => {
   }) => {
     await page.addInitScript(() => {
       localStorage.setItem("studio.onboardingShown", "1");
+      localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
     });
 
     for (const width of [1024, 1440]) {

@@ -1,5 +1,52 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-09-12 — Basic/Advanced and integrated learning
+
+- Added a lazy Basic workspace with drum/note grids, editable starter ideas,
+  clip/bar selection, simple sound/volume controls, fixed-source repetition,
+  guarded undo, and save/export actions using the existing store and engine.
+- Kept the full Advanced workspace and all project data. Both views work with
+  the same transport provider. Mode/tutor choices persist independently.
+- Added a lazy nonmodal seven-lesson tutor with explicit on/off, back/next,
+  restart, task navigation, and truthful audio/edit feedback. It subscribes
+  only to low-frequency state and cleans up its event listener on unmount.
+- Introduced both versions and the optional tutor in welcome and the landing
+  page; updated Settings, Footer, quick start, and the practice library.
+- Simplified Basic transport and export labels. Kept Stop/Panic accessible and
+  provided real WAV/MP3 and full project backup downloads. Additional export
+  formats remain available behind a disclosure.
+- Added **Open project backup (JSON)** directly to Load, using the existing
+  import review and project-preservation path. A production roundtrip downloads
+  the backup, restores it through Load, reloads, and compares exported music.
+- Preserved current work before welcome template replacement. Protected native
+  keyboard activation and dialog focus from global transport shortcuts.
+- Restricted whole-clip Delete/Backspace shortcuts to Advanced, protecting
+  Basic grid edits. Phone tutor lessons offer Basic practice when they require
+  note grids or the arrangement tools absent from the Advanced phone layout.
+- Added exact-path LF handling for the pinned factory license on Windows;
+  the normalized license bytes equal HEAD and the existing manifest hash.
+- Excluded generated test downloads/reports from development watching to avoid
+  locked-WAV `EBUSY` crashes, and disabled Replit dev plugins for empty REPL_ID.
+
+Primary source: App.tsx, BasicStudio.tsx, GuidedTutor.tsx, Header.tsx,
+TransportBar.tsx, HelpDialog.tsx, SettingsModal.tsx, LessonsPanel.tsx, Footer.tsx,
+LandingPage.tsx, lib/settings.ts, and lib/learning/basicWorkflow.ts. New tests
+cover preservation, alignment, linear repetition, undo, onboarding, tutor
+persistence, phone layout, live playback, and real production downloads.
+Legacy Advanced UI tests now request that version explicitly. Startup test
+setup uses its fresh browser context without deleting a live IndexedDB database.
+The 73-unit suite and full browser suite (82 passed, three opt-in skips) pass.
+After the final refinements, three keyboard/phone regressions and the production
+backup roundtrip pass on the final build. The full root build also passes.
+Production checks pass for real downloads/save/load and ten minutes of playback
+with 20 responsive version/mixer checks. See PERF_BASELINE.md for test boundaries.
+
+Before: a largely full-control Beginner screen plus modal help. After: a
+five-task Basic workflow with optional in-place lessons and one-click access
+to Advanced. The guide adds no scheduling loop or audio owner. Detailed test
+results and device limitations are in PERF_BASELINE.md; user instructions are
+in BASIC_ADVANCED_GUIDE.md.
+
 ## 2026-09-12 — Factory and custom instrument expansion (4.5.0)
 
 Added Steinway B Grand, French Harpsichord, Chapel Pipe Organ, Concert Marimba,

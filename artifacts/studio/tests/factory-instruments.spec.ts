@@ -16,6 +16,7 @@ test.describe("CC0 factory instruments", () => {
     test.setTimeout(60_000);
     await page.addInitScript(() => {
       localStorage.setItem("studio.onboardingShown", "1");
+      localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
     });
 
     const errors: string[] = [];

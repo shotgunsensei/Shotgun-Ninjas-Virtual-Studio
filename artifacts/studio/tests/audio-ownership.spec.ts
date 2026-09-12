@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 async function openStudio(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("studio.onboardingShown", "1");
+    localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
     localStorage.setItem("studio.browser.tab", "library");
   });
   await page.goto("/studio?disableAudio=1", { waitUntil: "domcontentloaded" });

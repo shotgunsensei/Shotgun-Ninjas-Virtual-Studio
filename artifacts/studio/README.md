@@ -5,6 +5,12 @@ every visible knob, slider, button, and pad is wired to real audio.
 
 ## Features
 
+- **Basic and Advanced** share the same music. Basic offers an editable beat
+  grid, bass/melody ideas, song repetition, sound/volume controls, and
+  save/download. Advanced retains the full studio. An optional seven-lesson
+  tutor is introduced at welcome, remembers your place, and can be turned off
+  or restarted. See [the workflow guide](./BASIC_ADVANCED_GUIDE.md).
+
 - **39 melodic presets and 19 sound packs**, including modeled piano, guitar,
   bass, synth, orchestral/world colors, multi-kit drums, and real microphone
   vocals.
@@ -51,7 +57,7 @@ every visible knob, slider, button, and pad is wired to real audio.
   configurable 15/30/60-second durable autosave (30 seconds by default) plus a
   short-debounced recovery draft. One Auto-save switch controls both paths.
 - **Cyber-ninja branding** — dark graphite + red primary + neon-blue accent.
-- **Adaptive workspace** — new users start in the lighter Beginner view,
+- **Adaptive workspace** — new users start in the lighter Basic view,
   command groups remain reachable on tablets, phones get the same Create/Learn
   entry points, and existing expert preferences are preserved.
 - **Performance controls** — bounded sample decoding/cache, lazy-loaded panels,

@@ -138,8 +138,51 @@ const ShareCardModal = lazy(() =>
   import("./ShareCardModal").then((module) => ({ default: module.ShareCardModal })),
 );
 
+/** Shared with the phone workspace; these preferences never replace a project. */
+export function StudioModeControls() {
+  const uiMode = useSettings((s) => s.uiMode);
+  const tutorEnabled = useSettings((s) => s.tutorEnabled);
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="studio-mode-controls">
+      <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="Studio version">
+        {(["beginner", "expert"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setSettings({ uiMode: mode })}
+            aria-pressed={uiMode === mode}
+            data-testid={`studio-mode-${mode}`}
+            title={mode === "beginner" ? "Basic: fewer controls for making your first beat or song" : "Advanced: the full studio and all sound controls"}
+            className={`min-h-9 rounded px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              uiMode === mode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
+            }`}
+          >
+            {mode === "beginner" ? "Basic" : "Advanced"}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        aria-pressed={tutorEnabled}
+        aria-label="Learning tutor"
+        data-testid="studio-tutor-toggle"
+        onClick={() => setSettings({ tutorEnabled: !tutorEnabled })}
+        title="Turn the step-by-step learning tutor on or off in either version"
+        className={`flex min-h-10 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          tutorEnabled ? "border-primary/50 bg-primary/10 text-primary-readable" : "border-border text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <GraduationCap className="h-4 w-4" aria-hidden="true" />
+        Tutor {tutorEnabled ? "on" : "off"}
+      </button>
+    </div>
+  );
+}
+
 export function Header() {
   const project = useStore((s) => s.project);
+  const basicMode = useSettings((s) => s.uiMode === "beginner");
   const [, setLocation] = useLocation();
   const [openLoad, setOpenLoad] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -996,7 +1039,7 @@ export function Header() {
   };
 
   return (
-    <header className="h-14 min-w-0 border-b border-border flex items-center px-2 lg:px-3 gap-2 bg-graphite">
+    <header className="min-h-14 shrink-0 min-w-0 border-b border-border flex flex-wrap items-center px-2 lg:px-3 py-2 gap-2 bg-graphite">
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
@@ -1006,7 +1049,7 @@ export function Header() {
           aria-label="Back to home"
         >
           <Logo className="w-8 h-8" />
-          <div className="hidden min-[1180px]:block leading-tight">
+          <div className="hidden min-[1560px]:block leading-tight">
             <div className="font-display text-sm tracking-[0.2em] text-foreground/90">
               SHOTGUN NINJAS
             </div>
@@ -1032,6 +1075,8 @@ export function Header() {
         />
       </div>
 
+      <StudioModeControls />
+
       <div className="flex shrink-0 items-center gap-1">
         <Tip label="Save project (S)">
           <Button
@@ -1042,7 +1087,7 @@ export function Header() {
             aria-label="Save project"
           >
             <Save className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Save</span>
+            <span className={basicMode ? "inline" : "hidden xl:inline"}>Save</span>
           </Button>
         </Tip>
 
@@ -1093,7 +1138,7 @@ export function Header() {
             data-testid="open-load-dialog"
           >
             <FolderOpen className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Load</span>
+            <span className={basicMode ? "inline" : "hidden xl:inline"}>Load</span>
           </Button>
         </Tip>
 
@@ -1107,7 +1152,7 @@ export function Header() {
           data-testid="open-export"
         >
           <Download className="w-3.5 h-3.5" />
-          <span className="hidden xl:inline">Export</span>
+          <span className={basicMode ? "inline" : "hidden xl:inline"}>Export</span>
         </Button>
 
         <DropdownMenu>
@@ -1120,7 +1165,7 @@ export function Header() {
               data-testid="learn-menu"
             >
               <BookOpen className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Learn</span>
+              <span className={basicMode ? "inline" : "hidden xl:inline"}>Learn</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="font-mono text-xs">
@@ -1221,7 +1266,7 @@ export function Header() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {showShortcutsButton && (
+        {!basicMode && showShortcutsButton && (
           <Tip label="Keyboard shortcuts (?)" >
             <Button
               variant="outline"
@@ -1234,7 +1279,7 @@ export function Header() {
             </Button>
           </Tip>
         )}
-        {pwaInstall.available && (
+        {!basicMode && pwaInstall.available && (
           <div className="hidden 2xl:block">
             <Button
               size="sm"
@@ -1256,7 +1301,7 @@ export function Header() {
             </Button>
           </div>
         )}
-        <ThemeSwitcher />
+        {!basicMode && <ThemeSwitcher />}
         {pwaInstall.dialog}
         <input
           ref={jsonImportRef}
@@ -1333,10 +1378,11 @@ export function Header() {
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Export song</DialogTitle>
             <DialogDescription>
+              {basicMode && <span className="block mb-2">Download music to listen to, or a project backup to keep editing on another day or device.</span>}
               <span className="font-mono text-xs">
                 {project.name} · {project.bpm} BPM ·{" "}
                 {project.loopEnabled
@@ -1352,7 +1398,7 @@ export function Header() {
 
               <div className="space-y-1">
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
-                  Export range
+                  {basicMode ? "How much of your song?" : "Export range"}
                 </div>
                 <label className="flex items-center gap-2 text-xs font-mono cursor-pointer">
                   <input
@@ -1362,7 +1408,7 @@ export function Header() {
                     checked={exportRangeMode === "whole"}
                     onChange={() => getStore().setExportRangeMode("whole")}
                   />
-                  Whole song ({project.bars} bars)
+                  Whole song ({project.bars} bars){basicMode && " · recommended"}
                 </label>
                 {project.loopEnabled && (
                   <label className="flex items-center gap-2 text-xs font-mono cursor-pointer">
@@ -1385,7 +1431,7 @@ export function Header() {
                     onChange={() => getStore().setExportRangeMode("custom")}
                   />
                   Custom range
-                  {exportRangeMode !== "custom" && (
+                  {!basicMode && exportRangeMode !== "custom" && (
                     <span className="text-[10px] text-muted-foreground/70">
                       — or drag the Export strip on the timeline
                     </span>
@@ -1405,6 +1451,7 @@ export function Header() {
                         getStore().setExportRangeBars(v, end);
                       }}
                       className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
+                      aria-label="First bar to export"
                       data-testid="export-custom-start-bar"
                     />
                     <span className="text-xs font-mono text-muted-foreground">to</span>
@@ -1419,6 +1466,7 @@ export function Header() {
                         getStore().setExportRangeBars(start, v);
                       }}
                       className="w-16 h-7 rounded border border-border bg-background px-2 text-xs font-mono text-center"
+                      aria-label="Last bar to export"
                       data-testid="export-custom-end-bar"
                     />
                     <span className="text-xs font-mono text-muted-foreground">
@@ -1444,18 +1492,24 @@ export function Header() {
               <div className="grid grid-cols-1 gap-2">
                 <button
                   type="button"
-                  data-testid="export-project-only"
-                  onClick={() => {
-                    onJsonExport("project-only");
-                    setExportModalOpen(false);
-                  }}
-                  className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                  data-testid="export-wav"
+                  onClick={() => startExport("wav", { loopOnly: false })}
+                  className="w-full text-left border border-primary/50 rounded-md p-3 bg-primary/5 hover:bg-primary/10 transition-colors"
                 >
-                  <div className="font-mono text-sm flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5" /> Export project only
-                  </div>
+                  <div className="font-mono text-sm">{basicMode ? "Download song (WAV) · recommended" : "Export audio (WAV)"}</div>
                   <div className="text-xs text-muted-foreground">
-                    Lightweight .snproj.json — no embedded audio.
+                    {basicMode ? "A high-quality audio file you can play and share." : "Uncompressed PCM, 44.1 kHz, 16-bit stereo."}
+                    {fsSaveSupported && " Pick a save location."}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startExport("mp3", { loopOnly: false })}
+                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm">{basicMode ? "Download smaller song (MP3)" : "Export MP3"}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {basicMode ? "An audio file that takes up less space and is easy to send." : "192 kbps stereo. Smaller, easy to share."}
                   </div>
                 </button>
                 <button
@@ -1468,36 +1522,32 @@ export function Header() {
                   className="text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
                 >
                   <div className="font-mono text-sm flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5" /> Export project + samples
+                    <FileText className="w-3.5 h-3.5" /> {basicMode ? "Download project backup (JSON)" : "Export project + samples"}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Self-contained .snproj.json with embedded sample audio.
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  data-testid="export-wav"
-                  onClick={() => startExport("wav", { loopOnly: false })}
-                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
-                >
-                  <div className="font-mono text-sm">Export audio (WAV)</div>
-                  <div className="text-xs text-muted-foreground">
-                    Uncompressed PCM, 44.1 kHz, 16-bit stereo.
-                    {fsSaveSupported && " Pick a save location."}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startExport("mp3", { loopOnly: false })}
-                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
-                >
-                  <div className="font-mono text-sm">Export MP3</div>
-                  <div className="text-xs text-muted-foreground">
-                    192 kbps stereo. Smaller, easy to share.
+                    {basicMode ? "Keep your notes, settings, and imported sounds together. Open this file with Load to keep making music." : "Self-contained .snproj.json with embedded sample audio."}
                   </div>
                 </button>
               </div>
 
+              <details key={basicMode ? "basic-export" : "advanced-export"} open={!basicMode} className="space-y-3">
+                <summary className="cursor-pointer rounded-md border border-border px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Advanced export options</summary>
+                <button
+                  type="button"
+                  data-testid="export-project-only"
+                  onClick={() => {
+                    onJsonExport("project-only");
+                    setExportModalOpen(false);
+                  }}
+                  className="w-full text-left border border-border rounded-md p-3 bg-background hover:bg-accent/40 transition-colors"
+                >
+                  <div className="font-mono text-sm flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" /> Export project only
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Lightweight .snproj.json with no embedded audio. Keep a separate copy of imported sounds.
+                  </div>
+                </button>
               <div className="pt-1 border-t border-border space-y-2">
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground pt-1">
                   DAW &amp; Format Exports
@@ -1631,6 +1681,7 @@ export function Header() {
               )}
 
               <CopyableShareBlurb />
+              </details>
             </div>
           )}
 
@@ -1682,15 +1733,33 @@ export function Header() {
       </Dialog>
 
       <Dialog open={openLoad} onOpenChange={setOpenLoad}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Load project</DialogTitle>
             <DialogDescription>
-              Pick a built-in demo to play with, or open one of your saved
-              sessions.
+              Open a project backup from your device, a project saved in this
+              browser, or a built-in demo.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 max-h-[28rem] overflow-y-auto pr-1">
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="min-h-11 w-full justify-start gap-2"
+                data-testid="load-project-backup"
+                onClick={() => {
+                  setOpenLoad(false);
+                  jsonImportRef.current?.click();
+                }}
+              >
+                <Upload className="h-4 w-4" aria-hidden />
+                Open project backup (JSON)
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Choose a project JSON file you downloaded from Export. You can
+                review its contents before replacing your current song.
+              </p>
+            </div>
             <section
               data-testid="recovery-section"
               className="border border-border rounded-md p-2 bg-background"

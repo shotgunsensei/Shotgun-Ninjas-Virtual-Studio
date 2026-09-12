@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { GraduationCap, ChevronLeft, ChevronRight, X, CheckCircle2 } from "lucide-react";
+import { setSettings } from "../lib/settings";
 
 interface LessonStep {
   instruction: string;
@@ -30,15 +31,15 @@ const LESSONS: Lesson[] = [
     steps: [
       {
         instruction:
-          "Welcome! First, make sure you have a Drums track. Look at the left sidebar for a track labeled 'Drums'. Click it to select it.",
+          "In Basic, open the beat maker. In Advanced, select a Drums track in Tracks and open Inspector on the right. Enable audio before trying the sounds.",
       },
       {
         instruction:
-          "With the Drums track selected, look for the drum pads grid in the main area. You'll see rows for Kick, Snare, Hi-hat and more.",
+          "Find the step grid with rows for Kick, Snare, and Hat. A lit square is a scheduled hit. The larger drum pads in Advanced play sounds live; they do not add a step unless you record.",
       },
       {
         instruction:
-          "Click the first square in the Kick row to place a kick on beat 1. Then click squares 5 and 13 in the Snare row (beats 2 and 4). You have a basic pattern!",
+          "For a one-bar pattern divided into 16 steps, turn on Kick steps 1 and 9 and Snare steps 5 and 13. These place kick on beats 1 and 3 and snare on beats 2 and 4. If a square is already lit, leave it on.",
       },
       {
         instruction:
@@ -46,7 +47,7 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Press the Play button in the transport bar (or press Space) to hear your beat loop. Press Space again to stop. Congratulations — you made a beat!",
+          "Press Play to hear your beat. Pause keeps your place, Stop returns to the beginning, and Panic cuts all sound. Enable Loop if you want the same section to repeat.",
         highlight: "[aria-label='Play'], [aria-label='Pause']",
         highlightLabel: "Play/Pause button",
       },
@@ -59,7 +60,7 @@ const LESSONS: Lesson[] = [
     steps: [
       {
         instruction:
-          "The mixer lives at the bottom of the screen — a row of channel strips, one per track plus a Master strip on the right.",
+          "Basic has a sound-level control for each track. For this lesson's full mixer controls, switch to Advanced and open Mixer at the bottom. Each channel strip controls one track; Master controls the combined output.",
       },
       {
         instruction:
@@ -75,8 +76,7 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "The Master strip (far right) controls the overall output level. Keep it below 0 dBFS on the meter — if the meter turns red you're clipping.",
-        highlight: "[data-testid='master-strip']",
+          "The Master strip at the far right controls overall loudness. Watch for the red CLIP warning and lower loud tracks if it appears. Keep your listening volume comfortable.",
         highlightLabel: "Master strip",
       },
     ],
@@ -98,7 +98,7 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Swing adds a shuffle feel — every other 16th note is delayed slightly. Find the Swing slider in the transport bar next to the BPM field.",
+          "Swing changes the spacing of alternating notes to create a shuffle feel. Switch to Advanced to find the Swing slider in the transport bar next to BPM.",
         highlight: "[aria-label*='Swing'], .swing-slider",
         highlightLabel: "Swing slider",
       },
@@ -119,13 +119,13 @@ const LESSONS: Lesson[] = [
     steps: [
       {
         instruction:
-          "Select a track by clicking its channel strip. Then look for the FX button at the bottom of that strip — click it to open the effects rack.",
+          "Switch to Advanced, select a track, and open Inspector on the right. Scroll down to Effects Rack. The mixer strip's FX button also selects that track; expand Inspector if it is collapsed.",
         highlight: "[data-testid^='fx-open']",
         highlightLabel: "FX button",
       },
       {
         instruction:
-          "In the right-hand inspector panel, find 'Reverb'. Toggle the switch next to it to turn reverb on. You'll hear the track sound more spacious.",
+          "In Effects Rack, click the Reverb power button to turn it on. Play your track and listen for a room-like tail after each note.",
       },
       {
         instruction:
@@ -137,7 +137,7 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Remember: less is more with effects on individual tracks. Save the heavy reverb for a send bus so multiple tracks share the same space.",
+          "Toggle the effect off and on to compare. Stop when it adds the space you want without blurring the rhythm. The mixer also has shared effect sends, covered in the sends lesson.",
       },
     ],
   },
@@ -173,7 +173,7 @@ const LESSONS: Lesson[] = [
 
   /* ── Intermediate lessons ── */
   {
-    title: "Sends & Return Tracks",
+    title: "Shared Effect Sends",
     summary: "Route multiple tracks through a shared reverb or delay bus.",
     category: "intermediate",
     steps: [
@@ -183,17 +183,17 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "In the mixer, each channel strip has a SEND knob (often labeled 'SND' or shown as a row of small knobs). Turn it up to route some of that channel's signal to the return bus.",
-        highlight: "[data-testid^='send-knob']",
-        highlightLabel: "Send knob",
+          "Switch to Advanced and open Mixer. Below the EQ and HPF controls are four send sliders. Hover over a row to read its effect name. Raise one a little while your track plays.",
+        highlight: "[data-testid^='send-']",
+        highlightLabel: "Effect send slider",
       },
       {
         instruction:
-          "The return track (also called an Aux or FX bus) receives all those sends and applies one effect — for example, a single Reverb. Add Reverb to the return track and set its wet mix to 100%.",
+          "This studio provides built-in shared effects, so you do not need to create a return track or add a plugin. Each send blends a copy of the track into that shared effect while keeping the original sound.",
       },
       {
         instruction:
-          "Now raise the send amount on your Drums channel. You'll hear reverb on the drums but the original dry signal stays clean. Try adding the Snare's send too.",
+          "Try the same send on a second track. Listen for the two tracks sharing a similar space. Start low and compare with the send at zero.",
       },
       {
         instruction:
@@ -212,14 +212,11 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Add a bass line. Create a new track (or use an existing synth track) and program a 2-bar bass pattern in the piano roll that follows your kick hits for a tight low-end.",
-        highlight: "[data-testid='add-track'], [aria-label*='Add track']",
-        highlightLabel: "Add Track button",
+          "Select the existing Bass track and write a short bass pattern in its piano roll in Advanced. In Basic, use the bass idea action to add an editable starting point. Try matching some bass notes to the kick rhythm.",
       },
       {
         instruction:
-          "Duplicate the drum pattern to fill 8 bars — right-click the clip in the timeline and choose 'Duplicate', or drag while holding Alt/Option.",
-        highlight: "[data-testid='timeline']",
+          "In Advanced, use the clip's menu on the timeline and choose Duplicate. Drag clips to place them in order. Repeat the idea in Basic with its song-building controls.",
         highlightLabel: "Timeline",
       },
       {
@@ -228,7 +225,7 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Review the arrangement: drums first, then bass enters on bar 3, chords on bar 5. Automate the master volume to fade in and you have a full intro-verse structure!",
+          "In Advanced, try moving the bass clip to bar 3 and the melody to bar 5, leaving drums at the start. Listen from the beginning and check that the project and loop range cover the full arrangement.",
       },
     ],
   },
@@ -239,8 +236,7 @@ const LESSONS: Lesson[] = [
     steps: [
       {
         instruction:
-          "Double-click any clip in the timeline to open the piano roll editor. You'll see a grid — horizontal lines are pitches, the vertical axis is time.",
-        highlight: "[data-testid='piano-roll'], [aria-label*='Piano roll']",
+          "Switch to Advanced, select a piano, guitar, or bass track, and open Inspector. Its piano roll edits that track's first note clip. Pitches run vertically, and time runs from left to right.",
         highlightLabel: "Piano roll",
       },
       {
@@ -249,12 +245,12 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Right-click a note to delete it, or click and drag it to move it to a different pitch or time position. Hold Shift while dragging to snap to the grid.",
+          "Drag the body of a note to move it, or drag its right edge to change its length. The Div control sets the grid spacing used for snapping. Clicking a note selects it.",
       },
       {
         instruction:
           "Use the velocity lane at the bottom of the piano roll. Taller bars mean louder notes. Click a bar and drag up or down to accent or soften individual notes.",
-        highlight: "[data-testid='velocity-lane']",
+        highlight: "[data-velocity-lane]",
         highlightLabel: "Velocity lane",
       },
       {
@@ -274,17 +270,17 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Select your bass track and open its FX rack. Add an EQ plugin. You'll see a frequency graph — the left side is bass, the right is treble.",
+          "Switch to Advanced and open Mixer. Each track has LO, MID, and HI controls for its low, middle, and high frequencies. Start with small changes and listen in the whole mix.",
         highlight: "[data-testid^='fx-open']",
         highlightLabel: "FX / EQ button",
       },
       {
         instruction:
-          "Apply a High-Pass Filter (HPF) to every non-bass track. Cut everything below 80–120 Hz — this removes rumble and gives the bass room to breathe.",
+          "If a track adds unwanted low rumble, try its HPF button and cutoff slider. Raise the cutoff slowly, then back off if the sound becomes too thin. Bass and kick often need their low frequencies.",
       },
       {
         instruction:
-          "On the snare, try boosting around 2–5 kHz for snap and presence. Cut a narrow band around 400 Hz if it sounds boxy. Trust your ears more than your eyes.",
+          "Try lowering MID slightly on a crowded track, or adjusting HI for brightness. These are broad tone controls, so judge the result by ear rather than looking for a detailed frequency graph.",
       },
       {
         instruction:
@@ -293,31 +289,29 @@ const LESSONS: Lesson[] = [
     ],
   },
   {
-    title: "Layering Drums for Punch",
-    summary: "Stack samples on the same pad to create a thicker, punchier sound.",
+    title: "Layering Drum Hits",
+    summary: "Combine kick, snare, or clap hits and balance the result.",
     category: "intermediate",
     steps: [
       {
         instruction:
-          "Great drum sounds often come from layering two or three samples on the same hit — for example a punchy 808 sub kick layered under a snappy acoustic kick.",
+          "Layering means playing sounds together. Start with the drum step grid and try a snare and clap on the same beat. Listen to how their attacks and tails combine.",
       },
       {
         instruction:
-          "In the drum grid, click the pad name (e.g. 'Kick') to open its sample settings. Look for a 'Layer' or '+' button to add a second sample to the same pad.",
-        highlight: "[data-testid^='pad-settings'], [aria-label*='Pad settings']",
-        highlightLabel: "Pad settings",
+          "In Advanced, select Drums, open Inspector, and choose Show Piece Mixer above the pads. The piece mixer lets you change the loudness and tone of each drum sound.",
       },
       {
         instruction:
-          "Choose a complementary sample — if your first kick is low and boomy, pick a second that's bright and clicky. Together they cover the full frequency range.",
+          "Choose sounds with different jobs: the snare supplies the snap while the clap adds a wider tail. Remove a hit if the combined sound becomes cluttered.",
       },
       {
         instruction:
-          "Adjust the volume balance between layers. A common ratio is 70% sub / 30% click. You want the sub to feel like weight and the click to cut through headphones.",
+          "Lower the clap in the piece mixer until it supports the snare. Listen with the whole beat playing, because two loud sounds together can overload the mix.",
       },
       {
         instruction:
-          "Apply a short Attack and fast Release on a compressor over the layered kick to glue the two samples together. You should now feel the kick as one unified punch rather than two separate sounds.",
+          "Mute the clap, then bring it back. Keep the layer only if you prefer the result. This is also a useful listening exercise with a kick and a quieter tom.",
       },
     ],
   },
@@ -332,21 +326,20 @@ const LESSONS: Lesson[] = [
       },
       {
         instruction:
-          "Open the Master channel strip and add an EQ first. Apply a gentle high-shelf boost (+1–2 dB at 10 kHz) for air, and a low-shelf boost (+1 dB at 80 Hz) for weight.",
-        highlight: "[data-testid='master-strip']",
+          "Switch to Advanced and open Mixer. The Master strip is on the far right. Start with its volume at a comfortable level and listen to the complete song before changing anything.",
         highlightLabel: "Master channel strip",
       },
       {
         instruction:
-          "Add a Compressor after the EQ on the master bus. Use a gentle ratio (2:1 or 4:1), slow attack (30–50 ms), and fast release. This glues the full mix together — aim for 2–3 dB of gain reduction on peaks.",
+          "The Master GLUE button enables its built-in compressor. Compare with GLUE off and on. If the drums lose their impact, leave it off or revisit the track balance.",
       },
       {
         instruction:
-          "Add a Limiter as the last plugin on the master bus. Set the ceiling to −0.3 dBFS (leaving headroom for streaming codec distortion). Raise the input gain until the loudness meter reads around −14 LUFS for streaming.",
+          "The LIMIT slider adjusts the built-in limiter threshold. Lowering it applies more peak control; it is not a target loudness meter. Watch the CLIP warning and avoid pushing levels just to make the song louder.",
       },
       {
         instruction:
-          "A/B your master against a reference track you admire. Match its loudness with the limiter, then compare the tone. If your mix sounds dull or harsh by comparison, go back and tweak the master EQ. When you're happy, export as 24-bit WAV.",
+          "Compare your song with another recording at a similar listening volume. If yours is unclear, return to the track volumes and EQ. Export WAV when ready, listen to the downloaded file, and keep a project JSON backup for future edits.",
       },
     ],
   },
@@ -415,7 +408,7 @@ const LESSONS: Lesson[] = [
     steps: [
       {
         instruction:
-          "Open Performance Mode from the transport bar. Turn on Scale Lock, choose D as the root, and select Pentatonic Minor. Incoming keyboard, MIDI, or pad notes will be pulled into that pitch collection.",
+          "In Advanced, open Performance Mode from the transport bar. Turn on Scale Lock, choose D as the root, and select Pentatonic Minor. Performance input notes will be mapped into that pitch collection.",
         highlight: "[aria-label*='Performance Mode']",
         highlightLabel: "Performance Mode",
       },
@@ -474,47 +467,11 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
   const [lessonIdx, setLessonIdx] = useState<number | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [completed, setCompleted] = useState<Set<string>>(() => loadCompleted());
-  const highlightCleanupRef = useRef<(() => void) | null>(null);
-
-  function clearHighlight() {
-    if (highlightCleanupRef.current) {
-      highlightCleanupRef.current();
-      highlightCleanupRef.current = null;
-    }
-  }
-
-  function applyHighlight(selector?: string) {
-    clearHighlight();
-    if (!selector) return;
-    try {
-      const el = document.querySelector(selector) as HTMLElement | null;
-      if (!el) return;
-      el.classList.add("lesson-highlight");
-      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      highlightCleanupRef.current = () => {
-        el.classList.remove("lesson-highlight");
-      };
-    } catch {
-      /* bad selector — ignore */
-    }
-  }
-
   const currentLesson = lessonIdx !== null ? LESSONS[lessonIdx] : null;
   const currentStep = currentLesson?.steps[stepIdx];
 
   useEffect(() => {
-    if (currentStep?.highlight) {
-      applyHighlight(currentStep.highlight);
-    } else {
-      clearHighlight();
-    }
-    return () => clearHighlight();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lessonIdx, stepIdx]);
-
-  useEffect(() => {
     if (!open) {
-      clearHighlight();
       setLessonIdx(null);
       setStepIdx(0);
     }
@@ -540,7 +497,6 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
       setStepIdx(stepIdx + 1);
     } else {
       markComplete(currentLesson.title);
-      clearHighlight();
       setLessonIdx(null);
       setStepIdx(0);
     }
@@ -550,7 +506,6 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
     if (stepIdx > 0) {
       setStepIdx(stepIdx - 1);
     } else {
-      clearHighlight();
       setLessonIdx(null);
       setStepIdx(0);
     }
@@ -565,22 +520,36 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-md max-h-[80vh] flex flex-col"
-        aria-label="Interactive lessons"
+        aria-label="Practice lessons"
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <GraduationCap className="w-4 h-4 text-primary" />
-            Lessons
+            Lessons · practice reference
           </DialogTitle>
           <DialogDescription className="flex items-center justify-between">
-            <span>Guided technique, listening, and creative practice.</span>
+            <span>Read a short exercise, then close this reference to try it.</span>
             {totalCompleted > 0 && (
               <span className="font-mono text-[10px] text-muted-foreground">
-                {totalCompleted}/{LESSONS.length} done
+                {totalCompleted}/{LESSONS.length} read
               </span>
             )}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+          <p className="text-xs text-muted-foreground">Want to learn while you make music? The optional tutor stays alongside your workspace. Mixer and Inspector examples below use Advanced on a larger screen.</p>
+          <Button
+            size="sm"
+            className="w-full text-xs"
+            onClick={() => {
+              setSettings({ tutorEnabled: true });
+              onOpenChange(false);
+            }}
+          >
+            Open learning tutor
+          </Button>
+        </div>
 
         {lessonIdx === null ? (
           /* Lesson list */
@@ -618,7 +587,7 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
                           {isDone && (
                             <CheckCircle2
                               className="w-3.5 h-3.5 text-primary shrink-0"
-                              aria-label="Completed"
+                              aria-label="Read"
                             />
                           )}
                         </div>
@@ -671,7 +640,7 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
               </p>
               {currentStep?.highlightLabel && (
                 <p className="text-[10px] text-muted-foreground mt-2 font-mono">
-                  ↑ Highlighted: {currentStep.highlightLabel}
+                  Control to find: {currentStep.highlightLabel}
                 </p>
               )}
             </div>
@@ -695,13 +664,13 @@ export function LessonsPanel({ open, onOpenChange }: LessonsPanelProps) {
                 className="font-mono text-xs gap-1"
                 aria-label={
                   stepIdx === currentLesson!.steps.length - 1
-                    ? "Finish lesson"
+                    ? "Finish reading"
                     : "Next step"
                 }
               >
                 {stepIdx === currentLesson!.steps.length - 1 ? (
                   <>
-                    Done <X className="w-3.5 h-3.5" />
+                    Read <X className="w-3.5 h-3.5" />
                   </>
                 ) : (
                   <>

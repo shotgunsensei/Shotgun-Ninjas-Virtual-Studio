@@ -1,5 +1,55 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-09-12 — Basic/Advanced workflow and optional tutor
+
+Requested scope: simplify the complete music-making workflow for children,
+teens, and new DAW users while retaining the full Advanced studio. This is an
+explicit workflow extension to the stabilization-only default, with the
+existing framework, branding, free-product policy, and audio engine preserved.
+
+Confirmed friction: Beginner previously changed mostly channel-strip details;
+the transport, browser, instrument inspector, and creation path stayed dense.
+Welcome's five choices were musical templates rather than complexity levels.
+Its static tour ended before hands-on practice. Lessons blocked interaction in
+a modal, with descriptions that did not match available controls. Welcome
+could replace existing work without the preservation helper used by Load.
+Global Enter/Space intercepted native focused buttons. Basic's clip selection
+for grid editing also exposed an invisible whole-clip Delete/Backspace target;
+those destructive shortcuts now belong to Advanced. Phone tutor instructions
+now match its available controls and offer Basic for editable grid practice.
+
+Basic now mounts a lightweight workspace on the same project/store, with
+rhythm → notes → arrangement → levels → save/download steps. Advanced retains
+the existing workspace. The optional tutor is independently persisted,
+nonmodal, and event-driven. Mode changes have no project patch, transport
+reset, audio initialization, or autosave payload. Existing expert preferences
+migrate to Advanced with the tutor initially off.
+
+Basic note operations use current track/clip ownership and preserve off-grid
+notes, samples, recordings, and unrelated state. Generated parts align in a
+new section; repeat appends a captured source once per click to avoid
+exponential growth. Copied automation timestamps are unique at boundaries.
+Undo requires the applied project and load revision to remain current.
+
+No tutor timer, worker, network request, audio node, transport event, or
+animation was added. Basic does not mount Advanced instrument/mixer/scope
+components. Existing performance/audio lifecycles remain authoritative.
+
+Test-environment findings: the repository requires pnpm; sandboxed tsx cannot
+read Windows user information; cached Chromium did not launch, while installed
+Google Chrome did. A factory-license hash failure was CRLF conversion on a
+clean checkout, repaired with an exact-path LF attribute without changing the
+license or manifest. Development watching also encountered Windows `EBUSY` on
+a generated WAV; output/report directories are now ignored. Empty `REPL_ID`
+no longer enables Replit-only dev plugins. Tests that require Advanced choose
+it explicitly, and startup setup no longer deletes a live IndexedDB database
+before a second navigation. After isolated checks and a fresh server without
+concurrent source edits, the full browser suite passes (82 passed, three
+expected opt-in skips). Production workflow and ten-minute playback checks
+also pass. PERF_BASELINE.md records the acceptance boundary, including hardware
+and learner testing still needed. This change makes no claim of reduced
+measured audio latency.
+
 ## 2026-09-12 — Custom instruments and expanded factory sounds
 
 Confirmed gaps: imported sounds could become audio clips or drum-pad assignments

@@ -78,6 +78,10 @@ export interface StudioSettings {
   // Phase 16: Accessibility & Learning Mode
   colorblindSafeMeters: boolean;
   uiMode: UIMode;
+  /** Optional, local-only learning guide; independent of workspace complexity. */
+  tutorEnabled: boolean;
+  /** Last lesson viewed (7 means the guide was finished). */
+  tutorStep: number;
 
   // Performance Stabilization Pass
   /** When true: reduces meter FPS, disables background FX, strips CSS glows. */
@@ -119,6 +123,8 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   backupReminderSessions: 5,
   colorblindSafeMeters: false,
   uiMode: "beginner",
+  tutorEnabled: true,
+  tutorStep: 0,
 
   performanceMode: false,
 };
@@ -183,6 +189,14 @@ export function normalizeStoredSettings(input: unknown): StudioSettings {
     ...(otherSettings as Partial<StudioSettings>),
     autosaveEnabled,
     autosaveIntervalSec,
+    uiMode: stored.uiMode === "expert" ? "expert" : "beginner",
+    // Existing expert users keep a quiet workspace until they opt in.
+    tutorEnabled: typeof stored.tutorEnabled === "boolean"
+      ? stored.tutorEnabled
+      : stored.uiMode !== "expert",
+    tutorStep: typeof stored.tutorStep === "number" && Number.isFinite(stored.tutorStep)
+      ? Math.max(0, Math.min(7, Math.trunc(stored.tutorStep)))
+      : 0,
   };
 }
 

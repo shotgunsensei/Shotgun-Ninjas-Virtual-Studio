@@ -18,6 +18,7 @@ import { DEFAULT_GAMEPAD_MAPPINGS } from "../lib/performance/router";
 import { useGamepad } from "../lib/performance/gamepad";
 import { visualTicker } from "../lib/visualTicker";
 import { firstPlayMark } from "../lib/performance/firstPlayTrace";
+import { useSettings } from "../lib/settings";
 
 const AudioDiagnosticsPanel = lazy(() =>
   import("./AudioDiagnosticsPanel").then((m) => ({ default: m.AudioDiagnosticsPanel })),
@@ -27,6 +28,7 @@ const WorldPickerButton = lazy(() =>
 );
 
 export function TransportBar() {
+  const basic = useSettings((s) => s.uiMode === "beginner");
   const bpm = useStore((s) => s.project.bpm);
   const masterVolume = useStore((s) => s.project.masterVolume);
   const loopEnabled = useStore((s) => s.project.loopEnabled);
@@ -43,6 +45,8 @@ export function TransportBar() {
   const audioUnlocked = useStore((s) => s.audioUnlocked);
   const { play, pause, stop, record } = useTransport();
   const [diagOpen, setDiagOpen] = useState(false);
+
+  if (basic) return <BasicTransport />;
 
   return (
     <div className="relative">
@@ -313,6 +317,44 @@ export function TransportBar() {
     )}
     </div>
   );
+}
+
+function BasicTransport() {
+  const { play, pause, stop } = useTransport();
+  const playing = useStore((s) => s.isPlaying);
+  const recording = useStore((s) => s.isRecording || s.countingIn);
+  const unlocked = useStore((s) => s.audioUnlocked);
+  const bpm = useStore((s) => s.project.bpm);
+  const volume = useStore((s) => s.project.masterVolume);
+  const loop = useStore((s) => s.project.loopEnabled);
+  const [unlocking, setUnlocking] = useState(false);
+  const panic = () => {
+    const timers = getStore().state.countInTimers;
+    if (timers.interval !== null) window.clearInterval(timers.interval);
+    if (timers.timeout !== null) window.clearTimeout(timers.timeout);
+    cancelAllRecorders();
+    audio.panicStopAll();
+    getStore().set((s) => ({ transportScheduleRevision: s.transportScheduleRevision + 1, panicRevision: s.panicRevision + 1 }));
+    getStore().set({ isPlaying: false, isRecording: false, countingIn: false, countInBeat: 0, countInTimers: { interval: null, timeout: null } });
+    audio.setMetronome(getStore().state.project.metronome);
+    getStore().setStatus("Panic — all notes released", "warn");
+  };
+  const enableAudio = async () => {
+    setUnlocking(true);
+    try { await audio.unlock(); getStore().set({ audioUnlocked: true }); }
+    catch (err) { getStore().setStatus(`Audio could not start: ${(err as Error).message}. Try again.`, "error"); }
+    finally { setUnlocking(false); }
+  };
+  return <div data-testid="basic-transport" aria-label="Playback controls" className="shrink-0 flex flex-wrap items-center gap-2 border-b border-border bg-graphite/80 px-3 py-2">
+    <Button className="min-h-10 gap-2" onClick={() => playing ? pause() : void play()} aria-label={playing ? "Pause" : "Play"}>{playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{playing ? "Pause" : "Play"}</Button>
+    <Button variant="outline" className="min-h-10 gap-2" onClick={() => void stop()} aria-label="Stop"><Square className="h-3 w-3" />Stop</Button>
+    <Button variant="outline" className="min-h-10 gap-1 text-red-400" onClick={panic} aria-label="Panic — stop all sound" title="Immediately stop every sound"><AlertOctagon className="h-4 w-4" />Panic</Button>
+    {!unlocked && <Button disabled={unlocking} variant="secondary" onClick={() => void enableAudio()}>{unlocking ? "Starting audio…" : "Tap to Enable Audio"}</Button>}
+    <label className="flex items-center gap-2 text-sm">Speed <input type="number" aria-label="BPM — project tempo" min={40} max={240} value={bpm} onChange={(e) => getStore().patchProject({ bpm: Math.max(40, Math.min(240, Number(e.target.value) || 40)) })} className="h-10 w-16 rounded-md border border-border bg-background px-2" /><span className="text-xs text-muted-foreground">BPM</span></label>
+    <label className="flex min-h-10 items-center gap-2 px-1 text-sm"><input type="checkbox" checked={loop} onChange={(e) => getStore().patchProject({ loopEnabled: e.target.checked })} />Repeat</label>
+    <label className="flex min-h-10 items-center gap-2 text-sm sm:ml-auto"><Volume2 className="h-4 w-4" />Volume<input aria-label="Main volume" type="range" min={0} max={100} value={Math.round(volume * 100)} onChange={(e) => getStore().patchProject({ masterVolume: Number(e.target.value) / 100 })} className="w-24 accent-primary" /></label>
+    {recording && <span role="status" className="text-sm text-red-400">Recording active — Stop to finish</span>}
+  </div>;
 }
 
 /**

@@ -71,6 +71,7 @@ test("New keeps an edited transient demo available for recovery", async ({ page 
 test("World Picker preserves an edited demo before loading another demo", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("studio.onboardingShown", "1");
+    localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
   });
   await page.goto("/studio?disableAudio=1", { waitUntil: "domcontentloaded" });
   await page.locator("header").waitFor({ state: "visible", timeout: 15_000 });

@@ -86,7 +86,7 @@ export default defineConfig({
     runtimeErrorOverlay(),
     snVirtualStudioPwaPlugin(),
     ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
+    Boolean(process.env.REPL_ID)
       ? [
           await import("@replit/vite-plugin-cartographer").then((m) =>
             m.cartographer({
@@ -133,6 +133,11 @@ export default defineConfig({
     },
   },
   server: {
+    // Downloaded WAVs and browser traces can be exclusively locked on Windows.
+    // They are verification output, never inputs to Vite's source graph.
+    watch: {
+      ignored: ["**/test-results/**", "**/test-results-production/**", "**/playwright-report/**", "**/runtime-profile/**"],
+    },
     port,
     strictPort: true,
     host: "0.0.0.0",

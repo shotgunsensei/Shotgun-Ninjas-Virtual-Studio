@@ -54,7 +54,7 @@ export function SettingsModal({
   const s = useSettings();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between gap-3">
             <span>Settings</span>
@@ -78,6 +78,37 @@ export function SettingsModal({
             Saved locally to this browser. Free, no account.
           </DialogDescription>
         </DialogHeader>
+        <div className="rounded-md border border-border p-3 space-y-3">
+          <div className="text-sm font-semibold">Your studio &amp; learning tutor</div>
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label="Studio version in settings">
+            {(["beginner", "expert"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setSettings({ uiMode: mode })}
+                aria-pressed={s.uiMode === mode}
+                className={`text-left border rounded-md p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${s.uiMode === mode ? "border-primary bg-primary/10" : "border-border hover:bg-accent/40"}`}
+              >
+                <span className="block text-sm font-medium">{mode === "beginner" ? "Basic" : "Advanced"}</span>
+                <span className="block text-xs text-muted-foreground leading-snug">
+                  {mode === "beginner"
+                    ? "Simple steps and fewer buttons for your first beats and songs."
+                    : "The full studio, with every sound, effect, and editing control."}
+                </span>
+              </button>
+            ))}
+          </div>
+          <Row label="Learning tutor" hint="Small lessons while you make music. Optional in either version; your progress is kept when you turn it off.">
+            <Switch checked={s.tutorEnabled} onCheckedChange={(value) => setSettings({ tutorEnabled: value })} aria-label="Learning tutor in settings" />
+          </Row>
+          <button
+            type="button"
+            onClick={() => setSettings({ tutorEnabled: true, tutorStep: 0 })}
+            className="min-h-9 rounded-md border border-border px-3 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Restart tutor from the first lesson
+          </button>
+        </div>
         <Tabs defaultValue="audio" className="w-full">
           <TabsList className="grid grid-cols-7 w-full bg-graphite/60">
             <TabsTrigger value="audio">Audio</TabsTrigger>
@@ -249,36 +280,6 @@ export function SettingsModal({
               }
             />
 
-            {/* ── UI Mode ─────────────────────────────────────────────── */}
-            <div className="border-t border-border pt-3 mt-1">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                Experience level
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {(["beginner", "expert"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setSettings({ uiMode: mode })}
-                    aria-pressed={s.uiMode === mode}
-                    className={`text-left border rounded-md p-2 transition-colors ${
-                      s.uiMode === mode
-                        ? "border-primary bg-primary/10"
-                        : "border-border hover:bg-accent/40"
-                    }`}
-                  >
-                    <div className="font-mono text-xs uppercase tracking-wider capitalize">
-                      {mode}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground leading-snug">
-                      {mode === "beginner"
-                        ? "Hides EQ bands, sends, swing %, probability & micro-timing behind a 'Show advanced' expander. Tooltips always on."
-                        : "Shows all controls at once — full access to every knob and parameter."}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
           </TabsContent>
 
           <TabsContent value="access" className="space-y-3 pt-3">

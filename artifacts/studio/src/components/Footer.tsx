@@ -13,8 +13,7 @@ const AboutDialog = lazy(() =>
  * the app version, trust badges (clicking opens TrustStatementModal),
  * and links to Changelog, Credits, Press, and About.
  *
- * In Beginner mode a subtle badge is shown so users can easily find the
- * toggle to switch back to Expert mode.
+ * In Basic mode a subtle badge links to settings and the Advanced version.
  */
 export function StudioFooter() {
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -39,10 +38,10 @@ export function StudioFooter() {
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent("studio:open-settings", { detail: { tab: "ui" } }))}
               className="beginner-badge hover:text-foreground transition-colors"
-              aria-label="Beginner mode active — tap to open settings and switch to Expert mode"
-              title="Beginner mode — tap ⚙ to switch"
+              aria-label="Basic version active — open settings to switch to Advanced"
+              title="Basic version — open settings to switch to Advanced"
             >
-              Beginner mode · tap ⚙ to switch
+              Basic · switch in settings
             </button>
           )}
         </div>

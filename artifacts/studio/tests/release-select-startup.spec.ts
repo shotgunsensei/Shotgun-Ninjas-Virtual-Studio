@@ -2,18 +2,6 @@ import { test, expect, type Page } from "@playwright/test";
 
 const STUDIO_URL = "/studio?disableAudio=1&snStartupSoundTrace=1";
 
-async function clearStorage(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await new Promise<void>((resolve) => {
-      const req = indexedDB.deleteDatabase("shotgun-ninjas-studio");
-      req.onsuccess = () => resolve();
-      req.onerror = () => resolve();
-      req.onblocked = () => resolve();
-    });
-  });
-}
-
 async function openStudio(page: Page): Promise<string[]> {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -29,11 +17,13 @@ test.describe("4.0.0-launch release guards", () => {
   test("loads a built-in demo and changes a track preset without empty Select value crashes", async ({
     page,
   }) => {
+    // Playwright supplies a fresh browser context for this test. Seed its
+    // preferences before startup instead of deleting an open IndexedDB database.
+    await page.addInitScript(() => {
+      localStorage.setItem("studio.onboardingShown", "1");
+      localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
+    });
     const errors = await openStudio(page);
-    await clearStorage(page);
-    await page.evaluate(() => localStorage.setItem("studio.onboardingShown", "1"));
-    await page.goto(STUDIO_URL, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("header", { timeout: 15_000 });
 
     await page.getByTestId("open-load-dialog").click();
     await expect(page.getByTestId("demo-list")).toBeVisible();

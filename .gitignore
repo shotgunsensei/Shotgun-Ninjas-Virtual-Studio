@@ -38,6 +38,7 @@ node_modules
 artifacts/studio/runtime-profile/
 artifacts/studio/playwright-report/
 artifacts/studio/test-results/
+artifacts/studio/test-results-production/
 artifacts/studio/.playwright/
 artifacts/studio/debug.log
 artifacts/studio/*.trace.zip

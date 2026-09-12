@@ -2,7 +2,7 @@ import "./lib/audio/toneContext";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
-import { Header } from "./components/Header";
+import { Header, StudioModeControls } from "./components/Header";
 import { StudioFooter } from "./components/Footer";
 import { TransportBar } from "./components/TransportBar";
 import { Timeline } from "./components/Timeline";
@@ -42,6 +42,12 @@ const SamplePreviewDialog = lazy(() =>
 );
 const MobileStudio = lazy(() =>
   import("./components/MobileStudio").then((m) => ({ default: m.MobileStudio })),
+);
+const BasicStudio = lazy(() =>
+  import("./components/BasicStudio").then((m) => ({ default: m.BasicStudio })),
+);
+const GuidedTutor = lazy(() =>
+  import("./components/GuidedTutor").then((m) => ({ default: m.GuidedTutor })),
 );
 const Keyboard = lazy(() =>
   import("./components/instruments/Keyboard").then((m) => ({ default: m.Keyboard })),
@@ -406,6 +412,8 @@ function writeCollapse(key: string, v: boolean) {
 }
 
 function Studio() {
+  const basic = useSettings((s) => s.uiMode === "beginner");
+  const tutorEnabled = useSettings((s) => s.tutorEnabled);
   // Narrow selector: returns a stable Track reference via Immer structural
   // sharing — only re-renders Studio when the SELECTED track itself changes,
   // not when a different track's fader/step moves.
@@ -523,6 +531,10 @@ function Studio() {
         t instanceof HTMLSelectElement ||
         (t && t.isContentEditable);
       if (editable) return;
+      // Native buttons/selectors must keep their Enter/Space activation, and
+      // dialogs own their shortcuts while a learner is choosing an action.
+      if (t?.closest('[role="dialog"], [role="alertdialog"]')) return;
+      if ((e.code === "Space" || e.key === "Enter") && t?.closest('button, a, [role="button"], [role="switch"], [role="tab"]')) return;
 
       const meta = e.metaKey || e.ctrlKey;
       const key = e.key;
@@ -623,6 +635,12 @@ function Studio() {
         return;
       }
       if (key === "Delete" || key === "Backspace") {
+        // Basic selects clips to edit individual steps. Whole-clip deletion
+        // belongs to Advanced, where the timeline makes that selection visible.
+        if (getSettings().uiMode === "beginner") {
+          e.preventDefault();
+          return;
+        }
         const sel = getStore().state.selectedClipId;
         if (!sel) return;
         const tracks = getStore().state.project.tracks;
@@ -1264,13 +1282,15 @@ function Studio() {
   // Render the simplified phone shell — Header still mounts (hidden) so
   // its dialog state and event listeners (Save / Load / Export / etc.)
   // remain available to the mobile menu.
-  if (viewport === "mobile") {
+  if (viewport === "mobile" && !basic) {
     return (
       <div className="h-full flex flex-col text-foreground overflow-hidden relative">
         <BackgroundFx />
         <div className="hidden" aria-hidden>
           <Header />
         </div>
+        <div className="border-b border-border p-2"><StudioModeControls /></div>
+        {tutorEnabled && <div className="max-h-[35vh] shrink-0 overflow-y-auto"><Suspense fallback={null}><GuidedTutor phone /></Suspense></div>}
         <Suspense fallback={<StudioPanelLoader label="Loading mobile studio…" />}>
           <MobileStudio />
         </Suspense>
@@ -1330,6 +1350,13 @@ function Studio() {
         />
       )}
       <TransportBar />
+      {basic ? (
+        <main id="studio-main-content" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto">
+          {tutorEnabled && <Suspense fallback={null}><GuidedTutor /></Suspense>}
+          <Suspense fallback={<StudioPanelLoader label="Loading Basic studio…" />}><BasicStudio /></Suspense>
+        </main>
+      ) : <>
+      {tutorEnabled && <div className="max-h-[30vh] shrink-0 overflow-y-auto"><Suspense fallback={null}><GuidedTutor /></Suspense></div>}
       {/* Performance Mode overlay — rendered above everything else */}
       {performanceOpen && (
         <Suspense fallback={null}>
@@ -1483,6 +1510,7 @@ function Studio() {
         </>
       )}
 
+      </>}
       {helpDialogOpen && (
         <Suspense fallback={null}>
           <HelpDialog />

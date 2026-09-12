@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 async function openRealAudioStudio(page: Page, search = ""): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("studio.onboardingShown", "1");
+    localStorage.setItem("studio.settings.v1", JSON.stringify({ uiMode: "expert", tutorEnabled: false }));
   });
   await page.goto(`/studio${search}`, { waitUntil: "domcontentloaded" });
   await page.locator("header").waitFor({ state: "visible", timeout: 20_000 });

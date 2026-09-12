@@ -1,0 +1,2 @@
+# Preserve the upstream license bytes verified by the factory sample manifest.
+artifacts/studio/public/samples/factory/vcsl/LICENSE-CC0-1.0.txt text eol=lf

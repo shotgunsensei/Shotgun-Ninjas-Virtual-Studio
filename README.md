@@ -20,6 +20,10 @@ The repo is a pnpm monorepo. The studio app itself lives in
 
 ## Features
 
+- **Basic or Advanced, with an optional tutor** — make a first beat with simple
+  grids and guided steps, or use the full studio controls. Both versions edit
+  the same project. [Read the workflow guide](./artifacts/studio/BASIC_ADVANCED_GUIDE.md).
+
 - **39 melodic presets and 19 ready-to-play sound packs** spanning modeled
   keys, guitar, bass, orchestral/world colors, multi-kit drums, and real
   microphone vocals. Twelve high-quality factory instruments use 62 same-origin
@@ -53,7 +57,7 @@ The repo is a pnpm monorepo. The studio app itself lives in
 - **WAV export** at master quality with progress and clipping warning.
 - **Cyber-ninja branding** — dark graphite + red primary + neon-blue
   accent, with multiple themes.
-- **Adaptive, accessible workspace** — Beginner Mode for new users, compact
+- **Adaptive, accessible workspace** — Basic for new users, compact
   tablet-safe command groups, the same Create/Learn tools on phones, keyboard
   browser tabs, live status announcements, and reduced-motion support.
 - **Global error boundary** with copy-trace, panic, and recovery-data

@@ -7,7 +7,7 @@ const FEATURES = [
   {
     icon: "🥁",
     title: "Beat-making in the browser",
-    desc: "Drum sequencer, piano roll, and step patterns — no downloads, no installs. Open the tab and make noise.",
+    desc: "Start in Basic with an editable beat, add bass and a tune, then save your song. Switch to Advanced for the full studio.",
   },
   {
     icon: "🎛️",
@@ -27,7 +27,7 @@ const FEATURES = [
   {
     icon: "🧠",
     title: "Learn by creating",
-    desc: "The local Dojo mentor, jam recovery, listening guides, prompts, and creative-practice lessons teach inside the workflow.",
+    desc: "An optional tutor explains one small task at a time. Turn it on or off in Basic or Advanced, with more practice in Lessons and The Dojo.",
   },
   {
     icon: "⚡",
@@ -39,26 +39,26 @@ const FEATURES = [
 const TUTORIALS = [
   {
     step: "01",
-    title: "Set your BPM",
-    desc: "Click the tempo display in the transport bar and type a number, or tap the BPM button to set it live.",
+    title: "Choose Basic and your tutor",
+    desc: "New to music software? Choose Basic at welcome. Keep the learning tutor on for step-by-step help, or turn it off any time.",
     param: "?focus=bpm",
   },
   {
     step: "02",
     title: "Add a drum pattern",
-    desc: "Select the Drums track, open the step sequencer, and click pads to build a beat.",
+    desc: "Use Add starter beat, then tap squares to change the rhythm. Press Play to hear your changes.",
     param: "?focus=drums",
   },
   {
     step: "03",
-    title: "Record a melody",
-    desc: "Select any melodic track, press R to arm record, then play your keyboard or MIDI controller.",
+    title: "Add bass and a melody",
+    desc: "Add a bass or melody idea in Basic, then change notes in its grid. Advanced also lets you record a keyboard or MIDI controller.",
     param: "?focus=piano",
   },
   {
     step: "04",
     title: "Mix and polish",
-    desc: "Open the mixer, pull faders, add reverb from the FX rack, and apply a mix preset to glue it.",
+    desc: "Balance track volumes in Basic. In Advanced, explore the mixer, effects, and detailed sound controls.",
     param: "?focus=mixer",
   },
   {
@@ -70,7 +70,7 @@ const TUTORIALS = [
   {
     step: "06",
     title: "Save and share",
-    desc: "Press S to save your project to IndexedDB, then grab the share card after export.",
+    desc: "Save keeps your editable music in this browser. Export a project JSON backup to keep it safe or open it on another device.",
     param: "",
   },
 ];
@@ -131,7 +131,9 @@ export default function LandingPage() {
             <span className="text-primary">in Your Browser</span>
           </h1>
           <p className="text-lg sm:text-xl text-foreground/70 max-w-xl mx-auto leading-relaxed">
-            A full DAW experience — drums, piano, guitar, vocals, FX, mixer, MIDI — running entirely client-side. No sign-up. No cost. Your music, your browser.
+            Make your first song in Basic, or explore every control in Advanced.
+            An optional learning tutor guides you as you create. Both versions
+            are free, with no sign-up. Your music stays in your browser.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <button
