@@ -38,6 +38,7 @@ const SOUND_CREDITS = [
   {
     category: "CC0 Factory Instruments",
     items: [
+      "VCSL Kawai Grand Piano — six sampled zones, player's stereo perspective",
       "VCSL TX81Z Piano 1 — six sampled zones",
       "VCSL Folk Harp — four sampled zones",
       "VCSL Vibraphone (hard mallets) — four sampled zones",
@@ -50,7 +51,7 @@ const SOUND_CREDITS = [
   {
     category: "Synthesized Instruments",
     items: [
-      "Grand Piano — Tone.js Sampler with internal synthesis fallback",
+      "Grand Piano fallback — modeled FM piano while local sample zones load",
       "Electric Piano — Tone.js FM synthesis",
       "Synth Lead — Tone.js oscillator stack",
       "Bass (Finger, Synth, Sub) — Tone.js synthesis chain",

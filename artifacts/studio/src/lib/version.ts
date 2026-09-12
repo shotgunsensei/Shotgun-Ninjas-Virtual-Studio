@@ -4,7 +4,7 @@
  * Bumped manually as each Phase 3 task lands. Surfaced in the footer,
  * the About dialog, and any future PWA update toast.
  */
-export const APP_VERSION = "4.3.0-dojo";
+export const APP_VERSION = "4.4.0-resonance";
 export const APP_NAME = "Shotgun Ninjas Virtual Studio";
 /** Canonical landing URL stamped on exported projects so a JSON file
  *  always tells you where it came from. The browser preview rewrites
@@ -26,6 +26,18 @@ export interface ChangelogEntry {
  * Newest entry first.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "4.4.0-resonance",
+    date: "2026-09-12",
+    highlights: [
+      "Grand Piano now plays six real Kawai acoustic-grand sample zones from the CC0 VCSL library, downloaded only when selected.",
+      "Factory sample octave mappings now match the piano roll. Existing sampled parts sound one octave lower; transpose notes +12 semitones if you want to preserve the previous high register.",
+      "Plucked instruments gain harmonic string bodies, velocity-sensitive brightness, distinct dampening, and working envelope controls.",
+      "Electric Piano has a warmer FM tine character; drive uses 2x oversampling to soften digital aliasing.",
+      "Room and Hall use stereo spaces with early reflections and darkening tails. Tape and Slapback repeats now shed low rumble and high-frequency buildup.",
+      "WAV export preserves modeled preset families and envelopes, matches shared effect-bus settings, and includes a longer tail for ringing notes and halls.",
+    ],
+  },
   {
     version: "4.3.0-dojo",
     date: "2026-08-30",

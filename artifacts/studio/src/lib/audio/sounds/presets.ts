@@ -44,8 +44,16 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     id: "keys.grand-piano",
     name: "Grand Piano",
     category: "Keys",
-    description: "Offline modeled grand with a warm hall send and responsive dynamics.",
+    description: "Six-zone Kawai acoustic grand with natural hammer attack and stereo string resonance.",
     compatibleWith: ["piano"],
+    layers: VCSL_FACTORY_LAYERS.kawaiGrand,
+    guide: {
+      family: "Acoustic grand piano",
+      register: "C2–C7 sampled roots; leave room between low notes and midrange chords",
+      character: "Real hammer transients, resonant strings, and a natural stereo decay.",
+      listeningCue: "Let a chord ring and notice the overtones fade at different speeds.",
+      creativeMove: "Play a quiet broken chord, then answer it with one stronger melody note.",
+    },
     synth: synth({
       engine: "sampler",
       attack: 0.02,
@@ -149,7 +157,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     layers: VCSL_FACTORY_LAYERS.tx81zPiano,
     guide: {
       family: "Digital FM piano",
-      register: "C2–C6; strongest for midrange chords and bright upper hooks",
+      register: "C2–C7 sampled roots; strongest for midrange chords and bright upper hooks",
       character: "Fast, glassy attack followed by a compact electric-piano body.",
       listeningCue: "Notice how the transient stays clear even when several notes overlap.",
       creativeMove: "Play seventh chords in the middle register, then answer them one octave higher with a two-note motif.",
@@ -385,7 +393,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     layers: VCSL_FACTORY_LAYERS.folkHarp,
     guide: {
       family: "Plucked string",
-      register: "C2–C5; keep bass notes sparse and let upper notes ring",
+      register: "C3–C6 sampled roots; keep bass notes sparse and let upper notes ring",
       character: "Rounded finger transient, woody center, and an airy natural decay.",
       listeningCue: "Listen for the small change from attack to ringing string—the decay is part of the phrase.",
       creativeMove: "Arpeggiate a four-note chord upward, leave a beat of silence, then reverse the same notes downward.",
@@ -535,7 +543,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     layers: VCSL_FACTORY_LAYERS.ocarina,
     guide: {
       family: "Vessel flute",
-      register: "A3–C5; most expressive as a single-note melody",
+      register: "A4–C6 sampled roots; most expressive as a single-note melody",
       character: "Pure flute tone with audible breath and a gentle, human sustain.",
       listeningCue: "Hear how held notes reveal more breath than short notes; phrase around that change.",
       creativeMove: "Write a five-note question, leave half a bar of air, then answer it with the last three notes reversed.",
@@ -618,7 +626,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     layers: VCSL_FACTORY_LAYERS.vibraphone,
     guide: {
       family: "Struck metal idiophone",
-      register: "F2–C5; use close voicings above the bass or sparse low octaves",
+      register: "F3–C6 sampled roots; use close voicings above the bass or sparse low octaves",
       character: "Bright mallet transient opening into a warm, sustained metallic bloom.",
       listeningCue: "The strike locates the rhythm; the ringing tail supplies harmony between hits.",
       creativeMove: "Place syncopated two-note chords off the kick, then let each tail bridge into the next downbeat.",
@@ -643,7 +651,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     layers: VCSL_FACTORY_LAYERS.tanzanianKalimba,
     guide: {
       family: "Plucked idiophone",
-      register: "C#2–C#5; clear for ostinatos, counter-lines, and sparse chords",
+      register: "C#3–C#6 sampled roots; clear for ostinatos, counter-lines, and sparse chords",
       character: "Woody click, focused fundamental, and asymmetric metallic overtones.",
       listeningCue: "The short attack defines groove while the upper overtones make repeated notes feel alive.",
       creativeMove: "Build a three-note ostinato, accent every third hit, and hear a new cross-rhythm emerge over 4/4.",
@@ -709,7 +717,7 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     layers: VCSL_FACTORY_LAYERS.tenorSaxStaccato,
     guide: {
       family: "Single-reed woodwind",
-      register: "C2–C5; strongest as short riffs, section answers, and rhythmic punches",
+      register: "C3–C6 sampled roots; strongest as short riffs, section answers, and rhythmic punches",
       character: "Immediate reed bite, warm body, and a naturally abrupt staccato release.",
       listeningCue: "The noisy reed edge makes soft and hard accents read differently even in a dense mix.",
       creativeMove: "Answer the snare with a two-hit stab, then move the second note up a fourth on every other bar.",
@@ -790,8 +798,8 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
     case "fmkeys":
       firstPlayMark("audio-node:create", { kind: "fmkeys", presetId: def.id });
       return markPresetVoice(def.id, started, new Tone.PolySynth(Tone.FMSynth, {
-        harmonicity: 8,
-        modulationIndex: 5.2,
+        harmonicity: def.id === "keys.electric" ? 3.5 : 8,
+        modulationIndex: def.id === "keys.electric" ? 3.2 : 5.2,
         oscillator: { type: "sine" },
         envelope: adsr(r, 0.002, 1.2, 0.0, 1.4),
         modulation: { type: "sine" },
@@ -840,9 +848,9 @@ export function buildPresetVoice(def: MelodicPresetDef): MelodicVoice {
       firstPlayMark("audio-node:create", { kind: "pluck", presetId: def.id });
       return markPresetVoice(def.id, started, new PolyPluck(
         {
-          attackNoise: 0.6,
-          dampening: 4500,
-          resonance: 0.94,
+          attackNoise: 0.2 + r.resonance * 0.8,
+          dampening: 800 + r.cutoff * 6_500,
+          resonance: 0.7 + Math.min(1, r.decay) * 0.28,
           release: secsFromNorm(r.release, 0, 1.2),
           volume: -8,
         },

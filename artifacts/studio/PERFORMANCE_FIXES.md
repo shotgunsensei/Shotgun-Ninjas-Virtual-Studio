@@ -1,4 +1,82 @@
-# Performance Fixes — 2026-08-30 Full Oversight
+# Performance Fixes — Shotgun Ninjas Virtual Studio
+
+## 2026-09-12 — Resonance sound-quality update
+
+Implemented in `src/lib/audio/{soundQuality,spatialEffects,voices,master,engine,export}.ts`
+and `src/lib/audio/sounds/{presets,factorySamples}.ts`: expressive harmonic plucks,
+warmer electric FM keys, working sampler envelopes, native preset-family exports,
+shared stereo rooms/halls and filtered delays, matched sampled output level,
+and 2x track drive. Grand Piano now loads six real CC0 Kawai zones on demand.
+All factory sample roots now use the correct sounding octave.
+
+Content/provenance changes: root `scripts/fetch-vcsl-factory-samples.mjs`,
+`public/samples/factory/vcsl/kawai-grand/*.wav`, `SOURCES.json`, factory README,
+product READMEs/user guide, version/changelog, About, Credits, Landing, and Press.
+No new environment variables, credentials, packages, schema migration, accounts,
+billing, ads, or paid gates are required.
+
+Verification (commands run from repo root unless noted):
+
+| Command | Current result |
+| --- | --- |
+| `corepack pnpm install --frozen-lockfile` | Pass, unchanged dependency tree |
+| `corepack pnpm typecheck` | Pass across workspace |
+| `corepack pnpm --filter @workspace/studio build` | Client, SSR, prerender pass; existing large-chunk advisory remains |
+| `corepack pnpm --filter @workspace/studio test:unit` | 53/53 pass |
+| `corepack pnpm --filter @workspace/studio test` | 59 pass, one intentional opt-in-worklet skip, 60 resolved |
+| `corepack pnpm --filter @workspace/studio test -- tests/factory-instruments.spec.ts` | 3/3 after root-pitch correction |
+| `corepack pnpm --filter @workspace/studio test -- tests/sound-quality.spec.ts` | 4/4 including added full-WAV timbre/pitch check |
+| `corepack pnpm --filter @workspace/studio test:bundle` | Pass; Studio initial JS 346.50 kB gzip |
+| `corepack pnpm --filter @workspace/studio test:select-values` | Pass |
+| `corepack pnpm audit --prod` | Two moderate `qs` advisories in API-server dependencies; not a clean audit |
+| Lint | No repository script available |
+| Production preview, then `node scripts/runtime-profile.mjs --mode playback10` from Studio | Pass in 618,339 ms; 5,997 ticks, 114.7 ms max heartbeat gap, zero measured silence/errors; cleanup zero active sources/events |
+
+The opt-in worklet run initially failed a suspension test's setup: it suspended
+the context while async Enable Audio was still completing. The test now waits
+for the real unlocked UI state (no fake success/delay). Targeted worklet
+audibility + one-click resume pass 2/2 with `VITE_STUDIO_ENABLE_AUDIO_WORKLETS=1`;
+default resume + independent velocity/dampening pluck checks also pass 2/2.
+Use `pnpm --filter @workspace/studio exec playwright test ... --grep ...` for
+precise filtering; the script runner's extra `--` treats later flags as paths.
+
+Before/after: generic triangle plucks now have measurable harmonic/dynamic
+contrast; generic native melodic bounces now retain distinct preset families;
+factory samples previously one octave high now align with displayed pitch.
+Factory PCM grows by 17.79 MiB on demand; the current build remains within all
+route/CSS/lazy-chunk budgets. Subjective musical improvement is not certified
+by signal tests.
+
+Current acceptance checklist (not a claim of human testing):
+
+| Required check | September status |
+| --- | --- |
+| App loads; no page/console errors in affected flows | Browser regressions pass |
+| Enable Audio; Stop; Panic/replay | Browser regressions pass |
+| Spacebar play/pause | Historical coverage; no new dedicated keyboard test |
+| Demo loads without freezing | Browser regressions pass |
+| Ten-minute playback without unresponsiveness | Production soak pass; local `runtime-profile-1789191537865.json` |
+| Mixer during playback | Production soak pass |
+| Visualizer during playback | Historical matrix; not rerun separately |
+| Normal sample import | Save/assign/relink browser regressions pass |
+| Project save/load | Storage and replacement browser regressions pass |
+| JSON export/import | Portable-project unit checks pass |
+| WAV export | Native sampled/model/timbre/pitch tests pass; advanced FX still approximate |
+| Unchanged autosave skipped | Policy unit checks pass; no new profiler scenario |
+| Hidden visual panels stop animation | Unchanged; historical matrix only |
+| Repeated instrument/kit switching | Rapid-switch browser and sustained cleanup pass; idle/GC heap 16.15 MiB |
+| Repeated project load/unload does not stack events | Browser replacement/lifecycle tests pass |
+| Performance Mode reduces visuals | Unchanged; historical matrix only |
+| Production vs dev performance | Production budgets/soak and dev regressions; no controlled speedup claim |
+| Subjective quality; real MIDI/mic; Safari/iOS/Android | Human/device checks still required |
+
+Rollback: revert this sound-quality commit as a unit; there is no project-data
+migration to reverse. Do not delete user projects or imported samples. Original
+VCSL recordings are unmodified and reproducible from the pinned source. Saved
+notes are preserved; duplicate and transpose affected sampled parts +12
+semitones if intentionally preserving the old octave-high sound.
+
+## Historical August full oversight
 
 This pass stabilizes the existing browser DAW first, then adds performance-safe free sound/preset/extension value using the current architecture. It does not rewrite the app, redesign the interface, weaken project safety, or add monetization.
 

@@ -4,7 +4,8 @@ import { SEND_BUS_IDS } from "../../types";
 import { describeError, workletManager } from "./worklet-manager";
 import { trackInterval } from "../../utils/performanceDiagnostics";
 import { DEFAULT_MASTER_BUS } from "./master-defaults";
-import { connectToneCompatible } from "./toneConnection";
+import { connectToneCompatible, resolveToneContextInput } from "./toneConnection";
+import { createSendEffect, type NativeSendEffect } from "./spatialEffects";
 
 export { DEFAULT_MASTER_BUS } from "./master-defaults";
 
@@ -33,7 +34,7 @@ export { DEFAULT_MASTER_BUS } from "./master-defaults";
 export interface SendBusNode {
   id: SendBusId;
   input: Tone.Gain;
-  fx: Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay;
+  fx: NativeSendEffect;
 }
 
 export class MasterChain {
@@ -102,10 +103,10 @@ export class MasterChain {
 
     this.buses = new Map();
     for (const id of SEND_BUS_IDS) {
-      const fx = makeBusFx(id);
       const input = new Tone.Gain(1);
-      input.connect(fx);
-      fx.connect(this.input);
+      const fx = createSendEffect(resolveToneContextInput(input).context, id, Tone.getTransport().bpm.value);
+      connectToneCompatible(input, fx.input);
+      connectToneCompatible(fx.output, this.input);
       this.buses.set(id, { id, input, fx });
     }
 
@@ -429,6 +430,10 @@ export class MasterChain {
     v.linearRampToValueAtTime(target, now + 0.05);
   }
 
+  setBpm(bpm: number) {
+    for (const bus of this.buses.values()) bus.fx.setBpm(bpm);
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -444,7 +449,8 @@ export class MasterChain {
     }
     this.cleanupFailedWorklets();
     for (const bus of this.buses.values()) {
-      for (const node of [bus.input, bus.fx]) {
+      bus.fx.dispose();
+      for (const node of [bus.input]) {
         try {
           node.disconnect();
         } catch {
@@ -480,19 +486,6 @@ export class MasterChain {
         // best-effort teardown
       }
     }
-  }
-}
-
-function makeBusFx(id: SendBusId): Tone.Freeverb | Tone.JCReverb | Tone.FeedbackDelay {
-  switch (id) {
-    case "roomReverb":
-      return new Tone.Freeverb({ roomSize: 0.6, dampening: 2500, wet: 1 });
-    case "neonHall":
-      return new Tone.JCReverb({ roomSize: 0.85, wet: 1 });
-    case "tapeDelay":
-      return new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.42, wet: 1 });
-    case "darkSlapback":
-      return new Tone.FeedbackDelay({ delayTime: 0.11, feedback: 0.18, wet: 1 });
   }
 }
 

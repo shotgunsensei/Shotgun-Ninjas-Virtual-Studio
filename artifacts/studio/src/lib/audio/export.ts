@@ -14,6 +14,8 @@ import { DEFAULT_MASTER_BUS } from "./master-defaults";
 import { findKit } from "./sounds/kits";
 import { getGroove, GROOVE_TEMPLATES } from "./sounds/groove";
 import { findPreset } from "./sounds/presets";
+import { scheduleModeledNote } from "./soundQuality";
+import { createSendEffect } from "./spatialEffects";
 import {
   loadSampleLayers,
   type DecodedSampleLayer,
@@ -34,7 +36,7 @@ export {
 
 const SAMPLE_RATE = 44100;
 const CHANNELS = 2;
-const TAIL_SEC = 2;
+const TAIL_SEC = 3;
 
 function padSampleBufferKey(blobKey: string): string {
   return `pad:${blobKey}`;
@@ -889,59 +891,12 @@ function createNativeSendBuses(
   ) as Record<SendBusId, GainNode>;
   const nodes: AudioNode[] = [...Object.values(inputs)];
 
-  const connectReverb = (
-    input: GainNode,
-    durationSec: number,
-    decayPower: number,
-    wetGain: number,
-    seed: number,
-  ) => {
-    const convolver = ctx.createConvolver();
-    const output = ctx.createGain();
-    convolver.buffer = makeNativeImpulse(ctx, durationSec, decayPower, seed);
-    convolver.normalize = true;
-    output.gain.value = wetGain;
-    input.connect(convolver);
-    convolver.connect(output);
-    output.connect(destination);
-    nodes.push(convolver, output);
-  };
-
-  const connectDelay = (
-    input: GainNode,
-    seconds: number,
-    feedbackAmount: number,
-    cutoffHz: number,
-    wetGain: number,
-  ) => {
-    const delay = ctx.createDelay(2);
-    const filter = ctx.createBiquadFilter();
-    const feedback = ctx.createGain();
-    const output = ctx.createGain();
-    delay.delayTime.value = seconds;
-    filter.type = "lowpass";
-    filter.frequency.value = cutoffHz;
-    feedback.gain.value = feedbackAmount;
-    output.gain.value = wetGain;
-    input.connect(delay);
-    delay.connect(filter);
-    filter.connect(output);
-    output.connect(destination);
-    filter.connect(feedback);
-    feedback.connect(delay);
-    nodes.push(delay, filter, feedback, output);
-  };
-
-  connectReverb(inputs.roomReverb, 0.9, 2.8, 0.34, 0x51a7);
-  connectReverb(inputs.neonHall, 2.6, 1.65, 0.24, 0x9e37);
-  connectDelay(
-    inputs.tapeDelay,
-    clamp((60 / Math.max(40, bpm)) * 0.5, 0.08, 1.2),
-    0.32,
-    4_500,
-    0.5,
-  );
-  connectDelay(inputs.darkSlapback, 0.085, 0.16, 2_800, 0.42);
+  for (const id of SEND_BUS_IDS) {
+    const effect = createSendEffect(ctx, id, bpm);
+    inputs[id].connect(effect.input);
+    effect.output.connect(destination);
+    nodes.push(...effect.nodes);
+  }
   return { inputs, nodes };
 }
 
@@ -1025,7 +980,7 @@ function createNativeTrackGraph(
   drive.curve = driveAmount > 0 || bits < 16
     ? makeNativeSaturationCurve(driveAmount, bits)
     : null;
-  drive.oversample = "none";
+  drive.oversample = driveAmount > 0 ? "2x" : "none";
 
   const { width } = renderControls;
   const main = 0.5 + width;
@@ -1102,27 +1057,6 @@ function nativeTrackSendLevels(track: Track): Record<SendBusId, number> {
     );
   }
   return levels;
-}
-
-function makeNativeImpulse(
-  ctx: OfflineAudioContext,
-  durationSec: number,
-  decayPower: number,
-  initialSeed: number,
-): AudioBuffer {
-  const length = Math.max(1, Math.ceil(ctx.sampleRate * durationSec));
-  const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
-  let seed = initialSeed >>> 0;
-  for (let channel = 0; channel < 2; channel += 1) {
-    const data = buffer.getChannelData(channel);
-    for (let index = 0; index < length; index += 1) {
-      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
-      const noise = (seed / 0xffffffff) * 2 - 1;
-      const envelope = Math.pow(1 - index / length, decayPower);
-      data[index] = noise * envelope;
-    }
-  }
-  return buffer;
 }
 
 function makeNativeSaturationCurve(amount: number, bits: number): Float32Array<ArrayBuffer> {
@@ -1519,22 +1453,22 @@ function scheduleNativeMelodicNote(
 ): void {
   const dur = Math.max(0.05, durationSec);
   if (sampleBank?.zones.length) {
-    scheduleNativeSampledNote(ctx, destination, sampleBank, ev.note, time, dur, velocity);
+    const bank = {
+      ...sampleBank,
+      attackSec: track.sound?.attack === undefined ? sampleBank.attackSec : Math.max(0.002, track.sound.attack * 0.4),
+      releaseSec: track.sound?.release === undefined ? sampleBank.releaseSec : Math.max(0.08, track.sound.release * 2),
+    };
+    scheduleNativeSampledNote(ctx, destination, bank, ev.note, time, dur, velocity);
     return;
   }
-  const freq = noteToFrequency(ev.note);
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = nativeOscillatorType(track);
-  osc.frequency.setValueAtTime(freq, time);
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(Math.max(0.0001, velocity * nativeTrackGainScale(track)), time + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + dur + nativeReleaseSeconds(track));
-  osc.connect(gain);
-  gain.connect(destination);
-  osc.start(time);
-  osc.stop(time + dur + nativeReleaseSeconds(track));
-  recordExportTrace("native-source", { kind: "OscillatorNode", trackKind: track.kind });
+  const legacyId = track.kind === "bass"
+    ? (track.preset === "sub" ? "bass.sub" : "bass.finger")
+    : track.kind === "guitar" ? "guitar.nylon"
+      : track.preset === "grand" ? "keys.grand-piano" : "keys.electric";
+  const preset = findPreset(track.presetId) ?? findPreset(legacyId) ?? findPreset("keys.electric")!;
+  const recipe = { ...preset.synth, ...track.sound };
+  scheduleModeledNote(ctx, destination, recipe, noteToFrequency(ev.note), time, dur, velocity, preset.id);
+  recordExportTrace("native-source", { kind: "ModeledVoice", trackKind: track.kind, presetId: preset.id, engine: recipe.engine });
 }
 
 function scheduleNativeSampledNote(
@@ -1575,9 +1509,10 @@ function scheduleNativeSampledNote(
   const gain = ctx.createGain();
   source.buffer = zone.buffer;
   source.playbackRate.setValueAtTime(playbackRate, time);
+  const amplitude = velocity * 10 ** (-8 / 20); // Same -8 dB as the live factory sampler.
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(Math.max(0.0001, velocity * 0.8), time + attack);
-  gain.gain.setValueAtTime(Math.max(0.0001, velocity * 0.8), fadeAt);
+  gain.gain.linearRampToValueAtTime(Math.max(0.0001, amplitude), time + attack);
+  gain.gain.setValueAtTime(Math.max(0.0001, amplitude), fadeAt);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + audibleDuration);
   source.connect(gain);
   gain.connect(destination);
@@ -1619,24 +1554,6 @@ function scheduleNativeAudioClip(
   src.start(when, sourceOffset, sourceDuration);
   recordExportTrace("native-audio-clip", { clipId: clip.id, reversed: !!clip.reversed });
   recordExportTrace("native-source", { kind: "AudioBufferSourceNode", clipId: clip.id });
-}
-
-function nativeOscillatorType(track: Track): OscillatorType {
-  if (track.kind === "bass") return track.preset === "sub" ? "sine" : "sawtooth";
-  if (track.kind === "guitar") return "triangle";
-  return "sine";
-}
-
-function nativeTrackGainScale(track: Track): number {
-  if (track.kind === "bass") return 0.8;
-  if (track.kind === "guitar") return 0.45;
-  return 0.55;
-}
-
-function nativeReleaseSeconds(track: Track): number {
-  if (track.kind === "bass") return 0.04;
-  if (track.kind === "guitar") return 0.08;
-  return 0.12;
 }
 
 function noteToFrequency(note: string): number {

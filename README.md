@@ -22,10 +22,10 @@ The repo is a pnpm monorepo. The studio app itself lives in
 
 - **34 melodic presets and 19 ready-to-play sound packs** spanning modeled
   keys, guitar, bass, orchestral/world colors, multi-kit drums, and real
-  microphone vocals. Six high-quality factory instruments use 26 same-origin
-  CC0 sample zones: TX81Z piano, folk harp, vibraphone, Tanzanian kalimba,
+  microphone vocals. Seven high-quality factory instruments use 32 same-origin
+  CC0 sample zones: Kawai grand, TX81Z piano, folk harp, vibraphone, Tanzanian kalimba,
   ocarina, and tenor sax stabs.
-- **Creative Compass and learning built into the studio** — arrangement-aware
+- **The Dojo and learning built into the studio** — arrangement-aware
   next moves, editable motif/chord/pulse/groove seeds, scoped variations and
   undo, sampled-instrument listening guides, and practical lessons. Sound-pack
   previews can become editable two-bar clips without replacing existing work.
@@ -118,12 +118,13 @@ side and persists to the user's own browser storage.
   the studio in multiple tabs will give each tab its own engine but they
   share IndexedDB, so the most recent autosave wins.
 - WAV export uses a bounded native `OfflineAudioContext` path; factory-sampled
-  presets use their decoded zones while modeled Tone-only voices and advanced
-  FX use stable approximations. MP3 remains on the heavier Tone offline path,
-  and very long exports can still hit a browser memory cap.
+  presets use their decoded zones. Modeled voices preserve their harmonic family
+  and envelope, and shared spatial effects use the same live/export recipes.
+  Advanced Tone-only FX and synthesis still use approximations. MP3 encodes
+  the same native PCM render; very long exports can still hit a browser memory cap.
 - Factory zones are downloaded only when first previewed, loaded, or exported.
   They are cached for later offline use, so the first use of an instrument can
-  reflect network speed while startup avoids the 24.07 MiB sample payload.
+  reflect network speed while startup avoids the 41.86 MiB sample payload.
 - There is no cloud sync — projects live in your browser's IndexedDB. If
   you clear site data, projects are gone. Use **Export → Project JSON** to
   back up.

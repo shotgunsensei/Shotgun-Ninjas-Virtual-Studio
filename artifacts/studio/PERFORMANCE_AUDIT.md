@@ -1,5 +1,48 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-09-12 — Sound-quality findings and corrections
+
+These are the current findings; the August sections below retain their original
+measurements and are not new September verification claims.
+
+| Confirmed cause | Audible consequence | Correction and evidence |
+| --- | --- | --- |
+| VCSL source octave labels were passed directly to Tone | Existing factory instruments sounded one octave above the displayed notes | Convert C3-middle-C source labels to Tone C4-middle-C roots; spectral tests cover all seven families and a full Grand Piano WAV |
+| Grand Piano had only an FM approximation | No recorded hammer/string decay | Six hash-pinned CC0 Kawai zones, same-origin lazy load, synthesis fallback preserved |
+| Safe pluck wrapper used one triangle waveform and ignored dampening/resonance | Similar generic plucks, limited attack detail | Band-limited harmonic excitation, decaying low-pass envelope, velocity-sensitive brightness; real Tone offline render tested |
+| Sampler controls received a synth-only envelope object | Attack/release edits did not control sampled voices correctly | Set Sampler attack/release directly and apply the same values in native export |
+| Native melodic export chose one oscillator by track kind | Preset identity disappeared in WAV/MP3 | Render the selected recipe's harmonic family and ADSR; full export test distinguishes sub and bell on the same track kind |
+| Live/export reverb and delay implementations/settings differed | Different spaces, levels, and repeat rhythm after bouncing | Shared stereo-impulse rooms/halls and filtered feedback delays; matching 375 ms dotted-eighth and 110 ms slap timing at 120 BPM |
+| Sampled native export used 0.8 gain while live sampler used -8 dB | Unexpectedly louder sampled bounce | Native sample voice gain matches -8 dB, before existing track/master processing |
+| Track drive did not oversample | Additional nonlinear aliasing risk | 2x drive oversampling; still allocated only when the existing rack needs it |
+
+Architecture boundaries remain intact: no second live context, no additional
+transport loop, no project-schema change, no new package or paid service.
+The two impulse buffers are cached per context, feedback is bounded/filtered,
+and master disposal disconnects every owned native effect node. Effect-tail
+generation uses direct PCM, not a nested offline renderer or worklet graph.
+
+Tradeoffs: stereo convolution and 2x drive use DSP time; there is no claim of
+reduced CPU on every device. The sample library grows from 24.07 to 41.86 MiB
+on demand. Sparse single-velocity zones are not a multi-gigabyte velocity/
+round-robin piano. Synth fallback, sample repitching, and native export remain
+approximations of advanced Tone modulation, glide, chorus, and rack processing.
+Three seconds of export tail improves normal releases but cannot capture every
+possible long combined release/feedback chain.
+
+Compatibility: saved notes are unchanged. Correcting factory roots lowers
+existing sampled playback by one octave to match the piano roll. To retain an
+old intentionally high arrangement, duplicate the project and transpose those
+notes up 12 semitones. Reverb character and bounced levels also intentionally
+change; review old mixes before re-exporting.
+
+Current checks and measurements are in `PERF_BASELINE.md`; the reproducible
+commands and acceptance checklist are in `PERFORMANCE_FIXES.md`. A production
+dependency scan also found two moderate transitive `qs` advisories in the
+separate API server; patching that backend dependency remains separate work.
+
+## Historical August audit
+
 Audit date: 2026-08-30
 
 ## Executive Conclusion

@@ -773,6 +773,10 @@ test.describe("real-audio continuity", () => {
   }) => {
     test.slow();
     await openRealAudioStudio(page);
+    // The click can return before async worklet initialization completes.
+    // Establish a genuinely unlocked session before simulating OS suspension;
+    // suspending mid-unlock tests a different cancellation boundary.
+    await expect(page.getByRole("button", { name: /Tap to Enable Audio/i }).first()).toBeHidden();
 
     const before = await page.evaluate(async () => {
       const [{ audio }, { getStore }] = await Promise.all([

@@ -19,6 +19,12 @@ const OUTPUT_ROOT = resolve(
 );
 
 const samples = [
+  sample("kawai-grand", "C1", "c1.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C1_v2_rr1_Player.wav", "0378679e31a709f2192862fe6f0c05d9e5e93586"),
+  sample("kawai-grand", "C2", "c2.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C2_v2_rr1_Player.wav", "3e64901412fe7935e3a1152b0b7a2d93645e53ef"),
+  sample("kawai-grand", "C3", "c3.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C3_v2_rr1_Player.wav", "2449d26c97873705e234ad85b94e0c651018d4a5"),
+  sample("kawai-grand", "C4", "c4.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C4_v2_rr1_Player.wav", "09dfd90293a537066bd825dac73f823bf46d0aa9"),
+  sample("kawai-grand", "C5", "c5.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C5_v2_rr1_Player.wav", "197b04e4b6bbaf93ecb4bf436b5c4831a5afdec3"),
+  sample("kawai-grand", "C6", "c6.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C6_v2_rr1_Player.wav", "38e2ea4d854e7ccb211981e664337d9ed551e95e"),
   sample("tx81z-piano", "C1", "c1.wav", "Electrophones/TX81Z/Piano 1/Piano 1_C1_vl2.wav", "ca1fec535245278a946b32e6593cea97b676fa45"),
   sample("tx81z-piano", "C2", "c2.wav", "Electrophones/TX81Z/Piano 1/Piano 1_C2_vl2.wav", "f6aa254b39d225b221acba74163162b61fa5c173"),
   sample("tx81z-piano", "C3", "c3.wav", "Electrophones/TX81Z/Piano 1/Piano 1_C3_vl2.wav", "0b0fb00300ac4475e352265b39e2d99aad46e399"),
@@ -52,7 +58,9 @@ const samples = [
   sample("tenor-sax-staccato", "C5", "c5.wav", "Aerophones/Reed Aerophones/Tenor Saxophone/Staccato/BrettTenor_Staccato_Main_C5_vl2_rr1.wav", "7ab94d38a686b809fabb575f1e0d11c549500976"),
 ];
 
-function sample(instrument, rootNote, targetFile, sourcePath, sourceBlobSha1) {
+function sample(instrument, sourceNote, targetFile, sourcePath, sourceBlobSha1) {
+  // VCSL names middle C "C3"; the browser engine names MIDI 60 "C4".
+  const rootNote = sourceNote.replace(/\d+$/, (octave) => String(Number(octave) + 1));
   return { instrument, rootNote, targetFile, sourcePath, sourceBlobSha1 };
 }
 
@@ -133,6 +141,7 @@ const manifest = {
   licenseSha256: digest("sha256", licenseBytes),
   licenseSourceBlobSha1,
   selectionPolicy: "Compact chromatic factory subset; original PCM WAV files are unmodified.",
+  rootNoteConvention: "Scientific/Tone pitch: C4 = MIDI 60. Original VCSL filenames use C3 = MIDI 60.",
   totalBytes: manifestSamples.reduce((sum, entry) => sum + entry.bytes, 0),
   samples: manifestSamples,
 };

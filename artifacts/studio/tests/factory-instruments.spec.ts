@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("CC0 factory instruments", () => {
-  test("loads a guided instrument from same-origin assets with bounded fetch concurrency", async ({
+  for (const instrument of [
+    { id: "bell.vcsl-tanzanian-kalimba", folder: "tanzanian-kalimba", name: "VCSL Tanzanian Kalimba", zones: 4, cue: "Build a three-note ostinato", family: "Plucked idiophone" },
+    { id: "keys.grand-piano", folder: "kawai-grand", name: "Grand Piano", zones: 6, cue: "Play a quiet broken chord", family: "Acoustic grand piano" },
+  ]) {
+  test(`loads ${instrument.name} from same-origin assets with bounded fetch concurrency`, async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -14,7 +18,7 @@ test.describe("CC0 factory instruments", () => {
     let activeFactoryRequests = 0;
     let maxFactoryRequests = 0;
     const isFactory = (url: string) =>
-      new URL(url).pathname.includes("/samples/factory/vcsl/tanzanian-kalimba/");
+      new URL(url).pathname.includes(`/samples/factory/vcsl/${instrument.folder}/`);
 
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
@@ -41,27 +45,28 @@ test.describe("CC0 factory instruments", () => {
     });
     await page.waitForSelector("header", { timeout: 20_000 });
 
-    const row = page.getByTestId("preset-row-bell.vcsl-tanzanian-kalimba");
+    const row = page.getByTestId(`preset-row-${instrument.id}`);
     await expect(row).toBeVisible({ timeout: 15_000 });
-    await expect(row).toContainText("HQ · 4 zones");
+    await expect(row).toContainText(`HQ · ${instrument.zones} zones`);
 
     await row.getByRole("button", { name: /creative guide/i }).click();
-    await expect(row).toContainText("Build a three-note ostinato");
-    await expect(row).toContainText("Plucked idiophone");
+    await expect(row).toContainText(instrument.cue);
+    await expect(row).toContainText(instrument.family);
 
-    await row.getByRole("button", { name: "Preview VCSL Tanzanian Kalimba" }).click();
-    await expect.poll(() => responses.length, { timeout: 20_000 }).toBe(4);
+    await row.getByRole("button", { name: `Preview ${instrument.name}` }).click();
+    await expect.poll(() => responses.length, { timeout: 20_000 }).toBe(instrument.zones);
     expect(responses.every((response) => response.status === 200)).toBe(true);
-    expect(new Set(responses.map((response) => response.url)).size).toBe(4);
+    expect(new Set(responses.map((response) => response.url)).size).toBe(instrument.zones);
     expect(maxFactoryRequests).toBeLessThanOrEqual(3);
 
-    await expect(page.getByText(/Previewing VCSL Tanzanian Kalimba · local CC0 samples/i)).toBeVisible({
+    await expect(page.getByText(`Previewing ${instrument.name} · local CC0 samples`, { exact: false })).toBeVisible({
       timeout: 10_000,
     });
     await row.getByRole("button", { name: "Load" }).click();
     await expect(row.getByRole("button", { name: "Loaded" })).toBeVisible();
     expect(errors).toEqual([]);
   });
+  }
 
   test("renders sampled preset zones into an offline WAV export", async ({ page }) => {
     test.setTimeout(60_000);

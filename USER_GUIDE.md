@@ -9,6 +9,23 @@ New users begin in **Beginner Mode**, which keeps each channel strip focused
 on the controls needed to write and play. Tap the Beginner Mode control in the
 footer whenever you want to reveal the full expert mixer; nothing is locked.
 
+### Sound update: Resonance 4.4
+
+Grand Piano now uses six real Kawai acoustic-grand recordings. Choose it in
+the sound browser and let its HQ zones load; a playable model remains available
+while loading or offline before the samples have been cached. Try **Electric
+Piano** for warmer tine tones, or **Nylon Ghost** for plucks whose brightness
+responds to how strongly you play. Room/Hall sends add stereo space; Tape Delay
+follows the tempo and Dark Slapback adds a short filtered echo.
+
+Existing VCSL instruments now play at the octave shown in the piano roll:
+their source octave labels previously made them sound one octave too high.
+Your saved notes are unchanged. If you want to preserve that old higher sound,
+duplicate the project first and transpose the affected notes up 12 semitones.
+Review old mixes before re-exporting: effect character and sampled bounce
+levels have also been corrected. WAV/MP3 retain modeled preset families, but
+advanced modulation and some rack effects still differ from live playback.
+
 ---
 
 ## 1. Enable audio
@@ -116,7 +133,7 @@ replacement is cancelled instead of risking your work.
 Factory-sampled instruments retain their recorded source timbre in WAV export.
 Modeled Tone-only voices and advanced effects use stable native approximations,
 so critically audition the downloaded mix before publishing it. WAV is the
-recommended reliability path; MP3 uses the heavier Tone offline renderer.
+lossless option; MP3 encodes the same native render into a smaller lossy file.
 
 ## 6. Import a sample
 
@@ -143,7 +160,7 @@ Installing gives you:
   a network connection (your projects already live offline in IndexedDB).
 
 Factory instruments become available offline after their zones have been used
-once. The 24.07 MiB library is intentionally not downloaded with the initial
+once. The 41.86 MiB library is intentionally not downloaded with the initial
 app shell.
 
 If the prompt doesn't appear, the browser may need you to interact with

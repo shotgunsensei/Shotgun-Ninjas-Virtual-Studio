@@ -13,13 +13,18 @@ function chromaticLayers(
   instrument: string,
   samples: ReadonlyArray<readonly [rootNote: string, filename: string]>,
 ): SampleLayer[] {
-  return samples.map(([rootNote, filename]) => ({
-    id: `vcsl.${instrument}.${rootNote.toLowerCase().replace("#", "s")}`,
-    url: `${BASE}/${instrument}/${filename}`,
-    minVelocity: 0,
-    maxVelocity: 1,
-    rootNote,
-  }));
+  // VCSL filenames use C3 = middle C; Tone/scientific notation uses C4.
+  // Keep original filenames for provenance, but map their actual sounding pitch.
+  return samples.map(([sourceNote, filename]) => {
+    const rootNote = sourceNote.replace(/\d+$/, (octave) => String(Number(octave) + 1));
+    return {
+      id: `vcsl.${instrument}.${rootNote.toLowerCase().replace("#", "s")}`,
+      url: `${BASE}/${instrument}/${filename}`,
+      minVelocity: 0,
+      maxVelocity: 1,
+      rootNote,
+    };
+  });
 }
 
 /**
@@ -28,6 +33,10 @@ function chromaticLayers(
  * paths and SHA-256 values live beside the audio in `SOURCES.json`.
  */
 export const VCSL_FACTORY_LAYERS = {
+  kawaiGrand: chromaticLayers("kawai-grand", [
+    ["C1", "c1.wav"], ["C2", "c2.wav"], ["C3", "c3.wav"],
+    ["C4", "c4.wav"], ["C5", "c5.wav"], ["C6", "c6.wav"],
+  ]),
   tx81zPiano: chromaticLayers("tx81z-piano", [
     ["C1", "c1.wav"],
     ["C2", "c2.wav"],

@@ -1,5 +1,62 @@
 # Performance Baseline
 
+## 2026-09-12 — Resonance sound-quality update
+
+This section supersedes current-status claims in the historical August audit
+below. Measured on Windows, Node 24.16.0, pnpm 11.25.0, headless Chromium.
+
+| Measurement | August recorded baseline | September sound update |
+| --- | ---: | ---: |
+| Landing initial JS, gzip | 74.42 kB | 74.84 kB |
+| Studio initial JS, gzip | 344.71 kB | 346.50 kB |
+| Shared CSS, gzip | 23.36 kB | 23.36 kB |
+| Lazy factory PCM | 26 zones / 24.07 MiB | 32 zones / 41.86 MiB |
+| Sampled instrument families | 6 | 7 |
+
+The additional 17.79 MiB contains six original stereo Kawai grand recordings.
+No sample joins shell precache or startup JavaScript; decoding still uses at
+most three concurrent jobs and a 64 MiB shared decoded-buffer LRU. Active
+voices can retain buffers outside that LRU; 64 MiB is not a whole-app ceiling.
+No dependency was added. The numeric comparison above is to the recorded
+August build, not a controlled CPU benchmark against the immediately prior commit.
+
+Current automated results:
+
+- Frozen install, root typecheck, production client/SSR/prerender, bundle
+  budgets, and empty-Select guard pass. No lint script exists.
+- 53/53 unit tests pass, including 32 original-PCM hashes, pinned CC0 license,
+  manifest/layer-root agreement, and recorded-pitch checks across seven families.
+- Full browser run: 60 resolved, 59 pass, one intentional opt-in-worklet skip.
+  After correcting sample octaves, factory preview/load/export passed 3/3;
+  the expanded sound-quality group passed 4/4, including the additional
+  complete WAV-render timbre/concert-pitch regression.
+- Opt-in worklet metronome and suspended-context resume passed 2/2. An earlier
+  opt-in run exposed a test-precondition race (suspending before unlock had
+  finished); the test now waits for the actual unlocked UI state. Default
+  resume and independently varied pluck velocity/dampening also passed 2/2.
+- All 34 modeled recipes produce finite audible PCM and end silently. Live
+  harmonic plucks change energy/brightness with playing strength and dampening.
+  Both reverbs produce distinct stereo tails; delay timing is 375/110 ms at
+  120 BPM. Exported Grand Piano C4 carries its expected 261.63 Hz pitch band.
+- Production ten-minute playback/Panic gate: pass in 618,339 ms, with Mixer
+  and Diagnostics open, three live pack changes, sampled promotion, replay,
+  Stop/Panic, idle and GC. 5,997 continuity ticks; maximum heartbeat gap
+  114.7 ms; zero measured sustained silence; zero browser/page errors.
+  Cleanup reported zero active lean sources, scheduled players, worklets,
+  or Transport events. Heap at 1/5/10 minutes: 19.25/36.57/20.27 MiB,
+  returning to 16.15 MiB after idle/GC. Four long tasks totaled 473 ms;
+  the largest was 203 ms during startup. Evidence: local ignored
+  `runtime-profile/runtime-profile-1789191537865.json` (Chromium 148.0.7778.96).
+  The final rebuild after this run changed release-note text only, not audio code.
+- Production dependency audit found two moderate `qs` advisories in the
+  separate API server, GHSA-x5fp-wj9c-mxmx and GHSA-4mjr-xmp4-gh2g. The earlier
+  clean audit below is historical; this update does not change dependencies.
+
+Listening quality, measured hardware latency, Safari/iOS/Android behavior,
+and live-site deployment acceptance have not been verified by this update.
+
+## Historical August audit
+
 Audit date: 2026-08-30
 
 Scope: full repository oversight of Shotgun Ninjas Virtual Studio, with production-build, browser-runtime, audio-lifecycle, storage/export, dependency, and security verification. The app remains free; no account, billing, advertising, or usage gate was added.

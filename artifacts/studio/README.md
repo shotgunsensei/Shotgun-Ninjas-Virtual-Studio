@@ -8,10 +8,15 @@ every visible knob, slider, button, and pad is wired to real audio.
 - **34 melodic presets and 19 sound packs**, including modeled piano, guitar,
   bass, synth, orchestral/world colors, multi-kit drums, and real microphone
   vocals.
-- **Six sampled factory instruments** built from 26 same-origin CC0 zones:
-  TX81Z piano, folk harp, vibraphone, Tanzanian kalimba, ocarina, and tenor sax
+- **Seven sampled factory instruments** built from 32 same-origin CC0 zones:
+  Kawai grand, TX81Z piano, folk harp, vibraphone, Tanzanian kalimba, ocarina, and tenor sax
   stabs. Zones load on demand and are cached for offline reuse instead of being
   added to the startup bundle.
+- **Expressive sound**: harmonic plucks respond to playing strength, electric
+  piano has a warmer tine character, and oversampled drive reduces aliasing.
+  Shared stereo rooms/halls and filtered delays use consistent settings in
+  live playback and WAV export. Modeled WAV instruments retain their preset
+  family and envelope; advanced Tone-only synthesis/FX remain approximations.
 - **The Dojo**, a project-aware local musical mentor with Teach, Surprise, and
   Quiet guidance levels, arrangement-aware next moves, editable musical seeds,
   playful constraints, explanations, and scoped undo. Nothing is generated or

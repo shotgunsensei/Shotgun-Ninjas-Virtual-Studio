@@ -9,6 +9,7 @@ import type {
   VocalsPreset,
 } from "../../types";
 import { makeWorkletSampledDrum } from "./worklet-sample-player";
+import { pluckCharacter } from "./soundQuality";
 
 /**
  * Voice construction module.
@@ -52,17 +53,38 @@ export type DrumKit = Record<DrumPiece, DrumVoice>;
  * load/play cycles leak URL-backed worklet modules. This approximation keeps
  * the same small trigger surface without using Tone's worklet pluck path.
  */
+class DynamicPluckSynth extends Tone.MonoSynth {
+  protected override _triggerEnvelopeAttack(time: number, velocity = 1): void {
+    this.envelope.triggerAttack(time, velocity);
+    this.filterEnvelope.triggerAttack(time, 0.3 + Math.max(0, Math.min(1, velocity)) * 0.7);
+    this.oscillator.start(time);
+    if (this.envelope.sustain === 0) {
+      this.oscillator.stop(time + this.toSeconds(this.envelope.attack) + this.toSeconds(this.envelope.decay));
+    }
+  }
+}
+
 export class PolyPluck {
-  private voice: Tone.PolySynth<Tone.Synth>;
+  private voice: Tone.PolySynth<DynamicPluckSynth>;
 
   constructor(opts: Partial<Tone.PluckSynthOptions> = {}, voiceCount = 8) {
     const release = typeof opts.release === "number" ? opts.release : 0.35;
-    this.voice = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "triangle" },
+    const shape = pluckCharacter(
+      opts.dampening === undefined ? undefined : Tone.Frequency(opts.dampening).toFrequency(),
+      opts.resonance,
+      opts.attackNoise,
+    );
+    this.voice = new Tone.PolySynth(DynamicPluckSynth, {
+      oscillator: { type: "custom", partials: shape.partials },
+      filter: { type: "lowpass", Q: 0.7, rolloff: -12 },
+      filterEnvelope: {
+        attack: 0.001, decay: shape.filterDecay, sustain: 0.02,
+        release: Math.max(0.08, release), baseFrequency: shape.baseFrequency, octaves: shape.octaves,
+      },
       envelope: {
         attack: 0.002,
-        decay: Math.max(0.08, Math.min(0.5, release * 0.6)),
-        sustain: 0.08,
+        decay: shape.decay,
+        sustain: 0,
         release: Math.max(0.08, Math.min(1.2, release)),
       },
       volume: opts.volume ?? -8,
@@ -96,6 +118,11 @@ export class PolyPluck {
 
   connect(dest: Tone.InputNode) {
     this.voice.connect(dest);
+    return this;
+  }
+
+  set(options: Parameters<Tone.PolySynth<DynamicPluckSynth>["set"]>[0]) {
+    this.voice.set(options);
     return this;
   }
 

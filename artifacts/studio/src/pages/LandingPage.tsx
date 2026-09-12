@@ -22,7 +22,7 @@ const FEATURES = [
   {
     icon: "🎷",
     title: "34 instruments, 19 packs",
-    desc: "Six HQ CC0 sampled instruments join the modeled synth catalog, with local lazy loading and export-ready sound.",
+    desc: "Seven HQ CC0 sampled instruments, including a real Kawai grand piano, join expressive synths and plucked strings.",
   },
   {
     icon: "🧠",

@@ -806,6 +806,7 @@ class AudioEngine {
 
   setBpm(bpm: number) {
     Tone.getTransport().bpm.rampTo(bpm, 0.05);
+    this.masterChain?.setBpm(bpm);
   }
 
   getBpm() {
@@ -2238,6 +2239,11 @@ class AudioEngine {
       v.widener.width.rampTo(Math.max(0, Math.min(1, partial.width)), 0.05);
     }
     if (!v.poly) return;
+    if (v.poly instanceof Tone.Sampler) {
+      if (partial.attack !== undefined) v.poly.attack = Math.max(0.002, partial.attack * 0.4);
+      if (partial.release !== undefined) v.poly.release = Math.max(0.08, partial.release * 2);
+      return;
+    }
     // Tone.PolySynth supports `.set()` to live-update voice options.
     const poly = v.poly as unknown as { set?: (opts: object) => void };
     if (typeof poly.set !== "function") return;
@@ -3315,7 +3321,7 @@ class AudioEngine {
   private ensureDriveNode(v: TrackVoice) {
     if (v.drive) return;
     firstPlayMark("effect-node:create", { kind: "drive" });
-    v.drive = new Tone.Distortion({ distortion: 0, wet: 0 });
+    v.drive = new Tone.Distortion({ distortion: 0, wet: 0, oversample: "2x" });
     trackToneCreate("effectModule", "drive");
     this.rewireTrackFxChain(v);
   }

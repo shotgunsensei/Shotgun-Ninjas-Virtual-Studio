@@ -49,6 +49,7 @@ function inspectWave(bytes: Buffer, label: string) {
   let cursor = 12;
   let format: { audioFormat: number; channels: number; sampleRate: number; bits: number } | null = null;
   let dataBytes = 0;
+  let dataOffset = 0;
   while (cursor + 8 <= bytes.length) {
     const id = bytes.toString("ascii", cursor, cursor + 4);
     const size = bytes.readUInt32LE(cursor + 4);
@@ -62,6 +63,7 @@ function inspectWave(bytes: Buffer, label: string) {
         bits: bytes.readUInt16LE(body + 14),
       };
     } else if (id === "data") {
+      dataOffset = body;
       dataBytes += size;
       // Some source WAVs omit the optional pad byte before trailing INFO
       // metadata. The audio-bearing chunks are complete at this point; hashes
@@ -78,6 +80,7 @@ function inspectWave(bytes: Buffer, label: string) {
   assert.ok(format.sampleRate >= 22_050 && format.sampleRate <= 192_000, `${label} has unsafe sample rate`);
   assert.ok([16, 24, 32].includes(format.bits), `${label} has unsupported bit depth`);
   assert.ok(dataBytes > 0, `${label} has no audio frames`);
+  return { ...format, dataBytes, dataOffset };
 }
 
 async function readManifest(): Promise<FactoryManifest> {
@@ -93,11 +96,11 @@ test("factory sample manifest is pinned, compact, and internally complete", asyn
   assert.equal(manifest.sourceCommit, "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e");
   assert.equal(manifest.license, "CC0-1.0");
   assert.match(manifest.licenseSourceBlobSha1, /^[a-f0-9]{40}$/);
-  assert.equal(manifest.samples.length, 26);
+  assert.equal(manifest.samples.length, 32);
   assert.equal(manifest.samples.length, FACTORY_SAMPLE_COUNT);
-  assert.equal(new Set(manifest.samples.map((sample) => sample.instrument)).size, 6);
-  assert.equal(FACTORY_INSTRUMENT_COUNT, 6);
-  assert.ok(manifest.totalBytes <= 26 * 1024 * 1024, "factory subset exceeds its 26 MiB budget");
+  assert.equal(new Set(manifest.samples.map((sample) => sample.instrument)).size, 7);
+  assert.equal(FACTORY_INSTRUMENT_COUNT, 7);
+  assert.ok(manifest.totalBytes <= 43 * 1024 * 1024, "factory subset exceeds its 43 MiB budget");
   assert.equal(
     manifest.samples.reduce((sum, sample) => sum + sample.bytes, 0),
     manifest.totalBytes,
@@ -139,7 +142,55 @@ test("every factory preset layer resolves to a manifested same-origin WAV", asyn
       assert.ok(layer.rootNote, `${layer.id} needs a root note`);
       const relative = layer.url.slice(URL_PREFIX.length);
       assert.ok(files.has(relative), `${layer.url} is missing from SOURCES.json`);
+      assert.equal(layer.rootNote, manifest.samples.find((sample) => sample.file === relative)?.rootNote,
+        `${layer.id} keyboard mapping disagrees with its provenance manifest`);
       await stat(resolve(FACTORY_ROOT, relative));
     }
+  }
+});
+
+test("each factory instrument maps its recorded pitch to the correct keyboard octave", async () => {
+  const manifest = await readManifest();
+  // Midrange representatives avoid missing fundamentals in very low piano
+  // strings and non-harmonic transients in extreme-register acoustic samples.
+  const representatives = ["kawai-grand/c3.wav", "tx81z-piano/c3.wav", "folk-harp/c3.wav",
+    "vibraphone/c3.wav", "tanzanian-kalimba/cs3.wav", "ocarina/cs4.wav", "tenor-sax-staccato/c3.wav"];
+  for (const file of representatives) {
+    const sample = manifest.samples.find((entry) => entry.file === file)!;
+    const bytes = await readFile(resolve(FACTORY_ROOT, file));
+    const wave = inspectWave(bytes, file);
+    const stride = wave.channels * wave.bits / 8;
+    const start = Math.min(Math.floor(wave.sampleRate * 0.13), Math.floor(wave.dataBytes / stride / 4));
+    const frames = Math.min(8192, Math.floor(wave.dataBytes / stride) - start);
+    const pcm = new Float64Array(frames);
+    for (let i = 0; i < frames; i++) {
+      pcm[i] = bytes.readIntLE(wave.dataOffset + (start + i) * stride, wave.bits / 8) / 2 ** (wave.bits - 1)
+        * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (frames - 1)));
+    }
+    const [, pitch, sharp, octave] = /^([A-G])(#?)(\d)$/.exec(sample.rootNote)!;
+    const semitone = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[pitch]!;
+    const midi = (Number(octave) + 1) * 12 + semitone + (sharp ? 1 : 0);
+    const expectedHz = 440 * 2 ** ((midi - 69) / 12);
+    const bandEnergy = (hz: number) => {
+      let peak = 0;
+      // Preserve natural acoustic tuning; this catches octave-label errors,
+      // not cents of vibrato/inharmonicity. Goertzel needs no DSP dependency.
+      for (let cents = -60; cents <= 60; cents += 2) {
+        const coefficient = 2 * Math.cos(2 * Math.PI * hz * 2 ** (cents / 1200) / wave.sampleRate);
+        let previous = 0;
+        let previous2 = 0;
+        for (const value of pcm) {
+          const current = value + coefficient * previous - previous2;
+          previous2 = previous;
+          previous = current;
+        }
+        peak = Math.max(peak, previous ** 2 + previous2 ** 2 - coefficient * previous * previous2);
+      }
+      return peak;
+    };
+    assert.ok(bandEnergy(expectedHz) > bandEnergy(expectedHz / 2) * 100,
+      `${file}: declared ${sample.rootNote} must carry the fundamental, not an octave harmonic`);
+    // The old (one octave low) root has almost no signal in these recordings.
+    assert.ok(bandEnergy(expectedHz) > 0.01, `${file}: declared pitch has no measurable energy`);
   }
 });
