@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { SampleInstrumentPanel } from "./SampleInstrumentPanel";
 import {
   Play,
   Pause,
@@ -452,9 +453,9 @@ function MobileInstrumentPanel({
       return <DrumPads track={track} />;
     case "piano":
     case "bass":
-      return <Keyboard track={track} />;
+      return <><Keyboard track={track} /><SampleInstrumentPanel track={track} /></>;
     case "guitar":
-      return <GuitarPanel track={track} />;
+      return <><GuitarPanel track={track} /><SampleInstrumentPanel track={track} /></>;
     case "vocals":
       return <VocalsPanel track={track} />;
     default:

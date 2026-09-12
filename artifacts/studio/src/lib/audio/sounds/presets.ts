@@ -175,6 +175,55 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
     }),
   },
 
+  {
+    id: "keys.vcsl-steinway-grand",
+    name: "Steinway B Grand",
+    category: "Keys",
+    description: "Six sampled registers of a Steinway B, with close stereo detail and warm unpedaled resonance.",
+    compatibleWith: ["piano"],
+    layers: VCSL_FACTORY_LAYERS.steinwayGrand,
+    guide: {
+      family: "Acoustic grand piano",
+      register: "C1–C6 sampled roots; full chords and exposed solo melodies",
+      character: "Round hammer attack, detailed strings, and a clear natural stereo decay.",
+      listeningCue: "Compare the body of a low chord with the lighter, singing upper register.",
+      creativeMove: "Leave a low fifth ringing while the right hand moves through a slow melody.",
+    },
+    synth: synth({ engine: "sampler", attack: 0.004, release: 0.8, cutoff: 0.78, reverbSend: 0.16 }),
+  },
+  {
+    id: "keys.vcsl-french-harpsichord",
+    name: "French Harpsichord",
+    category: "Keys",
+    description: "Five sampled registers with crisp plucked strings and bright, intricate overtones.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.frenchHarpsichord,
+    guide: {
+      family: "Plucked keyboard",
+      register: "C2–C6 sampled roots; interlocking arpeggios and quick ornaments",
+      character: "Immediate quill-like attack and a shimmering string decay.",
+      listeningCue: "Hear the pluck at the front of each note separate even in fast passages.",
+      creativeMove: "Alternate a two-note bass figure with a flowing upper arpeggio.",
+    },
+    synth: synth({ engine: "pluck", attack: 0.001, decay: 0.5, sustain: 0, release: 0.25, cutoff: 0.85, reverbSend: 0.12 }),
+  },
+  {
+    id: "keys.vcsl-pipe-organ",
+    name: "Chapel Pipe Organ",
+    category: "Keys",
+    description: "Five softly voiced pipe-organ registers recorded with natural room ambience.",
+    compatibleWith: ["piano"],
+    layers: VCSL_FACTORY_LAYERS.pipeOrgan,
+    guide: {
+      family: "Pipe organ",
+      register: "C2–C6 sampled roots; spacious chords and connected melodic lines",
+      character: "Gentle wind onset, rounded pipes, and a resonant room tail.",
+      listeningCue: "Follow the room sound after releasing a chord. Recorded sustains have a finite length.",
+      creativeMove: "Move one voice at a time through three chords over a held bass note.",
+    },
+    synth: synth({ engine: "softkeys", attack: 0.025, decay: 0.25, sustain: 0.9, release: 0.65, cutoff: 0.55, reverbSend: 0.08 }),
+  },
+
   // ---- Bass ----
   {
     id: "bass.finger",
@@ -668,6 +717,39 @@ export const MELODIC_PRESETS: MelodicPresetDef[] = [
       reverbSend: 0.22,
       delaySend: 0.1,
     }),
+  },
+
+  {
+    id: "bell.vcsl-marimba",
+    name: "Concert Marimba",
+    category: "Bell",
+    description: "Eight sampled registers of warm wooden bars, with rounded mallet attack and natural resonance.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.marimba,
+    guide: {
+      family: "Wooden mallet percussion",
+      register: "F2–C7 sampled roots; bass ostinatos, broken chords, and clear upper patterns",
+      character: "Soft mallet impact followed by a woody, bell-like body.",
+      listeningCue: "Low bars ring longer while upper notes become compact rhythmic accents.",
+      creativeMove: "Repeat a low two-note figure and answer with a syncopated high phrase.",
+    },
+    synth: synth({ engine: "bell", attack: 0.001, decay: 0.65, sustain: 0, release: 0.8, cutoff: 0.65, reverbSend: 0.18 }),
+  },
+  {
+    id: "bell.vcsl-glockenspiel",
+    name: "Orchestral Glockenspiel",
+    category: "Bell",
+    description: "Six sampled metal-bar registers with sparkling attacks and long, clear ringing tails.",
+    compatibleWith: ["piano", "guitar"],
+    layers: VCSL_FACTORY_LAYERS.glockenspiel,
+    guide: {
+      family: "Metal mallet percussion",
+      register: "G5–C8 sampled roots; bright melody doubles and sparse accents",
+      character: "Focused metallic strike with a pure high ring and delicate overtones.",
+      listeningCue: "Let individual notes overlap and hear the high tails form a halo.",
+      creativeMove: "Double only the final notes of a melody one octave higher.",
+    },
+    synth: synth({ engine: "bell", attack: 0.001, decay: 0.75, sustain: 0, release: 1, cutoff: 0.9, reverbSend: 0.22 }),
   },
 
   // ---- Brass / Siren ----

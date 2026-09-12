@@ -1,5 +1,42 @@
 # Performance Baseline
 
+## 2026-09-12 — Sample instrument expansion (4.5.0)
+
+The user explicitly requested additional instruments and creating an instrument
+from an uploaded sound. This is a scoped feature expansion of the existing
+audio/import pipeline; the free product policy and stability constraints remain.
+
+| Measurement | Recorded 4.4 baseline | 4.5 build |
+| --- | ---: | ---: |
+| Melodic presets | 34 | 39 |
+| Sampled factory instruments / WAV zones | 7 / 32 | 12 / 62 |
+| Factory WAV assets on disk | 41.86 MiB | 101.38 MiB |
+| Landing initial JS, gzip | 74.84 kB | 75.11 kB |
+| Studio initial JS, gzip | 346.50 kB | 351.52 kB |
+| Shared CSS, gzip | 23.36 kB | 23.36 kB |
+
+The 59.52 MiB of additional recordings is loaded on demand, outside startup
+JavaScript and service-worker shell precache. Factory loading retains its three
+decode slots and 64 MiB decoded LRU. New custom instruments share one decoded
+recording across notes; each instrument caps active sources at 32. The custom
+decode queue permits three jobs, coalesces concurrent copies of the same Blob,
+skips discarded queued voices, and retains no permanent decoded sample library.
+Factory and custom queues are separately bounded; these are not whole-app memory
+limits. Active instruments retain their own PCM.
+
+All 62 unit tests pass. The complete browser suite resolves 75 tests: 74 pass,
+one existing opt-in AudioWorklet test is skipped. The soak result and required
+checklist are recorded in PERFORMANCE_FIXES.md. Actual native WAV/MP3 analysis
+measured the same source at A3/A4/A5 = 220/440/880 Hz (test tolerance ±12 Hz).
+The build comparison uses the recorded 4.4 numbers, not a controlled CPU or
+memory benchmark against a checked-out prior commit.
+
+The 600.256-second dev soak with five new factory voices and one custom voice
+passed: 11,989 heartbeat ticks, 322.2 ms maximum gap, audible output at all 20
+checkpoints, no errors/crashes, and zero custom sources after Stop/Panic. Heap
+cycled from 39.34–64.77 MiB and ended at 48.04 MiB. The final UI/mixer checks
+pass 6/6 in addition to the full suite.
+
 ## 2026-09-12 — Resonance sound-quality update
 
 This section supersedes current-status claims in the historical August audit

@@ -8,9 +8,279 @@
   "licenseSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
   "licenseSourceBlobSha1": "0e259d42c996742e9e3cba14c677129b2c1b6311",
   "selectionPolicy": "Compact chromatic factory subset; original PCM WAV files are unmodified.",
-  "rootNoteConvention": "Scientific/Tone pitch: C4 = MIDI 60. Original VCSL filenames use C3 = MIDI 60.",
-  "totalBytes": 43891081,
+  "rootNoteConvention": "Scientific/Tone pitch: C4 = MIDI 60. Steinway filenames already use C4 = MIDI 60; other included VCSL families use C3 = MIDI 60.",
+  "totalBytes": 106304651,
   "samples": [
+    {
+      "instrument": "steinway-grand",
+      "rootNote": "C1",
+      "file": "steinway-grand/c1.wav",
+      "bytes": 3780478,
+      "sha256": "8c59a38845e99ff0bc3a3ed2674191003f281d7a72f2dbcfa773dc169c87dcae",
+      "sourcePath": "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C1_vl2_rr1.wav",
+      "sourceBlobSha1": "e6a9c3b244c84d465c9e0a6fbf134d76848963b2"
+    },
+    {
+      "instrument": "steinway-grand",
+      "rootNote": "C2",
+      "file": "steinway-grand/c2.wav",
+      "bytes": 7368994,
+      "sha256": "8efd86d8a58e6334dea0c34c53872e67baa27e3982b5708b844c937bfb5fd5be",
+      "sourcePath": "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C2_vl2_rr1.wav",
+      "sourceBlobSha1": "f341a21eec0e406b32de9ba94e2845991aa2536f"
+    },
+    {
+      "instrument": "steinway-grand",
+      "rootNote": "C3",
+      "file": "steinway-grand/c3.wav",
+      "bytes": 5150932,
+      "sha256": "53c2cf94051119d240c8ccd4b9a91f07aa07333d845515c1ea1276daa775549e",
+      "sourcePath": "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C3_vl2_rr1.wav",
+      "sourceBlobSha1": "8ef76a88e25aebe3d1f3dc26099289900b3650d8"
+    },
+    {
+      "instrument": "steinway-grand",
+      "rootNote": "C4",
+      "file": "steinway-grand/c4.wav",
+      "bytes": 2260822,
+      "sha256": "9c2020587943a86dec7a8b7178cdac1c254c4f3dfc016bb27acdef1af292827f",
+      "sourcePath": "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C4_vl2_rr1.wav",
+      "sourceBlobSha1": "5f80e0d82e670ab294d58ac9373b4156f2b6d611"
+    },
+    {
+      "instrument": "steinway-grand",
+      "rootNote": "C5",
+      "file": "steinway-grand/c5.wav",
+      "bytes": 3389992,
+      "sha256": "167d625aeb78f0d64491d6cb8b0436302f63bd0dd4c2e21180460ef568e4faea",
+      "sourcePath": "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C5_vl2_rr1.wav",
+      "sourceBlobSha1": "d4e3e6c40762d902e249fe93aa4bd492962fb40c"
+    },
+    {
+      "instrument": "steinway-grand",
+      "rootNote": "C6",
+      "file": "steinway-grand/c6.wav",
+      "bytes": 2162200,
+      "sha256": "9feff6271739e80f80b1fdaa450fee2d9c76ccf0c5bbeb89bb73f78fcd8d309f",
+      "sourcePath": "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C6_vl2_rr1.wav",
+      "sourceBlobSha1": "f26dc99b20c0baf1620a748c68ea00909e8cef3f"
+    },
+    {
+      "instrument": "french-harpsichord",
+      "rootNote": "C2",
+      "file": "french-harpsichord/c1.wav",
+      "bytes": 4020440,
+      "sha256": "251bdc793c94771f99a736b5c7946da6278535f9e614c3b9fe58a965dfd0d774",
+      "sourcePath": "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C1_rr1_Main.wav",
+      "sourceBlobSha1": "7dd39f2c8728bdbe02a263f534431e0f074177ed"
+    },
+    {
+      "instrument": "french-harpsichord",
+      "rootNote": "C3",
+      "file": "french-harpsichord/c2.wav",
+      "bytes": 3411962,
+      "sha256": "9859e034d9e59dd7f3878e4bd52f05263b2780f5b697c7d87881ad8f880be98f",
+      "sourcePath": "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C2_rr1_Main.wav",
+      "sourceBlobSha1": "b1dbf4825efe25540907057c5b16883595dbd269"
+    },
+    {
+      "instrument": "french-harpsichord",
+      "rootNote": "C4",
+      "file": "french-harpsichord/c3.wav",
+      "bytes": 2647268,
+      "sha256": "cda5d21cdf4581517933859b8557e32745b5115ba243f63fef757fee025390de",
+      "sourcePath": "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C3_rr1_Main.wav",
+      "sourceBlobSha1": "bfba5da963ee600cdbdaa3c3e142f15b1fa097fa"
+    },
+    {
+      "instrument": "french-harpsichord",
+      "rootNote": "C5",
+      "file": "french-harpsichord/c4.wav",
+      "bytes": 1758974,
+      "sha256": "57b13d0ce01a8ad50c09ad1d7ecda3df1298c73ab9dc49988fbdf9dc2ce277a5",
+      "sourcePath": "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C4_rr1_Main.wav",
+      "sourceBlobSha1": "25401f1f36f7c9691deb7d321a604caf4e51b238"
+    },
+    {
+      "instrument": "french-harpsichord",
+      "rootNote": "C6",
+      "file": "french-harpsichord/c5.wav",
+      "bytes": 1433186,
+      "sha256": "63132dd11bb1a0b9ca09b89183e86c8020afadc7d48812432448450b354fe3cd",
+      "sourcePath": "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C5_rr1_Main.wav",
+      "sourceBlobSha1": "0a4b5176930655ead6024168f8eea403f3a1d657"
+    },
+    {
+      "instrument": "pipe-organ",
+      "rootNote": "C2",
+      "file": "pipe-organ/c1.wav",
+      "bytes": 2037594,
+      "sha256": "daad4df8c2cd9444a6ff04269149ea92dace2326c481cc6a07da67d7a2e5e76d",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C1_rr1.wav",
+      "sourceBlobSha1": "674ed832a1540ba7c881fa6e8a584c4a324bdcc4"
+    },
+    {
+      "instrument": "pipe-organ",
+      "rootNote": "C3",
+      "file": "pipe-organ/c2.wav",
+      "bytes": 2202602,
+      "sha256": "5906348057006cfa5451a2cb3f02b8cd639d89f9ddf3cc98df3102f5c942cd5a",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C2_rr1.wav",
+      "sourceBlobSha1": "2dc720c4f80f912ede3f3ac138b1f40e0215c450"
+    },
+    {
+      "instrument": "pipe-organ",
+      "rootNote": "C4",
+      "file": "pipe-organ/c3.wav",
+      "bytes": 2140890,
+      "sha256": "55b246625c8a2fe71c271d2335ba6cc5f12d3cd48cc691aa047197b7f825084f",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C3_rr1.wav",
+      "sourceBlobSha1": "862175f3f2ad7da84ba00509bbc63b1e72227d1a"
+    },
+    {
+      "instrument": "pipe-organ",
+      "rootNote": "C5",
+      "file": "pipe-organ/c4.wav",
+      "bytes": 2143034,
+      "sha256": "14f3a97253046b883e9689d9fb5420b9eb69e7b65564e2396b5098f245b0cd10",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C4_rr1.wav",
+      "sourceBlobSha1": "aaf898acca4946752d6ef5ddde411638fa28784d"
+    },
+    {
+      "instrument": "pipe-organ",
+      "rootNote": "C6",
+      "file": "pipe-organ/c5.wav",
+      "bytes": 2165234,
+      "sha256": "16c3916dbf17c878d4430fd4c5fe7b15aeb4fd0c568f651d05149b22e72c8bc8",
+      "sourcePath": "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C5_rr1.wav",
+      "sourceBlobSha1": "9c70ecaec5c14162da761be5c089fad1075db374"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "F2",
+      "file": "marimba/f1.wav",
+      "bytes": 1027292,
+      "sha256": "484de6300831ebb267a867a4c435567bacfb77aed953f317fde5b1c312bafac4",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F1_med_01.wav",
+      "sourceBlobSha1": "21df93be7915e72dabe9189001262c62b436355f"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "C3",
+      "file": "marimba/c2.wav",
+      "bytes": 1785050,
+      "sha256": "fd9c329513ed9d54c36174bbe45add471a80ffad411c686428bbf0bbc0121438",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C2_med_01.wav",
+      "sourceBlobSha1": "8d18c94d5945941574e44563a60908d9f8c11430"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "G3",
+      "file": "marimba/g2.wav",
+      "bytes": 1513244,
+      "sha256": "e9c2d33b9f50f0689b349dc9aee20a5b621961cf8294abb5ac4ba5a4674bd7c2",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G2_med_01.wav",
+      "sourceBlobSha1": "f27193e84ff36d8c16ddc4a59bc89acc79d426ae"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "F4",
+      "file": "marimba/f3.wav",
+      "bytes": 1382924,
+      "sha256": "a493b31ac2e588ed961c522a66b790acc584b59a08918bd7193d6e6fa8df4756",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F3_med_01.wav",
+      "sourceBlobSha1": "2c74c56eba169268ec3e74bc2de31fb282716a58"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "C5",
+      "file": "marimba/c4.wav",
+      "bytes": 655244,
+      "sha256": "3e88c006eef05e8f7891f8f6027042006199a4ec3b53a0ad7308f9782a52d4df",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C4_med_01.wav",
+      "sourceBlobSha1": "85c657dd0a8f58808efad5e9184d5b9124285512"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "G5",
+      "file": "marimba/g4.wav",
+      "bytes": 580262,
+      "sha256": "278e738d8214cdc192e63c3350b1e464a72c86dc135ddf0c5ce035569be66c71",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G4_med_01.wav",
+      "sourceBlobSha1": "be84c27de4fea671b78c82591aa6d6f98c06619e"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "F6",
+      "file": "marimba/f5.wav",
+      "bytes": 566924,
+      "sha256": "430da3d4f0a323838b7495d9cc5a98bc3829e2f11be11335af526a48ea88b8e6",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F5_med_01.wav",
+      "sourceBlobSha1": "215d4dfb83636c70a5997ac65cb3acf201c53dc5"
+    },
+    {
+      "instrument": "marimba",
+      "rootNote": "C7",
+      "file": "marimba/c6.wav",
+      "bytes": 451844,
+      "sha256": "d93fc6f7b399ac28d1ecf91987e9eb55b34024c6033b7f0e3aaf35f49d51a2f2",
+      "sourcePath": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C6_med_01.wav",
+      "sourceBlobSha1": "f5c95434f42f07fecdbd4f3e3a6a737d81cdd45a"
+    },
+    {
+      "instrument": "glockenspiel",
+      "rootNote": "G5",
+      "file": "glockenspiel/g4.wav",
+      "bytes": 1271310,
+      "sha256": "6c4649b13e24fa01e4634edad8fe8edf18aef33facc5d49fe53097b376bac4da",
+      "sourcePath": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G4_01.wav",
+      "sourceBlobSha1": "a7d9ca6c68e4c56327d83f0653ee3e16e4810265"
+    },
+    {
+      "instrument": "glockenspiel",
+      "rootNote": "C6",
+      "file": "glockenspiel/c5.wav",
+      "bytes": 1271310,
+      "sha256": "635f898e0bcb6975b96b18efd9c896f6f1b97ff12174a339ada4814e49675660",
+      "sourcePath": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C5_01.wav",
+      "sourceBlobSha1": "db079c70946137f543820b6a6ac023d0afaac47c"
+    },
+    {
+      "instrument": "glockenspiel",
+      "rootNote": "G6",
+      "file": "glockenspiel/g5.wav",
+      "bytes": 1226714,
+      "sha256": "7045c0ef7260e2f1ad11a64406cf7575ed898d1207a91104d33d78caefac63e4",
+      "sourcePath": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G5_01.wav",
+      "sourceBlobSha1": "dbaf80bc3975016095de3a611a202b581931311c"
+    },
+    {
+      "instrument": "glockenspiel",
+      "rootNote": "C7",
+      "file": "glockenspiel/c6.wav",
+      "bytes": 1271310,
+      "sha256": "e942cbf502cf6731df2925945fe3234c876cb63f047d91007b6929887f9e4904",
+      "sourcePath": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C6_01.wav",
+      "sourceBlobSha1": "c02ff721d10eb3551372806653368f45ea5dc367"
+    },
+    {
+      "instrument": "glockenspiel",
+      "rootNote": "G7",
+      "file": "glockenspiel/g6.wav",
+      "bytes": 843122,
+      "sha256": "a2ba94e59119cd5272c1161fc8b8fbfb94c7b44de45a9a6cc5973b1c332103af",
+      "sourcePath": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G6_01.wav",
+      "sourceBlobSha1": "e95738492bdc207b11ad32891a9a1ea090b6719e"
+    },
+    {
+      "instrument": "glockenspiel",
+      "rootNote": "C8",
+      "file": "glockenspiel/c7.wav",
+      "bytes": 492418,
+      "sha256": "b2ecbe0e60c983bbfaa49a1f45f8a11559f7dba27b8c8a032eb2cb7366a36910",
+      "sourcePath": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C7_01.wav",
+      "sourceBlobSha1": "a0f4aff9ef7d73e49a16f4054ead1369a78572b0"
+    },
     {
       "instrument": "kawai-grand",
       "rootNote": "C2",

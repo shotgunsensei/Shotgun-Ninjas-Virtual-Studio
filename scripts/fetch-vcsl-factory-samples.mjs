@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,41 @@ const OUTPUT_ROOT = resolve(
 );
 
 const samples = [
+  sample("steinway-grand", "C1", "c1.wav", "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C1_vl2_rr1.wav", "e6a9c3b244c84d465c9e0a6fbf134d76848963b2"),
+  sample("steinway-grand", "C2", "c2.wav", "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C2_vl2_rr1.wav", "f341a21eec0e406b32de9ba94e2845991aa2536f"),
+  sample("steinway-grand", "C3", "c3.wav", "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C3_vl2_rr1.wav", "8ef76a88e25aebe3d1f3dc26099289900b3650d8"),
+  sample("steinway-grand", "C4", "c4.wav", "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C4_vl2_rr1.wav", "5f80e0d82e670ab294d58ac9373b4156f2b6d611"),
+  sample("steinway-grand", "C5", "c5.wav", "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C5_vl2_rr1.wav", "d4e3e6c40762d902e249fe93aa4bd492962fb40c"),
+  sample("steinway-grand", "C6", "c6.wav", "Chordophones/Zithers/Grand Piano, Steinway B/NoSus/JHPiano_NoSus_Close_C6_vl2_rr1.wav", "f26dc99b20c0baf1620a748c68ea00909e8cef3f"),
+
+  sample("french-harpsichord", "C1", "c1.wav", "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C1_rr1_Main.wav", "7dd39f2c8728bdbe02a263f534431e0f074177ed"),
+  sample("french-harpsichord", "C2", "c2.wav", "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C2_rr1_Main.wav", "b1dbf4825efe25540907057c5b16883595dbd269"),
+  sample("french-harpsichord", "C3", "c3.wav", "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C3_rr1_Main.wav", "bfba5da963ee600cdbdaa3c3e142f15b1fa097fa"),
+  sample("french-harpsichord", "C4", "c4.wav", "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C4_rr1_Main.wav", "25401f1f36f7c9691deb7d321a604caf4e51b238"),
+  sample("french-harpsichord", "C5", "c5.wav", "Chordophones/Zithers/Harpsichord, French/Sustains/Harpsi2_Normal_C5_rr1_Main.wav", "0a4b5176930655ead6024168f8eea403f3a1d657"),
+
+  sample("pipe-organ", "C1", "c1.wav", "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C1_rr1.wav", "674ed832a1540ba7c881fa6e8a584c4a324bdcc4"),
+  sample("pipe-organ", "C2", "c2.wav", "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C2_rr1.wav", "2dc720c4f80f912ede3f3ac138b1f40e0215c450"),
+  sample("pipe-organ", "C3", "c3.wav", "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C3_rr1.wav", "862175f3f2ad7da84ba00509bbc63b1e72227d1a"),
+  sample("pipe-organ", "C4", "c4.wav", "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C4_rr1.wav", "aaf898acca4946752d6ef5ddde411638fa28784d"),
+  sample("pipe-organ", "C5", "c5.wav", "Aerophones/Edge-blown Aerophones/Pipe Organ/Quiet/NT5_Man3Quiet_C5_rr1.wav", "9c70ecaec5c14162da761be5c089fad1075db374"),
+
+  sample("marimba", "F1", "f1.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F1_med_01.wav", "21df93be7915e72dabe9189001262c62b436355f"),
+  sample("marimba", "C2", "c2.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C2_med_01.wav", "8d18c94d5945941574e44563a60908d9f8c11430"),
+  sample("marimba", "G2", "g2.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G2_med_01.wav", "f27193e84ff36d8c16ddc4a59bc89acc79d426ae"),
+  sample("marimba", "F3", "f3.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F3_med_01.wav", "2c74c56eba169268ec3e74bc2de31fb282716a58"),
+  sample("marimba", "C4", "c4.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C4_med_01.wav", "85c657dd0a8f58808efad5e9184d5b9124285512"),
+  sample("marimba", "G4", "g4.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G4_med_01.wav", "be84c27de4fea671b78c82591aa6d6f98c06619e"),
+  sample("marimba", "F5", "f5.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F5_med_01.wav", "215d4dfb83636c70a5997ac65cb3acf201c53dc5"),
+  sample("marimba", "C6", "c6.wav", "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C6_med_01.wav", "f5c95434f42f07fecdbd4f3e3a6a737d81cdd45a"),
+
+  sample("glockenspiel", "G4", "g4.wav", "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G4_01.wav", "a7d9ca6c68e4c56327d83f0653ee3e16e4810265"),
+  sample("glockenspiel", "C5", "c5.wav", "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C5_01.wav", "db079c70946137f543820b6a6ac023d0afaac47c"),
+  sample("glockenspiel", "G5", "g5.wav", "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G5_01.wav", "dbaf80bc3975016095de3a611a202b581931311c"),
+  sample("glockenspiel", "C6", "c6.wav", "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C6_01.wav", "c02ff721d10eb3551372806653368f45ea5dc367"),
+  sample("glockenspiel", "G6", "g6.wav", "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G6_01.wav", "e95738492bdc207b11ad32891a9a1ea090b6719e"),
+  sample("glockenspiel", "C7", "c7.wav", "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C7_01.wav", "a0f4aff9ef7d73e49a16f4054ead1369a78572b0"),
+
   sample("kawai-grand", "C1", "c1.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C1_v2_rr1_Player.wav", "0378679e31a709f2192862fe6f0c05d9e5e93586"),
   sample("kawai-grand", "C2", "c2.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C2_v2_rr1_Player.wav", "3e64901412fe7935e3a1152b0b7a2d93645e53ef"),
   sample("kawai-grand", "C3", "c3.wav", "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C3_v2_rr1_Player.wav", "2449d26c97873705e234ad85b94e0c651018d4a5"),
@@ -59,8 +94,10 @@ const samples = [
 ];
 
 function sample(instrument, sourceNote, targetFile, sourcePath, sourceBlobSha1) {
-  // VCSL names middle C "C3"; the browser engine names MIDI 60 "C4".
-  const rootNote = sourceNote.replace(/\d+$/, (octave) => String(Number(octave) + 1));
+  // Most VCSL families name MIDI 60 "C3". Recorded-pitch validation confirms
+  // the Steinway filenames already use scientific/Tone notation (C4 = MIDI 60).
+  const sourceOctaveOffset = instrument === "steinway-grand" ? 0 : 1;
+  const rootNote = sourceNote.replace(/\d+$/, (octave) => String(Number(octave) + sourceOctaveOffset));
   return { instrument, rootNote, targetFile, sourcePath, sourceBlobSha1 };
 }
 
@@ -111,11 +148,15 @@ async function mapLimit(items, limit, worker) {
 await mkdir(OUTPUT_ROOT, { recursive: true });
 
 const manifestSamples = await mapLimit(samples, 4, async (entry) => {
-  const bytes = await fetchPinned(entry.sourcePath, entry.sourceBlobSha1);
   const targetPath = resolve(OUTPUT_ROOT, entry.instrument, entry.targetFile);
-  await mkdir(dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, bytes);
-  process.stdout.write(`Fetched ${entry.instrument}/${entry.targetFile} (${bytes.length} bytes)\n`);
+  const existing = await readFile(targetPath).catch(() => null);
+  const verified = existing && gitBlobDigest(existing) === entry.sourceBlobSha1;
+  const bytes = verified ? existing : await fetchPinned(entry.sourcePath, entry.sourceBlobSha1);
+  if (!verified) {
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, bytes);
+  }
+  process.stdout.write(`${verified ? "Verified" : "Fetched"} ${entry.instrument}/${entry.targetFile} (${bytes.length} bytes)\n`);
   return {
     instrument: entry.instrument,
     rootNote: entry.rootNote,
@@ -141,7 +182,7 @@ const manifest = {
   licenseSha256: digest("sha256", licenseBytes),
   licenseSourceBlobSha1,
   selectionPolicy: "Compact chromatic factory subset; original PCM WAV files are unmodified.",
-  rootNoteConvention: "Scientific/Tone pitch: C4 = MIDI 60. Original VCSL filenames use C3 = MIDI 60.",
+  rootNoteConvention: "Scientific/Tone pitch: C4 = MIDI 60. Steinway filenames already use C4 = MIDI 60; other included VCSL families use C3 = MIDI 60.",
   totalBytes: manifestSamples.reduce((sum, entry) => sum + entry.bytes, 0),
   samples: manifestSamples,
 };

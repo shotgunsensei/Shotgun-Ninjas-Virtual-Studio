@@ -21,8 +21,8 @@ const FEATURES = [
   },
   {
     icon: "🎷",
-    title: "34 instruments, 19 packs",
-    desc: "Seven HQ CC0 sampled instruments, including a real Kawai grand piano, join expressive synths and plucked strings.",
+    title: "39 instruments, 19 packs",
+    desc: "Twelve HQ CC0 sampled instruments, including Kawai and Steinway grands. Upload your own sound to create a keyboard instrument.",
   },
   {
     icon: "🧠",

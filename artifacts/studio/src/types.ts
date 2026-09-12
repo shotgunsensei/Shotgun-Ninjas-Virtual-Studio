@@ -413,6 +413,8 @@ export interface Track {
   kitId?: DrumKitId;
   /** New melodic preset id from the preset library. Overrides legacy `preset`. */
   presetId?: string;
+  /** One project sample mapped chromatically from its original MIDI pitch. */
+  sampleInstrument?: { blobKey: string; rootNote: number };
   /** Per-drum-piece mixer overrides. Each value can be partial. */
   pieceSettings?: Partial<Record<string, Partial<DrumPieceSettings>>>;
   /** Project sample-library blob keys that replace individual drum pads. */

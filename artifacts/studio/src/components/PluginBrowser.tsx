@@ -144,7 +144,7 @@ function InstrumentPluginRow({ manifest }: { manifest: PluginManifest }) {
 
   const status = getInstrumentStatus(
     manifest.id,
-    track?.presetId,
+    track?.sampleInstrument ? undefined : track?.presetId,
     track?.kitId,
   );
 

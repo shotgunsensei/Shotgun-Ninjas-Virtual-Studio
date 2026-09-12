@@ -128,7 +128,7 @@ export function AboutDialog({
             <div className="font-mono text-[9px] uppercase tracking-widest text-foreground mb-1">
               Open factory sounds
             </div>
-            Seven high-quality sampled instruments come from the public-domain
+            Twelve high-quality sampled instruments come from the public-domain
             Versilian Community Sample Library and are served by the app itself.
             {" "}
             <a

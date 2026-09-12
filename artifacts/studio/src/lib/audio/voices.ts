@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import { makeWorkletSampledDrum } from "./worklet-sample-player";
 import { pluckCharacter } from "./soundQuality";
+import type { SampleInstrumentVoice } from "./sampleInstrumentVoice";
 
 /**
  * Voice construction module.
@@ -426,6 +427,7 @@ export class SubFingerBass {
 }
 
 export type MelodicVoice =
+  | SampleInstrumentVoice
   | Tone.PolySynth
   | Tone.Sampler
   | PolyPluck

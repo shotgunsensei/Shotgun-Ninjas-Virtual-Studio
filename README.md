@@ -20,11 +20,16 @@ The repo is a pnpm monorepo. The studio app itself lives in
 
 ## Features
 
-- **34 melodic presets and 19 ready-to-play sound packs** spanning modeled
+- **39 melodic presets and 19 ready-to-play sound packs** spanning modeled
   keys, guitar, bass, orchestral/world colors, multi-kit drums, and real
-  microphone vocals. Seven high-quality factory instruments use 32 same-origin
+  microphone vocals. Twelve high-quality factory instruments use 62 same-origin
   CC0 sample zones: Kawai grand, TX81Z piano, folk harp, vibraphone, Tanzanian kalimba,
-  ocarina, and tenor sax stabs.
+  ocarina, tenor sax stabs, Steinway grand, French harpsichord, pipe organ,
+  marimba, and glockenspiel.
+- **Create your own instrument** — upload and trim a sound, name it, set the
+  source note, and play it across the keyboard and octaves. The recording stays
+  with your project and portable exports. Pitch changes playback speed and
+  duration; source notes are set manually and recordings end naturally.
 - **The Dojo and learning built into the studio** — arrangement-aware
   next moves, editable motif/chord/pulse/groove seeds, scoped variations and
   undo, sampled-instrument listening guides, and practical lessons. Sound-pack

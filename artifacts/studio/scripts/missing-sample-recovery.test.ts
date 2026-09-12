@@ -102,6 +102,17 @@ test("library recovery hydrates only the exact id/blob-key owner", () => {
   assert.equal(isMissingSampleRecovered(recovered, entry, blob), true);
 });
 
+test("skipping a missing custom source mutes every instrument that uses it", () => {
+  const source = project();
+  source.tracks[1].sampleInstrument = { blobKey: "blob:library-target", rootNote: 60 };
+  const patch = buildMissingSampleSkipPatch(source, {
+    kind: "library", sampleId: "duplicate-id", blobKey: "blob:library-target", name: "Target sample",
+  });
+  assert.equal(patch.action, "muted");
+  assert.deepEqual(patch.tracks!.map((track) => track.muted), [true, true, false]);
+  assert.equal(patch.tracks![1].sampleInstrument?.rootNote, 60);
+});
+
 test("clip recovery hydrates only the exact track/id/blob-key tuple", () => {
   const source = project();
   const blob = new Blob(["clip audio"], { type: "audio/wav" });

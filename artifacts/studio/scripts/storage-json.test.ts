@@ -136,3 +136,39 @@ test("project-only import reports missing audio and retains destination-owned re
     "json-fixture:sample:sample-one",
   );
 });
+
+test("portable and project-only imports preserve the custom root and remap its source", async () => {
+  for (const mode of ["project-with-samples", "project-only"] as const) {
+    const project = projectFixture();
+    project.tracks[0].sampleInstrument = {
+      blobKey: project.samples![0].blobKey,
+      rootNote: 57,
+    };
+    const imported = parseProjectJson(await projectToJson(project, mode));
+    assert.deepEqual(imported.tracks[0].sampleInstrument, {
+      blobKey: imported.samples![0].blobKey,
+      rootNote: 57,
+    });
+    assert.notEqual(imported.samples![0].blobKey, project.samples![0].blobKey);
+    assert.equal(await imported.samples![0].blob?.text(), mode === "project-with-samples" ? "library-audio" : undefined);
+  }
+});
+
+test("a dangling custom source remains recoverable after portable import", async () => {
+  const project = projectFixture();
+  project.tracks[0].sampleInstrument = { blobKey: "removed-source", rootNote: 60 };
+  const json = await projectToJson(project);
+  const imported = parseProjectJson(json);
+  const recoveredEntry = imported.samples!.find((sample) => sample.blobKey === imported.tracks[0].sampleInstrument?.blobKey);
+  assert.equal(recoveredEntry?.name, "Voice instrument source");
+  assert.equal(recoveredEntry?.blob, undefined);
+  assert.match(recoveredEntry!.blobKey, new RegExp(`^${imported.id}:sample:`));
+  assert.ok(summarizeProjectJson(json).missingSampleNames.includes("Voice instrument source"));
+});
+
+test("JSON import rejects invalid custom configuration before accepting the project", async () => {
+  const project = projectFixture();
+  const envelope = JSON.parse(await projectToJson(project));
+  envelope.project.tracks[0].sampleInstrument = { blobKey: project.samples![0].blobKey, rootNote: "60" };
+  assert.throws(() => parseProjectJson(JSON.stringify(envelope)), /Invalid custom instrument/);
+});

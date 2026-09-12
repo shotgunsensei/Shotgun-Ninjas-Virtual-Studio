@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useStore, getStore } from "../store";
 import { useSettings } from "../lib/settings";
 import { audio } from "../lib/audio/engine";
+import { findPreset } from "../lib/audio/sounds/presets";
 import { useMidiEvents } from "../lib/midi/midi";
 import type { AnyPreset, AutomationParamId, InstrumentKind, MidiTarget, SendBusId, Track, TrackEq } from "../types";
 import { SEND_BUS_IDS, SEND_BUS_LABELS } from "../types";
@@ -177,7 +178,8 @@ const ChannelStrip = memo(function ChannelStrip({
   const color = track.meta?.color ?? "#7dd3fc";
   const iconName = track.meta?.icon ?? "Music";
   const Icon = TRACK_ICONS[iconName] ?? Music;
-  const sourceLabel = track.meta?.sourceLabel ?? "MIDI";
+  const sourceLabel = track.sampleInstrument ? "Custom sample" : track.meta?.sourceLabel ?? "MIDI";
+  const melodicPreset = track.sampleInstrument ? undefined : findPreset(track.presetId);
   const eq = track.eq ?? DEFAULT_EQ;
   const fxCount = fxRackEnabledCount(track);
 
@@ -218,7 +220,7 @@ const ChannelStrip = memo(function ChannelStrip({
       </div>
 
       <Select
-        value={track.preset}
+        value={track.sampleInstrument ? "custom-sample" : melodicPreset ? `factory:${melodicPreset.id}` : track.preset}
         onValueChange={(v) => getStore().applyLegacyPreset(track.id, v as AnyPreset)}
       >
         <SelectTrigger
@@ -228,6 +230,8 @@ const ChannelStrip = memo(function ChannelStrip({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
+          {track.sampleInstrument && <SelectItem value="custom-sample" disabled>Custom sample</SelectItem>}
+          {melodicPreset && <SelectItem value={`factory:${melodicPreset.id}`} disabled>{melodicPreset.name}</SelectItem>}
           {PRESETS[track.kind].map((p) => (
             <SelectItem key={p.value} value={p.value} className="text-xs">
               {p.label}

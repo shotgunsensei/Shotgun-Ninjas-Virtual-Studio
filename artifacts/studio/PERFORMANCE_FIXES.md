@@ -1,5 +1,106 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-09-12 — Factory and custom instrument expansion (4.5.0)
+
+Added Steinway B Grand, French Harpsichord, Chapel Pipe Organ, Concert Marimba,
+and Orchestral Glockenspiel from the pinned CC0 VCSL source. The library now
+contains 39 melodic presets and 12 sampled instruments with 62 original WAV
+zones. Hash, format, provenance, pitch, decode-budget, and lazy-request tests
+cover the additions. No account, billing, ads, paid gates, or new dependency.
+
+The new Custom Instrument controls open the existing lazy sample import dialog
+for upload, name, trim, and source-note selection. Creating an instrument saves
+one source Blob and a pitched track; the keyboard/piano roll/MIDI/QWERTY reuse
+that recording across octaves. Selected sources prepare after audio unlock.
+Project samples can also replace another melodic track. Current custom/factory
+names appear in the mixer; inapplicable custom decay/sustain/glide knobs are
+hidden. Attack/release, filters, mixer and effects continue to work.
+
+Native source disposal and decode ownership protect Stop, Panic, preset changes,
+relinks, track deletion and project replacement. Schema v7, Save As, JSON,
+drafts, native WAV/MP3, missing-source recovery and scoped pack Undo preserve
+the same custom instrument. DAW-pack readmes retain missing-source warnings.
+
+Files: `src/components/{SampleInstrumentPanel,SamplePreviewDialog,ChannelStrip,
+MelodicParams,MobileStudio,LeftBrowser,PresetBrowser,PluginBrowser,SoundLibraryPanel}.tsx`,
+`src/App.tsx`, `src/{store,types}.ts`, `src/lib/audio/{engine,voices,export,
+sampleInstrumentVoice,sampleInstrumentDecode,missingSampleRecovery}.ts`,
+`src/lib/storage/{db,migrate}.ts`, `src/lib/creative/packSketch.ts`, factory
+catalog/presets/assets/provenance/fetcher, unit/browser tests, user guide,
+READMEs, release notes, About, Landing, Press, and these performance documents.
+
+Verification on Windows with Node 24, pnpm 10.34.5, installed Chrome:
+
+| Check | Result |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | Pass; repository requires pnpm instead of npm |
+| Root `pnpm run build` with `PORT=5173`, `BASE_PATH=/` | Pass across workspace |
+| Studio `typecheck`, `build` (client/SSR/prerender) | Pass |
+| Studio `test:unit` | 62/62 pass |
+| Studio `test` (port 5184, installed Chrome) | 74 pass, one existing opt-in-worklet skip, 75 resolved |
+| Final UI/source-selector/mixer tests (port 5188) | 6/6 pass after keyboard-event guard and accurate factory mixer labels |
+| Studio `test:bundle`, `test:select-values` | Pass; no empty Radix options |
+| Lint | No lint script exists; TypeScript and select guard run |
+| Studio `serve --port 5186 --strictPort` | Production preview starts; browser page/controls load with no page errors |
+| `node scripts/instrument-soak.mjs` from Studio | Pass: 600.256 seconds with all five new factory instruments plus one custom track |
+| `git diff --check` | Pass |
+
+The initial frozen install needed normal Windows user access after sandbox
+network failures. The root build initially lacked PORT required by the sibling
+video project; supplying its existing environment settings resolved it. Initial
+UI-test imports reused a server with stale HMR module identities; a fresh server
+passed. One existing pack test timed out under concurrent work, then passed
+isolated and in the full suite. The Vite large-chunk advisory remains. Production
+first-run welcome has an existing missing-dialog-description warning; a fresh
+onboarded production load has no console errors. No claim of manual listening.
+
+Required checklist (browser automation or inspection, not human device testing):
+
+| Scenario | Current result |
+| --- | --- |
+| App loads without console errors | Pass: fresh UI tests and production preview |
+| Enable Audio | Pass: real-audio UI/continuity suites |
+| Spacebar play/pause | Pass: production browser changes Play → Pause → Play with Space; Stop/Panic controls also exercised |
+| Stop releases audio / Panic stops all audio | Pass: native custom sources fall to zero and existing continuity tests pass |
+| Demo loads without freezing | Pass: startup, welcome, project replacement and dense-demo tests |
+| Ten-minute playback | Pass: 600.256 seconds, 20 audible checkpoints, no page errors or crashes |
+| Mixer opens during playback | Pass: 3 reopens in 399/302/231 ms without loss of output |
+| Visualizer opens during playback | Pass: existing always-mounted master scope redrew at each mixer checkpoint; no separate visualizer panel added |
+| Normal sample import / project save / project load | Pass: UI upload, durable source roundtrips, relinks and project replacement |
+| JSON export | Pass: portable/project-only mapping, source preservation and missing-file recovery |
+| WAV export | Pass: source pitch measured across octaves, missing/corrupt silence+warnings; MP3 also passes |
+| Autosave skips unchanged projects | Existing hash/revision paths preserved; policy unit tests pass; unchanged-write runtime count not reprofiled |
+| Hidden visual panels stop animation loops | No visual ticker changes; new panel uses readiness events only; full hidden-ticker audit not rerun |
+| Repeated instrument switching does not steadily leak | Bounded decode/source and late-disposal tests pass; heap cycles with GC in the soak (not a formal long-term leak proof) |
+| Repeated project replacement does not stack Transport events | Replacement/ownership browser regressions pass; custom path creates no Transport event IDs |
+| Performance Mode reduces visual load | Existing ownership regression passes; reduction not quantitatively remeasured |
+| Production behaves better/equal to dev | Both load correctly; production build/budget and smoke pass; no controlled comparative latency benchmark |
+
+Ten-minute evidence: `runtime-profile/instrument-soak/result.json` (ignored
+local artifact), reproduced with `node scripts/instrument-soak.mjs` from Studio.
+The runner defaults to port 5182 and installed Windows Chrome; override
+`STUDIO_SOAK_PORT` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` as needed. It opens
+an isolated dev server with HMR disabled, uses real browser audio and shuts down
+its own browser/server. The final UI-only label/keyboard changes were separately
+verified by the six-test run and production rebuild.
+
+Measured 11,989 heartbeat ticks, worst gap 322.2 ms, zero console/page errors,
+and audio at all 20 checkpoints. Custom polyphony peaked at 5 of 32 allowed
+sources. Factory cache stayed at 66,398,824 bytes, below 64 MiB, with no queued
+decodes after initial loading. JS heap cycled between 39.34 and 64.77 MiB and
+ended at 48.04 MiB. After Stop, level was -122.95 dB with zero custom sources;
+after restarting and Panic, -120.93 dB with zero sources. This is headless
+responsiveness/audio evidence, not human listening, an OS dialog observation,
+or a production-versus-development performance benchmark.
+
+Remaining risks: source pitch requires manual selection, recordings end naturally,
+and resampling changes duration/timbre. Factory single-velocity sparse zones are
+not a large multilayer orchestral library. The finite organ recording does not
+sustain indefinitely. Many active tracks retain PCM outside the bounded caches.
+
+Recommended next action: audition the five new presets and create an instrument
+from a clean, sustained single note; select its real source pitch before recording.
+
 ## 2026-09-12 — Resonance sound-quality update
 
 Implemented in `src/lib/audio/{soundQuality,spatialEffects,voices,master,engine,export}.ts`

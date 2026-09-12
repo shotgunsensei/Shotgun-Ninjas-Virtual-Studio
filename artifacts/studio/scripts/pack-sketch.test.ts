@@ -182,6 +182,20 @@ test("plays an authored two-bar melody once and drops events beyond the preview"
   );
 });
 
+test("pack factory selections clear a custom source while melody-only sketches retain it", () => {
+  const melodicTrack = makeTrack("keys", "piano");
+  melodicTrack.sampleInstrument = { blobKey: "custom-source", rootNote: 57 };
+  for (const presetId of ["keys.soft", undefined]) {
+    const sketch = createPackSketch({
+      pack: makePack({ presetId, demoMelody: [{ step: 0, note: "C4", lengthSteps: 2 }] }),
+      drumTrack: makeTrack("drums", "drums"), melodicTrack,
+      startBeat: 0, ids: { drumClipId: "drums", melodicClipId: "melody" },
+    });
+    assert.deepEqual(sketch.melodic?.track.sampleInstrument, presetId ? undefined : melodicTrack.sampleInstrument);
+    assert.deepEqual(melodicTrack.sampleInstrument, { blobKey: "custom-source", rootNote: 57 });
+  }
+});
+
 test("requires caller-owned melody inputs and rejects invalid track/start values", () => {
   const melodicPack = makePack({
     demoMelody: [{ step: 0, note: "C4", lengthSteps: 1 }],

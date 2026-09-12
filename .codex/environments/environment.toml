@@ -1,0 +1,21 @@
+# Local setup prepared for this Windows PC. Review before committing.
+version = 1
+name = "Shotgun-Ninjas-Virtual-Studio (Windows)"
+
+[setup]
+script = "corepack pnpm install --frozen-lockfile"
+
+[setup.win32]
+script = "$env:Path='C:\\Program Files\\nodejs;C:\\Users\\johnt\\AppData\\Roaming\\npm;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;'+$env:Path\n$env:COREPACK_ENABLE_AUTO_PIN='0'\n$env:npm_config_script_shell='C:\\Program Files\\Git\\bin\\bash.exe'\ncorepack.cmd pnpm install --frozen-lockfile\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+
+[[actions]]
+name = "Build"
+icon = "tool"
+platform = "win32"
+command = "$env:Path='C:\\Program Files\\nodejs;C:\\Users\\johnt\\AppData\\Roaming\\npm;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;'+$env:Path\n$env:COREPACK_ENABLE_AUTO_PIN='0'\n$env:npm_config_script_shell='C:\\Program Files\\Git\\bin\\bash.exe'\ncorepack.cmd pnpm run build\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+
+[[actions]]
+name = "Type check"
+icon = "test"
+platform = "win32"
+command = "$env:Path='C:\\Program Files\\nodejs;C:\\Users\\johnt\\AppData\\Roaming\\npm;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;'+$env:Path\n$env:COREPACK_ENABLE_AUTO_PIN='0'\n$env:npm_config_script_shell='C:\\Program Files\\Git\\bin\\bash.exe'\ncorepack.cmd pnpm run typecheck\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"

@@ -12,11 +12,12 @@ const BASE = "/samples/factory/vcsl";
 function chromaticLayers(
   instrument: string,
   samples: ReadonlyArray<readonly [rootNote: string, filename: string]>,
+  sourceOctaveOffset = 1,
 ): SampleLayer[] {
-  // VCSL filenames use C3 = middle C; Tone/scientific notation uses C4.
+  // Most VCSL filenames use C3 = middle C; the Steinway uses scientific C4.
   // Keep original filenames for provenance, but map their actual sounding pitch.
   return samples.map(([sourceNote, filename]) => {
-    const rootNote = sourceNote.replace(/\d+$/, (octave) => String(Number(octave) + 1));
+    const rootNote = sourceNote.replace(/\d+$/, (octave) => String(Number(octave) + sourceOctaveOffset));
     return {
       id: `vcsl.${instrument}.${rootNote.toLowerCase().replace("#", "s")}`,
       url: `${BASE}/${instrument}/${filename}`,
@@ -33,6 +34,26 @@ function chromaticLayers(
  * paths and SHA-256 values live beside the audio in `SOURCES.json`.
  */
 export const VCSL_FACTORY_LAYERS = {
+  steinwayGrand: chromaticLayers("steinway-grand", [
+    ["C1", "c1.wav"], ["C2", "c2.wav"], ["C3", "c3.wav"],
+    ["C4", "c4.wav"], ["C5", "c5.wav"], ["C6", "c6.wav"],
+  ], 0),
+  frenchHarpsichord: chromaticLayers("french-harpsichord", [
+    ["C1", "c1.wav"], ["C2", "c2.wav"], ["C3", "c3.wav"],
+    ["C4", "c4.wav"], ["C5", "c5.wav"],
+  ]),
+  pipeOrgan: chromaticLayers("pipe-organ", [
+    ["C1", "c1.wav"], ["C2", "c2.wav"], ["C3", "c3.wav"],
+    ["C4", "c4.wav"], ["C5", "c5.wav"],
+  ]),
+  marimba: chromaticLayers("marimba", [
+    ["F1", "f1.wav"], ["C2", "c2.wav"], ["G2", "g2.wav"], ["F3", "f3.wav"],
+    ["C4", "c4.wav"], ["G4", "g4.wav"], ["F5", "f5.wav"], ["C6", "c6.wav"],
+  ]),
+  glockenspiel: chromaticLayers("glockenspiel", [
+    ["G4", "g4.wav"], ["C5", "c5.wav"], ["G5", "g5.wav"],
+    ["C6", "c6.wav"], ["G6", "g6.wav"], ["C7", "c7.wav"],
+  ]),
   kawaiGrand: chromaticLayers("kawai-grand", [
     ["C1", "c1.wav"], ["C2", "c2.wav"], ["C3", "c3.wav"],
     ["C4", "c4.wav"], ["C5", "c5.wav"], ["C6", "c6.wav"],

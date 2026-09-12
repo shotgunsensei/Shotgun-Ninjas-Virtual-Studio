@@ -25,6 +25,7 @@ async function editableProjectSnapshot(page: Page) {
         id: track.id,
         kitId: track.kitId ?? null,
         presetId: track.presetId ?? null,
+        sampleInstrument: track.sampleInstrument ?? null,
         sound: track.sound ?? null,
         noteClips: track.noteClips.map((clip) => ({
           id: clip.id,
@@ -114,4 +115,42 @@ test("an editable sketch reconciles an existing audio voice before Play and Pani
     };
   }, drumTrackId);
   expect(finalState).toEqual({ isPlaying: false, kitId: "lofi", hasKit: true });
+});
+
+test("pack sketch undo restores custom audio and respects a later custom instrument selection", async ({ page }) => {
+  await openStudio(page);
+  const trackId = await page.evaluate(async () => {
+    const { getStore } = await import("/src/store.ts");
+    const store = getStore();
+    const track = store.state.project.tracks.find((candidate) => candidate.kind === "piano")!;
+    const blobKey = `${store.state.project.id}:sample:custom-sketch`;
+    store.patchProject({
+      tracks: store.state.project.tracks.filter((candidate) => candidate.kind === "drums" || candidate.id === track.id),
+      samples: [{ id: "custom-sketch", name: "Custom sketch source", blobKey, durationSec: 1, createdAt: 0, blob: new Blob(["source"], { type: "audio/wav" }) }],
+    });
+    store.applySampleInstrument(track.id, blobKey, 57);
+    return track.id;
+  });
+  const before = await editableProjectSnapshot(page);
+  await page.getByRole("tab", { name: "Library" }).click();
+  await page.getByTestId("start-pack-sketch-vcsl-neon-keys").click();
+  const generated = await editableProjectSnapshot(page);
+  const generatedTrack = generated.tracks.find((track) => track.id === trackId)!;
+  expect(generatedTrack.sampleInstrument).toBeNull();
+  expect(generatedTrack.presetId).toBe("keys.vcsl-tx81z-piano");
+  await page.getByRole("button", { name: /Undo sketch/i }).click();
+  expect(await editableProjectSnapshot(page)).toEqual(before);
+
+  await page.getByTestId("start-pack-sketch-vcsl-neon-keys").click();
+  const newSelection = await page.evaluate(async (id) => {
+    const { getStore } = await import("/src/store.ts");
+    const store = getStore();
+    store.applySampleInstrument(id, store.state.project.samples![0].blobKey, 72);
+    const track = store.state.project.tracks.find((candidate) => candidate.id === id)!;
+    return { sampleInstrument: track.sampleInstrument, sound: track.sound, presetId: track.presetId ?? null };
+  }, trackId);
+  await page.getByRole("button", { name: /Undo sketch/i }).click();
+  const after = (await editableProjectSnapshot(page)).tracks.find((track) => track.id === trackId)!;
+  expect({ sampleInstrument: after.sampleInstrument, sound: after.sound, presetId: after.presetId }).toEqual(newSelection);
+  expect(after.noteClips).toEqual(before.tracks.find((track) => track.id === trackId)!.noteClips);
 });

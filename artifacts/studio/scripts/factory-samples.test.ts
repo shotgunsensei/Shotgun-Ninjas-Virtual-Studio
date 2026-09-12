@@ -96,17 +96,18 @@ test("factory sample manifest is pinned, compact, and internally complete", asyn
   assert.equal(manifest.sourceCommit, "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e");
   assert.equal(manifest.license, "CC0-1.0");
   assert.match(manifest.licenseSourceBlobSha1, /^[a-f0-9]{40}$/);
-  assert.equal(manifest.samples.length, 32);
+  assert.equal(manifest.samples.length, 62);
   assert.equal(manifest.samples.length, FACTORY_SAMPLE_COUNT);
-  assert.equal(new Set(manifest.samples.map((sample) => sample.instrument)).size, 7);
-  assert.equal(FACTORY_INSTRUMENT_COUNT, 7);
-  assert.ok(manifest.totalBytes <= 43 * 1024 * 1024, "factory subset exceeds its 43 MiB budget");
+  assert.equal(new Set(manifest.samples.map((sample) => sample.instrument)).size, 12);
+  assert.equal(FACTORY_INSTRUMENT_COUNT, 12);
+  assert.ok(manifest.totalBytes <= 103 * 1024 * 1024, "factory subset exceeds its 103 MiB budget");
   assert.equal(
     manifest.samples.reduce((sum, sample) => sum + sample.bytes, 0),
     manifest.totalBytes,
   );
 
   const files = new Set<string>();
+  const decodedBytesByInstrument = new Map<string, number>();
   for (const sample of manifest.samples) {
     assert.ok(!files.has(sample.file), `duplicate manifest file: ${sample.file}`);
     files.add(sample.file);
@@ -118,7 +119,12 @@ test("factory sample manifest is pinned, compact, and internally complete", asyn
     const bytes = await readFile(path);
     assert.equal((await stat(path)).size, sample.bytes, `${sample.file} byte size changed`);
     assert.equal(sha256(bytes), sample.sha256, `${sample.file} SHA-256 changed`);
-    inspectWave(bytes, sample.file);
+    const wave = inspectWave(bytes, sample.file);
+    decodedBytesByInstrument.set(sample.instrument,
+      (decodedBytesByInstrument.get(sample.instrument) ?? 0) + wave.dataBytes / (wave.bits / 8) * 4);
+  }
+  for (const [instrument, bytes] of decodedBytesByInstrument) {
+    assert.ok(bytes <= 40 * 1024 * 1024, `${instrument} exceeds its 40 MiB decoded PCM budget`);
   }
 
   const license = await readFile(resolve(FACTORY_ROOT, manifest.licenseFile));
@@ -154,7 +160,9 @@ test("each factory instrument maps its recorded pitch to the correct keyboard oc
   // Midrange representatives avoid missing fundamentals in very low piano
   // strings and non-harmonic transients in extreme-register acoustic samples.
   const representatives = ["kawai-grand/c3.wav", "tx81z-piano/c3.wav", "folk-harp/c3.wav",
-    "vibraphone/c3.wav", "tanzanian-kalimba/cs3.wav", "ocarina/cs4.wav", "tenor-sax-staccato/c3.wav"];
+    "vibraphone/c3.wav", "tanzanian-kalimba/cs3.wav", "ocarina/cs4.wav", "tenor-sax-staccato/c3.wav",
+    "steinway-grand/c3.wav", "french-harpsichord/c3.wav", "pipe-organ/c3.wav",
+    "marimba/f3.wav", "glockenspiel/c5.wav"];
   for (const file of representatives) {
     const sample = manifest.samples.find((entry) => entry.file === file)!;
     const bytes = await readFile(resolve(FACTORY_ROOT, file));

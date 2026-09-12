@@ -60,6 +60,7 @@ import { connectToneCompatible, resolveToneContextInput } from "./toneConnection
 import { LeanDrumTrackSettingsCache } from "./leanDrumTrackSettings";
 import type { LevelMeter } from "./meterTypes";
 import { DrumPadSampleManager } from "./drumPadSamples";
+import { SampleInstrumentVoice } from "./sampleInstrumentVoice";
 import {
   startPerfTimer,
   trackAudioResource,
@@ -135,6 +136,8 @@ interface TrackVoice {
   kitId?: DrumKitId;
   /** Active melodic preset id (when track.presetId is set). */
   presetId?: string;
+  sampleInstrument?: Track["sampleInstrument"];
+  sampleBlob?: Blob;
   /** Invalidates async sampler loads when an instrument is replaced/disposed. */
   instrumentGeneration: number;
   mic?: Tone.UserMedia;
@@ -148,6 +151,8 @@ interface InstrumentState {
   kit?: KitVoice;
   kitId?: DrumKitId;
   presetId?: string;
+  sampleInstrument?: Track["sampleInstrument"];
+  sampleBlob?: Blob;
 }
 
 type VoiceMode = "shell" | "lean" | "tone" | "disposed";
@@ -192,6 +197,7 @@ declare global {
       voiceModes: () => ReturnType<AudioEngine["getVoiceModeSnapshot"]>;
       soundSelectors: () => ReturnType<AudioEngine["getVoiceSoundSelectorSnapshot"]>;
       padSamples: () => ReturnType<AudioEngine["getDrumPadSampleSnapshot"]>;
+      sampledInstruments: () => ReturnType<AudioEngine["getSampleInstrumentSnapshot"]>;
       playback: () => ReturnType<AudioEngine["getPlaybackDiagnosticSnapshot"]>;
     };
   }
@@ -226,6 +232,7 @@ class AudioEngine {
   private leanTrackSnapshots = new Map<string, Track>();
   private leanTrackSettings = new LeanDrumTrackSettingsCache();
   private projectTrackSnapshots = new Map<string, Track>();
+  private projectSamples: readonly SampleLibraryItem[] = [];
   private drumPadSampleManager = new DrumPadSampleManager(
     this.masterChain.input,
     (trackId, piece) => {
@@ -320,6 +327,7 @@ class AudioEngine {
         voiceModes: () => this.getVoiceModeSnapshot(),
         soundSelectors: () => this.getVoiceSoundSelectorSnapshot(),
         padSamples: () => this.getDrumPadSampleSnapshot(),
+        sampledInstruments: () => this.getSampleInstrumentSnapshot(),
         playback: () => this.getPlaybackDiagnosticSnapshot(),
       };
     }
@@ -524,6 +532,7 @@ class AudioEngine {
       // ignore
     }
     this.drumPadSampleManager.dispose();
+    this.projectSamples = [];
     this.cancelPresetPreview();
     try {
       if (this.masterAnalyser) {
@@ -1250,6 +1259,9 @@ class AudioEngine {
     // snapshot here, outside the note scheduler, so EQ, sends, piece settings,
     // FX and sound parameters cannot remain stale behind a correct selector.
     for (const track of tracks) {
+      if (track.sampleInstrument || previousSnapshots.get(track.id)?.sampleInstrument) {
+        this.reconcileExistingSoundSelector(track);
+      }
       const lean = this.leanDrumVoices.get(track.id);
       if (!lean) continue;
       this.leanTrackSnapshots.set(track.id, track);
@@ -1263,10 +1275,33 @@ class AudioEngine {
     }
   }
 
-  /** Keep project-library blobs available to persisted drum-pad overrides. */
+  /** Keep project-library blobs available to drum pads and melodic samples. */
   setProjectSampleLibrary(samples: readonly SampleLibraryItem[] = []): void {
+    this.projectSamples = samples;
     if (this.noAudio) return;
     this.drumPadSampleManager.syncSamples(samples);
+    for (const track of this.projectTrackSnapshots.values()) {
+      if (track.sampleInstrument) this.reconcileExistingSoundSelector(track);
+    }
+  }
+
+  getSampleInstrumentSnapshot() {
+    return Array.from(this.projectTrackSnapshots.values()).flatMap((track) => {
+      if (!track.sampleInstrument) return [];
+      const selected = track.sampleInstrument;
+      const voice = this.voices.get(track.id)?.poly;
+      return [{
+        trackId: track.id,
+        blobKey: selected.blobKey,
+        rootNote: selected.rootNote,
+        status: this.projectSamples.some((sample) => sample.blobKey === selected.blobKey && sample.blob)
+          ? "unloaded" as const : "missing" as const,
+        error: undefined as string | undefined,
+        activeSources: 0,
+        playbackRates: [] as number[],
+        ...(voice instanceof SampleInstrumentVoice ? voice.snapshot() : {}),
+      }];
+    });
   }
 
   /** Read-only assignment/decode status for diagnostics and regression tests. */
@@ -1318,6 +1353,14 @@ class AudioEngine {
     }
 
     if (track.kind === "vocals") return;
+    if (track.sampleInstrument) {
+      this.reconcileSampleInstrument(voice, track);
+      return;
+    }
+    if (voice.sampleInstrument) {
+      this.changePreset(track);
+      return;
+    }
     if (track.presetId) {
       if (voice.presetId !== track.presetId || !voice.poly) {
         this.setMelodicPreset(track.id, track.presetId);
@@ -1574,7 +1617,8 @@ class AudioEngine {
         hasToneKit: Boolean(voice?.kit),
         runtime: lean ? "native" as const : "tone" as const,
         hasMelodicVoice: Boolean(voice?.poly),
-        isSampled: voice?.poly instanceof Tone.Sampler,
+        isSampled: voice?.poly instanceof Tone.Sampler || voice?.poly instanceof SampleInstrumentVoice,
+        sampleInstrument: voice?.sampleInstrument,
         samplePromotionState:
           this.activeSamplerPromotion?.voice.trackId === trackId
             ? "loading" as const
@@ -1789,6 +1833,8 @@ class AudioEngine {
       kit: v.kit,
       kitId: v.kitId,
       presetId: v.presetId,
+      sampleInstrument: v.sampleInstrument,
+      sampleBlob: v.sampleBlob,
     };
   }
 
@@ -1821,6 +1867,8 @@ class AudioEngine {
     v.kit = next.kit;
     v.kitId = next.kitId;
     v.presetId = next.presetId;
+    v.sampleInstrument = next.sampleInstrument;
+    v.sampleBlob = next.sampleBlob;
     this.disposeInstrumentState(previous);
   }
 
@@ -1888,6 +1936,10 @@ class AudioEngine {
         this.applyVocalPresetSettings(v, track.preset as VocalsPreset);
         return;
       }
+      if (track.sampleInstrument) {
+        this.reconcileSampleInstrument(v, track);
+        return;
+      }
       if (track.presetId) {
         this.setMelodicPreset(track.id, track.presetId);
         return;
@@ -1915,6 +1967,41 @@ class AudioEngine {
   }
 
   // ---- v2 sound-model methods ----
+
+  private reconcileSampleInstrument(v: TrackVoice, track: Track): void {
+    const config = track.sampleInstrument;
+    if (!config) return;
+    const blob = this.projectSamples.find((sample) => sample.blobKey === config.blobKey)?.blob;
+    if (
+      v.sampleInstrument?.blobKey === config.blobKey &&
+      v.sampleBlob === blob &&
+      v.poly instanceof SampleInstrumentVoice
+    ) {
+      v.poly.setRootNote(config.rootNote);
+      v.sampleInstrument = config;
+      return;
+    }
+    this.pendingSamplerPromotions.delete(track.id);
+    // The new source owns this selector immediately, including while missing
+    // or decoding. Retaining a factory synth here would play the wrong sound.
+    this.commitInstrument(v, { sampleInstrument: config, sampleBlob: blob });
+    let poly: SampleInstrumentVoice | undefined;
+    try {
+      poly = new SampleInstrumentVoice(config.rootNote, blob);
+      poly.connect(v.filter);
+      v.poly = poly;
+      this.rehydrateTrackVoice(track);
+    } catch (error) {
+      poly?.dispose();
+      firstPlayMark("sample-instrument:failed", {
+        trackId: track.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("studio:sample-instruments-changed"));
+    }
+  }
 
   /** Select a named kit without rebuilding the real-time audio graph. */
   setKit(trackId: string, kitId: DrumKitId) {
@@ -2239,7 +2326,7 @@ class AudioEngine {
       v.widener.width.rampTo(Math.max(0, Math.min(1, partial.width)), 0.05);
     }
     if (!v.poly) return;
-    if (v.poly instanceof Tone.Sampler) {
+    if (v.poly instanceof Tone.Sampler || v.poly instanceof SampleInstrumentVoice) {
       if (partial.attack !== undefined) v.poly.attack = Math.max(0.002, partial.attack * 0.4);
       if (partial.release !== undefined) v.poly.release = Math.max(0.08, partial.release * 2);
       return;
@@ -2591,6 +2678,8 @@ class AudioEngine {
     v.drums = undefined;
     v.kit = undefined;
     v.presetId = undefined;
+    v.sampleInstrument = undefined;
+    v.sampleBlob = undefined;
     v.kitId = undefined;
     this.disposeInstrumentState(current);
   }
@@ -3421,6 +3510,8 @@ class AudioEngine {
       dispose: () => {
         voice.instrumentGeneration += 1;
         voice.presetId = undefined;
+        voice.sampleInstrument = undefined;
+        voice.sampleBlob = undefined;
         voice.kitId = undefined;
         if (voice.poly) voice.poly.dispose();
         if (voice.drums) {
@@ -3543,6 +3634,11 @@ class AudioEngine {
         trackId: track.id,
         kind,
       });
+      return;
+    }
+    // A user sample owns the entire keyboard, including loading/missing audio.
+    if (track.sampleInstrument) {
+      this.reconcileSampleInstrument(v, track);
       return;
     }
     // melodic — v2 preset id wins.

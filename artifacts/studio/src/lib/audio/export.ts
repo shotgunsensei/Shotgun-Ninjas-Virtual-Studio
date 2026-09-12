@@ -42,6 +42,19 @@ function padSampleBufferKey(blobKey: string): string {
   return `pad:${blobKey}`;
 }
 
+function instrumentSampleBufferKey(blobKey: string): string {
+  return `instrument:${blobKey}`;
+}
+
+function hasInstrumentNotesInRange(track: Track, range: ExportRange): boolean {
+  return Boolean(track.sampleInstrument) && track.noteClips.some((clip) =>
+    clip.notes.some((event) => {
+      const beat = clip.start + event.time + (event.microTiming ?? 0);
+      return event.time >= 0 && event.time < clip.length && beat >= range.startBeat && beat < range.endBeat;
+    }),
+  );
+}
+
 // ── export concurrency guard ─────────────────────────────────────────────
 // Prevents a second export from launching while one is already rendering.
 // The OfflineAudioContext render is CPU-intensive; stacking two would cause
@@ -167,7 +180,7 @@ async function _renderProjectInner(
   const decoded = await decodeAudioClips(project, plan, (p) =>
     onProgress?.({ phase: "decoding", progress: p * 0.5 }),
   );
-  const nativeSampleBanks = await decodeNativeSampleBanks(plan.audibleTracks);
+  const nativeSampleBanks = await decodeNativeSampleBanks(plan.audibleTracks, decoded);
   onProgress?.({ phase: "decoding", progress: 1 });
 
   recordExportTrace("route", { format, route: plan.route });
@@ -242,6 +255,7 @@ function createExportPlan(
     const hasDecodedPresetPath = Boolean(preset?.layers?.length);
     if (
       track.kind !== "drums" &&
+      !track.sampleInstrument &&
       !hasDecodedPresetPath &&
       track.noteClips.some((clip) => clip.notes.length > 0)
     ) {
@@ -320,6 +334,12 @@ function createExportPlan(
     (project.samples ?? []).map((sample) => [sample.blobKey, sample]),
   );
   for (const track of audibleTracks) {
+    if (hasInstrumentNotesInRange(track, range)) {
+      const sample = sampleByBlobKey.get(track.sampleInstrument!.blobKey);
+      if (!sample?.blob) warnings.push(
+        `Custom instrument source unavailable on "${track.name}" during export. That instrument was silent; relink its source for a complete mix.`,
+      );
+    }
     for (const blobKey of assignedPadBlobKeysForRange(track, range)) {
       const sample = sampleByBlobKey.get(blobKey);
       if (!sample?.blob) missingAssignedSamples.add(sample?.name ?? blobKey);
@@ -386,6 +406,7 @@ async function decodeAudioClips(
   const out = new Map<string, AudioBuffer>();
   const failedAssignedSamples = new Set<string>();
   const failedTimelineClips = new Set<string>();
+  const failedInstrumentSamples = new Set<string>();
   const sampleByBlobKey = new Map(
     (project.samples ?? []).map((sample) => [sample.blobKey, sample]),
   );
@@ -394,9 +415,16 @@ async function decodeAudioClips(
   // project libraries otherwise make a one-bar bounce decode unrelated PCM.
   const pending = new Map<
     string,
-    { blob: Blob; assignedSampleName?: string; timelineClipName?: string }
+    { blob: Blob; assignedSampleName?: string; timelineClipName?: string; instrumentSampleName?: string }
   >();
   for (const t of plan.audibleTracks) {
+    if (hasInstrumentNotesInRange(t, plan)) {
+      const sample = sampleByBlobKey.get(t.sampleInstrument!.blobKey);
+      if (sample?.blob) pending.set(instrumentSampleBufferKey(sample.blobKey), {
+        blob: sample.blob,
+        instrumentSampleName: sample.name || t.name,
+      });
+    }
     for (const c of t.audioClips) {
       if (!c.blob || c.start >= plan.endBeat) continue;
       const clipEndBeat = c.start + c.durationSec * (project.bpm / 60);
@@ -421,11 +449,12 @@ async function decodeAudioClips(
 
   const entries = Array.from(
     pending,
-    ([bufferKey, { blob, assignedSampleName, timelineClipName }]) => ({
+    ([bufferKey, { blob, assignedSampleName, timelineClipName, instrumentSampleName }]) => ({
       bufferKey,
       blob,
       assignedSampleName,
       timelineClipName,
+      instrumentSampleName,
     }),
   );
 
@@ -438,7 +467,7 @@ async function decodeAudioClips(
     for (let i = 0; i < entries.length; i += BATCH) {
       const batch = entries.slice(i, i + BATCH);
       await Promise.all(
-        batch.map(async ({ bufferKey, blob, assignedSampleName, timelineClipName }) => {
+        batch.map(async ({ bufferKey, blob, assignedSampleName, timelineClipName, instrumentSampleName }) => {
           try {
             const ab = await blob.arrayBuffer();
             const decoded = await ac.decodeAudioData(ab.slice(0));
@@ -448,6 +477,7 @@ async function decodeAudioClips(
             // recipe. Timeline omissions are reported explicitly below.
             if (assignedSampleName) failedAssignedSamples.add(assignedSampleName);
             if (timelineClipName) failedTimelineClips.add(timelineClipName);
+            if (instrumentSampleName) failedInstrumentSamples.add(instrumentSampleName);
           }
         }),
       );
@@ -471,6 +501,11 @@ async function decodeAudioClips(
       `Timeline audio could not be decoded during export: ${Array.from(failedTimelineClips).join(", ")}. Those clips were omitted; relink or replace them for a complete mix.`,
     );
   }
+  if (failedInstrumentSamples.size > 0) {
+    plan.warnings.push(
+      `Custom instrument sources could not be decoded during export: ${Array.from(failedInstrumentSamples).join(", ")}. Those instruments were silent; relink or replace their source audio for a complete mix.`,
+    );
+  }
   return out;
 }
 
@@ -486,6 +521,7 @@ interface NativeSampleBank {
   attackSec: number;
   releaseSec: number;
   zones: NativeSampleZone[];
+  custom?: boolean;
 }
 
 type NativeSampleBanks = Map<string, NativeSampleBank>;
@@ -496,10 +532,25 @@ type NativeSampleBanks = Map<string, NativeSampleBank>;
  * limits decode concurrency; AudioBuffers can then be attached directly to
  * native offline buffer sources without routing WAV export through Tone.
  */
-async function decodeNativeSampleBanks(tracks: Track[]): Promise<NativeSampleBanks> {
+async function decodeNativeSampleBanks(tracks: Track[], decodedAudio: Map<string, AudioBuffer>): Promise<NativeSampleBanks> {
   const banks: NativeSampleBanks = new Map();
+  for (const track of tracks) {
+    if (!track.sampleInstrument) continue;
+    const buffer = decodedAudio.get(instrumentSampleBufferKey(track.sampleInstrument.blobKey));
+    if (!buffer) continue;
+    const midi = track.sampleInstrument.rootNote;
+    const pitch = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][midi % 12];
+    banks.set(`custom:${track.id}`, {
+      presetId: "custom-instrument",
+      custom: true,
+      attackSec: 0.002,
+      releaseSec: 0.6,
+      zones: [{ buffer, rootNote: `${pitch}${Math.floor(midi / 12) - 1}`, minVelocity: 0, maxVelocity: 1 }],
+    });
+  }
   const presets = new Map(
     tracks
+      .filter((track) => !track.sampleInstrument)
       .map((track) => findPreset(track.presetId))
       .filter((preset): preset is NonNullable<ReturnType<typeof findPreset>> =>
         Boolean(preset?.layers?.length),
@@ -724,7 +775,9 @@ async function renderNativeWav(
                 eventTime,
                 eventDurationSec,
                 eventVelocity,
-                track.presetId ? nativeSampleBanks.get(track.presetId) : undefined,
+                track.sampleInstrument
+                  ? nativeSampleBanks.get(`custom:${track.id}`)
+                  : track.presetId ? nativeSampleBanks.get(track.presetId) : undefined,
               );
             }
             scheduled += 1;
@@ -1461,6 +1514,8 @@ function scheduleNativeMelodicNote(
     scheduleNativeSampledNote(ctx, destination, bank, ev.note, time, dur, velocity);
     return;
   }
+  // A missing custom source must never silently become an unrelated factory voice.
+  if (track.sampleInstrument) return;
   const legacyId = track.kind === "bass"
     ? (track.preset === "sub" ? "bass.sub" : "bass.finger")
     : track.kind === "guitar" ? "guitar.nylon"
@@ -1495,7 +1550,9 @@ function scheduleNativeSampledNote(
     return candidateDistance < nearestDistance ? candidate : nearest;
   });
   const rootFrequency = noteToFrequency(zone.rootNote);
-  const playbackRate = Math.max(0.125, Math.min(8, targetFrequency / rootFrequency));
+  const playbackRate = bank.custom
+    ? targetFrequency / rootFrequency
+    : Math.max(0.125, Math.min(8, targetFrequency / rootFrequency));
   const naturalDuration = zone.buffer.duration / playbackRate;
   const audibleDuration = Math.max(
     0.03,
@@ -1510,10 +1567,19 @@ function scheduleNativeSampledNote(
   source.buffer = zone.buffer;
   source.playbackRate.setValueAtTime(playbackRate, time);
   const amplitude = velocity * 10 ** (-8 / 20); // Same -8 dB as the live factory sampler.
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(Math.max(0.0001, amplitude), time + attack);
-  gain.gain.setValueAtTime(Math.max(0.0001, amplitude), fadeAt);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + audibleDuration);
+  if (bank.custom) {
+    const customAttack = Math.min(bank.attackSec, durationSec);
+    const heldAmplitude = amplitude * Math.min(1, durationSec / bank.attackSec);
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(heldAmplitude, time + customAttack);
+    gain.gain.setValueAtTime(heldAmplitude, time + durationSec);
+    gain.gain.linearRampToValueAtTime(0, time + durationSec + bank.releaseSec);
+  } else {
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(Math.max(0.0001, amplitude), time + attack);
+    gain.gain.setValueAtTime(Math.max(0.0001, amplitude), fadeAt);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + audibleDuration);
+  }
   source.connect(gain);
   gain.connect(destination);
   source.start(time);
@@ -1848,6 +1914,9 @@ export async function exportDawPack(
     .map((t) => `  - ${t.name} (${t.kind})`)
     .join("\n");
   const now = new Date();
+  const renderWarnings = mixResult.warnings?.length
+    ? `Render warnings\n---------------\n${mixResult.warnings.map((warning) => `  - ${warning}`).join("\n")}\n\n`
+    : "";
   const readme =
     `Shotgun Ninjas Virtual Studio — DAW Pack\n` +
     `=========================================\n\n` +
@@ -1855,6 +1924,7 @@ export async function exportDawPack(
     `BPM     : ${project.bpm}\n` +
     `Bars    : ${project.bars}\n` +
     `Exported: ${now.toISOString()}\n\n` +
+    renderWarnings +
     `Tracks\n------\n${trackLines}\n\n` +
     `Contents\n--------\n` +
     `  mix.wav            — Full stereo mixdown\n` +

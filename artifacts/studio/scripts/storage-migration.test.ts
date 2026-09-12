@@ -105,3 +105,28 @@ test("migration rejects invalid and future schema versions without downgrading",
     /Update the studio before opening it/,
   );
 });
+
+test("v7 preserves custom roots across all MIDI octaves and creates a relink entry for a missing source", () => {
+  for (const rootNote of [0, 48, 60, 127]) {
+    const { project } = migrateProject(legacyProject({
+      schemaVersion: 6,
+      tracks: [{ id: "keys", name: "Custom keys", sampleInstrument: { blobKey: "source", rootNote } }],
+    }));
+    assert.deepEqual(project.tracks[0].sampleInstrument, { blobKey: "source", rootNote });
+    assert.equal(project.samples?.[0].blobKey, "source");
+    assert.equal(project.samples?.[0].name, "Custom keys instrument source");
+    assert.equal(migrateProject(project).project.samples?.length, 1);
+  }
+});
+
+test("migration rejects malformed custom instruments rather than substituting a factory sound", () => {
+  for (const sampleInstrument of [
+    null, [], "sample", {},
+    { blobKey: "", rootNote: 60 },
+    { blobKey: " ", rootNote: 60 },
+    { blobKey: 7, rootNote: 60 },
+    ...[-1, 128, 60.5, NaN, Infinity, "60", undefined].map((rootNote) => ({ blobKey: "source", rootNote })),
+  ]) {
+    assert.throws(() => migrateProject(legacyProject({ tracks: [{ sampleInstrument }] })), /Invalid custom instrument/);
+  }
+});

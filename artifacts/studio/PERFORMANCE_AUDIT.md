@@ -1,5 +1,37 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-09-12 — Custom instruments and expanded factory sounds
+
+Confirmed gaps: imported sounds could become audio clips or drum-pad assignments
+but could not act as a pitched melodic source. Seven factory sampled instruments
+were available. Existing preset replacement and native export assumed factory
+selectors, and storage needed explicit source ownership across JSON imports and
+Save As. The expanded Steinway set also uses a different source-filename octave
+convention; measured-pitch tests established its correct C1–C6 roots.
+
+The custom instrument now uses a single native AudioBuffer and disposable note
+sources with `2 ** ((midi - rootNote) / 12)` playback rate. Source decoding has
+bounded concurrency and stale-owner checks. Notes use the existing track
+filter/mixer/effect graph. No audio node is constructed in a React render body;
+the selected panel prepares its source after audio unlock and receives readiness
+events, with no animation or note-rate React state loop added.
+
+Replacing a sample, choosing a preset/legacy sound/pack, removing a track, or
+replacing the project relinquishes the previous voice. Pack Undo tracks custom
+source ownership and leaves later user changes intact. Missing/corrupt custom
+sources remain silent with actionable status; WAV/MP3 and DAW-pack readmes report
+omissions. Schema v7 validates roots, preserves sample blobs via the existing
+storage path, remaps references, and creates recoverable missing-source entries.
+
+Remaining limits: custom source pitch is set manually; resampling changes both
+pitch and duration. Recordings end naturally, with no sustain loop or independent
+time stretching. Factory instruments use sparse single-velocity zones, so remote
+registers change timbre; the pipe organ sustain is finite. The complete asset set
+is 101.38 MiB, though startup fetches none of these WAVs. Polyphony and decoding
+are bounded, but many active tracks can retain substantial PCM outside caches.
+
+Validation and current checklist: see PERFORMANCE_FIXES.md and PERF_BASELINE.md.
+
 ## 2026-09-12 — Sound-quality findings and corrections
 
 These are the current findings; the August sections below retain their original

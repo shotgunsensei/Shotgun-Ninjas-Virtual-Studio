@@ -60,7 +60,7 @@ pads live with **Q W E R / A S D F**.
 
 ## 3. Explore sounds and learn by creating
 
-Open the **Library** browser to explore 34 melodic presets and 19 complete
+Open the **Library** browser to explore 39 melodic presets and 19 complete
 sound packs. The **HQ** badge marks an instrument recorded from the included
 CC0 factory library. Its zones download only when you first preview, load, or
 export that instrument, then remain available to the app's offline cache.
@@ -142,6 +142,28 @@ preview dialog opens with a waveform; trim and name it, then drop it
 onto a vocal track to add it as a clip, or save it to the sample
 library for later. You can also click **Import sample** from the header.
 
+To turn a recording into an instrument, choose **Create instrument from sample**
+in the instrument panel or **Samples** browser. Upload a sound, name it, trim any
+silence, then set **Source note** to the note in your recording (for example,
+A4 for a 440 Hz tone). Click **Create instrument** to add a keyboard track.
+Every key is mapped automatically; use **Octave − / +**, QWERTY, MIDI, or the
+piano roll to play other registers. A clean recording of one note works best.
+
+You can change **Source note** later or choose a project sample for another
+melodic track. Duplicate a custom track to reuse its exact tuning and settings.
+Attack, release, filters, mixer, and effects remain available. Choosing a factory
+preset replaces the custom sound while keeping its source in the project library.
+
+Custom instruments use resampling: higher notes play faster and end sooner,
+lower notes play slower and last longer. They do not detect the source pitch,
+stretch time independently, or loop a sustained tone. Set the source note yourself;
+the recording ends naturally even if you hold a key.
+
+Project saves, recovery drafts, and portable JSON include the recording. JSON
+without audio keeps its reference; use **Samples → Locate sample** to restore
+it. Missing or corrupt sources stay silent and exports warn about the omission.
+WAV and MP3 use the same octave mapping as live playback.
+
 ## 7. Use demo projects
 
 Open **Load** in the header and switch to the **Demos** tab. Each demo
@@ -160,7 +182,7 @@ Installing gives you:
   a network connection (your projects already live offline in IndexedDB).
 
 Factory instruments become available offline after their zones have been used
-once. The 41.86 MiB library is intentionally not downloaded with the initial
+once. The 101.38 MiB library is intentionally not downloaded with the initial
 app shell.
 
 If the prompt doesn't appear, the browser may need you to interact with

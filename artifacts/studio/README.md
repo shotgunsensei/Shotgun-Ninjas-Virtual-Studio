@@ -5,13 +5,20 @@ every visible knob, slider, button, and pad is wired to real audio.
 
 ## Features
 
-- **34 melodic presets and 19 sound packs**, including modeled piano, guitar,
+- **39 melodic presets and 19 sound packs**, including modeled piano, guitar,
   bass, synth, orchestral/world colors, multi-kit drums, and real microphone
   vocals.
-- **Seven sampled factory instruments** built from 32 same-origin CC0 zones:
+- **Twelve sampled factory instruments** built from 62 same-origin CC0 zones:
   Kawai grand, TX81Z piano, folk harp, vibraphone, Tanzanian kalimba, ocarina, and tenor sax
-  stabs. Zones load on demand and are cached for offline reuse instead of being
+  stabs, Steinway grand, French harpsichord, pipe organ, marimba, and glockenspiel.
+  Zones load on demand and are cached for offline reuse instead of being
   added to the startup bundle.
+- **Custom sample instruments**: choose **Create instrument from sample**, upload
+  a sound, name/trim it, and set its original note. Every keyboard note and octave
+  uses that source. Adjust the source note later or reuse the sample on another
+  track. Sources persist with projects and portable JSON; WAV/MP3 use the same
+  pitch mapping. Resampling changes duration with pitch; these are finite
+  recordings, with no automatic pitch detection, looping, or time stretching.
 - **Expressive sound**: harmonic plucks respond to playing strength, electric
   piano has a warmer tine character, and oversampled drive reduces aliasing.
   Shared stereo rooms/halls and filtered delays use consistent settings in

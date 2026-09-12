@@ -151,6 +151,7 @@ export function buildMissingSampleSkipPatch(
     );
   }
   const owners = project.tracks.filter((track) =>
+    track.sampleInstrument?.blobKey === entry.blobKey ||
     Object.values(track.padSamples ?? {}).includes(entry.blobKey),
   );
   if (owners.length === 0) return { action: "skipped" };

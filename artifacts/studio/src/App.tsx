@@ -85,6 +85,7 @@ import { applyWorldTheme, findWorld, getStoredWorldId } from "./lib/worlds";
 import { PresetBrowser } from "./components/PresetBrowser";
 import { GroovePanel } from "./components/GroovePanel";
 import { MelodicParams } from "./components/MelodicParams";
+import { SampleInstrumentPanel } from "./components/SampleInstrumentPanel";
 import { EffectsRack } from "./components/EffectsRack";
 import { TransportProvider, useTransport } from "./hooks/useTransport";
 import { audio } from "./lib/audio/engine";
@@ -1648,6 +1649,7 @@ function PendingSampleHost() {
         defaultName={pending.defaultName}
         recordedTrackId={pending.recordedTrackId}
         recordedClipId={pending.recordedClipId}
+        createInstrument={pending.createInstrument}
         onClose={() => getStore().set({ pendingSample: null })}
       />
     </Suspense>
@@ -1766,6 +1768,7 @@ function SelectedInstrument({ trackId }: { trackId: string }) {
           <PianoRoll track={track} />
         </Suspense>
       )}
+      {isMelodic && <SampleInstrumentPanel track={track} />}
       {isMelodic && <PresetBrowser track={track} />}
       {isMelodic && <MelodicParams track={track} />}
       {track.kind !== "vocals" && <GroovePanel track={track} />}

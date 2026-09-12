@@ -384,11 +384,13 @@ export function SoundLibraryPanel() {
           previous: {
             kitId: drumTrack.kitId,
             presetId: drumTrack.presetId,
+            sampleInstrument: drumTrack.sampleInstrument,
             sound: drumTrack.sound ? { ...drumTrack.sound } : undefined,
           },
           applied: {
             kitId: sketch.drum.track.kitId,
             presetId: sketch.drum.track.presetId,
+            sampleInstrument: sketch.drum.track.sampleInstrument,
             sound: sketch.drum.track.sound ? { ...sketch.drum.track.sound } : undefined,
           },
         },
@@ -398,11 +400,13 @@ export function SoundLibraryPanel() {
               previous: {
                 kitId: melodicTrack.kitId,
                 presetId: melodicTrack.presetId,
+                sampleInstrument: melodicTrack.sampleInstrument,
                 sound: melodicTrack.sound ? { ...melodicTrack.sound } : undefined,
               },
               applied: {
                 kitId: sketch.melodic.track.kitId,
                 presetId: sketch.melodic.track.presetId,
+                sampleInstrument: sketch.melodic.track.sampleInstrument,
                 sound: appliedMelodicSound
                   ? { ...appliedMelodicSound }
                   : undefined,
@@ -431,6 +435,9 @@ export function SoundLibraryPanel() {
     const receipts = new Map(lastSketch.tracks.map((entry) => [entry.trackId, entry]));
     const sameSound = (left: Track["sound"], right: Track["sound"]) =>
       JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+    const sameInstrument = (
+      left: Track["sampleInstrument"], right: Track["sampleInstrument"],
+    ) => left?.blobKey === right?.blobKey && left?.rootNote === right?.rootNote;
     const tracks = current.tracks.map((track) => {
       const receipt = receipts.get(track.id);
       const generatedIds = clipIdsByTrack.get(track.id);
@@ -445,10 +452,13 @@ export function SoundLibraryPanel() {
       // Restore a generated selector only while it still has the generated
       // value. Any sound edit made after sketch creation wins.
       if (next.kitId === receipt.applied.kitId) next.kitId = receipt.previous.kitId;
-      if (next.presetId === receipt.applied.presetId) {
+      const instrumentUnchanged = next.presetId === receipt.applied.presetId &&
+        sameInstrument(next.sampleInstrument, receipt.applied.sampleInstrument);
+      if (instrumentUnchanged) {
         next.presetId = receipt.previous.presetId;
+        next.sampleInstrument = receipt.previous.sampleInstrument;
       }
-      if (sameSound(next.sound, receipt.applied.sound)) {
+      if (instrumentUnchanged && sameSound(next.sound, receipt.applied.sound)) {
         next.sound = receipt.previous.sound ? { ...receipt.previous.sound } : undefined;
       }
       return next;

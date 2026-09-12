@@ -145,7 +145,7 @@ export function PresetBrowser({ track }: { track: Track }) {
       </div>
       <div className="max-h-44 overflow-y-auto space-y-0.5">
         {filtered.map((p) => {
-          const active = track.presetId === p.id;
+          const active = !track.sampleInstrument && track.presetId === p.id;
           const fav = favs.includes(p.id);
           const showGuide = guidePresetId === p.id && p.guide;
           return (

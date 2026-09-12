@@ -3,6 +3,7 @@ import type {
   PerformanceSettings,
   Project,
   ProjectMetadata,
+  SampleLibraryItem,
   Track,
 } from "../../types";
 import { DEFAULT_MASTER_BUS } from "../audio/master-defaults";
@@ -24,8 +25,9 @@ import { DEFAULT_MASTER_BUS } from "../audio/master-defaults";
  *   v5 — Preserve Sound Library, Performance Mode, and Chop Lab project
  *        state across every IndexedDB, draft-recovery, and JSON load path.
  *   v6 — Preserve project sample-library assignments to individual drum pads.
+ *   v7 — Preserve sample-based melodic instruments and their original MIDI root.
  */
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 /** Known FX module ids — anything else is dropped (with a warning) by
  *  `checkProjectHealth`. Kept in sync with `FxModuleId`. */
@@ -71,6 +73,47 @@ function normalizeMetadata(raw: unknown): ProjectMetadata | undefined {
 
 function objectValue(raw: unknown): Record<string, unknown> | null {
   return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+}
+
+/** Reject an invalid custom voice rather than silently replacing its sound. */
+export function normalizeSampleInstrument(raw: unknown): Track["sampleInstrument"] {
+  if (raw === undefined) return undefined;
+  const value = objectValue(raw);
+  if (
+    !value || Array.isArray(raw) ||
+    typeof value.blobKey !== "string" || !value.blobKey.trim() ||
+    !Number.isInteger(value.rootNote) ||
+    (value.rootNote as number) < 0 || (value.rootNote as number) > 127
+  ) {
+    throw new Error("Invalid custom instrument: a sample reference and a MIDI root note from 0 to 127 are required.");
+  }
+  return { blobKey: value.blobKey, rootNote: value.rootNote as number };
+}
+
+/** Keep broken custom references visible to the existing sample relink wizard. */
+export function missingInstrumentSamplePlaceholders(
+  tracks: readonly Pick<Track, "id" | "name" | "sampleInstrument">[],
+  samples: readonly Pick<SampleLibraryItem, "id" | "blobKey">[],
+): SampleLibraryItem[] {
+  const keys = new Set(samples.map((sample) => sample.blobKey));
+  const ids = new Set(samples.map((sample) => sample.id));
+  const missing: SampleLibraryItem[] = [];
+  for (const track of tracks) {
+    const instrument = normalizeSampleInstrument(track.sampleInstrument);
+    if (!instrument || keys.has(instrument.blobKey)) continue;
+    let id = `missing-instrument-${track.id}`;
+    while (ids.has(id)) id += "-missing";
+    ids.add(id);
+    keys.add(instrument.blobKey);
+    missing.push({
+      id,
+      name: `${track.name} instrument source`,
+      blobKey: instrument.blobKey,
+      durationSec: 0,
+      createdAt: 0,
+    });
+  }
+  return missing;
 }
 
 function normalizePerformance(raw: unknown): PerformanceSettings | undefined {
@@ -129,6 +172,7 @@ function migrateTrack(t: unknown): Track {
     },
     kitId: raw.kitId,
     presetId: raw.presetId,
+    sampleInstrument: normalizeSampleInstrument(raw.sampleInstrument),
     pieceSettings: raw.pieceSettings,
     padSamples:
       raw.padSamples && typeof raw.padSamples === "object"
@@ -179,6 +223,7 @@ export function migrateProject(input: unknown): MigrationResult {
   // defaults exist so the rest of the app can stop guarding for missing
   // optional fields on every render.
   const tracks = (raw.tracks ?? []).map(migrateTrack);
+  const samples = Array.isArray(raw.samples) ? raw.samples : [];
   const project: Project = {
     id: String(raw.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`),
     name: String(raw.name ?? "Untitled"),
@@ -193,7 +238,7 @@ export function migrateProject(input: unknown): MigrationResult {
     masterVolume: typeof raw.masterVolume === "number" ? raw.masterVolume : 0.8,
     tracks,
     midiMappings: Array.isArray(raw.midiMappings) ? raw.midiMappings : [],
-    samples: Array.isArray(raw.samples) ? raw.samples : [],
+    samples: [...samples, ...missingInstrumentSamplePlaceholders(tracks, samples)],
     sections: Array.isArray(raw.sections) ? raw.sections : [],
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
     globalGroove: raw.globalGroove,

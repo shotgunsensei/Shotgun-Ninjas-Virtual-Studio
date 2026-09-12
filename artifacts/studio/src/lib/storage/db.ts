@@ -5,7 +5,12 @@ import type {
   SampleLibraryItem,
   Track,
 } from "../../types";
-import { CURRENT_SCHEMA_VERSION, migrateProject } from "./migrate";
+import {
+  CURRENT_SCHEMA_VERSION,
+  migrateProject,
+  missingInstrumentSamplePlaceholders,
+  normalizeSampleInstrument,
+} from "./migrate";
 import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
 import { countPerf, timePerfAsync } from "../../utils/performanceDiagnostics";
 import { blobContentFingerprint } from "./performanceGuards";
@@ -508,6 +513,17 @@ function remapPadSampleKeys(
   ) as Track["padSamples"];
 }
 
+function remapSampleInstrument(
+  value: unknown,
+  sampleKeyMap: ReadonlyMap<string, string>,
+): Track["sampleInstrument"] {
+  const instrument = normalizeSampleInstrument(value);
+  if (!instrument) return undefined;
+  const blobKey = sampleKeyMap.get(instrument.blobKey);
+  if (!blobKey) throw new Error("The custom instrument source could not be copied.");
+  return { ...instrument, blobKey };
+}
+
 async function duplicateProjectUnqueued(
   source: Project,
   newName: string,
@@ -517,7 +533,11 @@ async function duplicateProjectUnqueued(
     .toString(36)
     .slice(2, 8)}`;
 
-  const samplePlans = (source.samples ?? []).map((sample) => ({
+  const sourceSamples = [
+    ...(source.samples ?? []),
+    ...missingInstrumentSamplePlaceholders(source.tracks, source.samples ?? []),
+  ];
+  const samplePlans = sourceSamples.map((sample) => ({
     source: sample,
     destinationKey: `${newId}:sample:${sample.id}`,
   }));
@@ -532,6 +552,7 @@ async function duplicateProjectUnqueued(
     source.tracks.map(async (t) => ({
       ...t,
       padSamples: remapPadSampleKeys(t.padSamples, sampleKeyMap),
+      sampleInstrument: remapSampleInstrument(t.sampleInstrument, sampleKeyMap),
       audioClips: await Promise.all(
         t.audioClips.map(async (c) => {
           let blob = c.blob;
@@ -838,6 +859,9 @@ export function summarizeProjectJson(text: string): ProjectImportSummary {
   for (const s of data.project.samples ?? []) {
     if (!s.base64) missingSampleNames.push(s.name);
   }
+  for (const sample of missingInstrumentSamplePlaceholders(data.project.tracks, data.project.samples ?? [])) {
+    missingSampleNames.push(sample.name);
+  }
   if (data.project.chopLab?.sampleName && !data.project.chopLab.base64) {
     missingSampleNames.push(`Chop Lab: ${data.project.chopLab.sampleName}`);
   }
@@ -877,7 +901,11 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
     .toString(36)
     .slice(2, 8)}`;
   const p = data.project;
-  const samplePlans = (p.samples ?? []).map((sample) => ({
+  const sourceSamples: NonNullable<ProjectJsonV1["project"]["samples"]> = [
+    ...(p.samples ?? []),
+    ...missingInstrumentSamplePlaceholders(p.tracks, p.samples ?? []),
+  ];
+  const samplePlans = sourceSamples.map((sample) => ({
     source: sample,
     destinationKey: `${newId}:sample:${sample.id}`,
   }));
@@ -890,6 +918,7 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
   const tracks = p.tracks.map((t) => ({
     ...t,
     padSamples: remapPadSampleKeys(t.padSamples, sampleKeyMap),
+    sampleInstrument: remapSampleInstrument(t.sampleInstrument, sampleKeyMap),
     audioClips: t.audioClips.map((c) => {
       const blob =
         hydrateBlobs && c.base64 && c.mimeType

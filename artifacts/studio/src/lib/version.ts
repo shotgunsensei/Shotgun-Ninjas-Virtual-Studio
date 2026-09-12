@@ -4,7 +4,7 @@
  * Bumped manually as each Phase 3 task lands. Surfaced in the footer,
  * the About dialog, and any future PWA update toast.
  */
-export const APP_VERSION = "4.4.0-resonance";
+export const APP_VERSION = "4.5.0-instruments";
 export const APP_NAME = "Shotgun Ninjas Virtual Studio";
 /** Canonical landing URL stamped on exported projects so a JSON file
  *  always tells you where it came from. The browser preview rewrites
@@ -26,6 +26,16 @@ export interface ChangelogEntry {
  * Newest entry first.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "4.5.0-instruments",
+    date: "2026-09-12",
+    highlights: [
+      "Five new sampled instruments: Steinway B Grand, French Harpsichord, Chapel Pipe Organ, Concert Marimba, and Orchestral Glockenspiel. All 62 factory zones are CC0 and load on demand.",
+      "Create an instrument from a recording: upload, trim, name it, set its source note, and play it across the keyboard and octaves.",
+      "Custom sources travel with saved projects and portable JSON, render into WAV/MP3, and support missing-sample relinking.",
+      "Custom voices share a source across notes with bounded decoding and polyphony; Stop, Panic, and instrument replacement release their audio.",
+    ],
+  },
   {
     version: "4.4.0-resonance",
     date: "2026-09-12",

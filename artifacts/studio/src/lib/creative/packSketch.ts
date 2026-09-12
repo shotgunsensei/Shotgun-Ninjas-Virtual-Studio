@@ -178,6 +178,7 @@ export function createPackSketch({
   const nextMelodicTrack: Track = {
     ...melodicTrack,
     presetId: pack.presetId ?? melodicTrack.presetId,
+    sampleInstrument: pack.presetId ? undefined : melodicTrack.sampleInstrument,
     noteClips: [...melodicTrack.noteClips, melodicClip],
   };
 

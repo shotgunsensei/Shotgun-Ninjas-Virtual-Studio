@@ -20,6 +20,7 @@ import {
 import { assertSampleImportAllowed, isLargeSample, formatBytes } from "../lib/storage/performanceGuards";
 import { audio } from "../lib/audio/engine";
 import type { SampleLibraryItem } from "../types";
+import { InstrumentUploadButton } from "./SampleInstrumentPanel";
 
 const SoundLibraryPanel = lazy(() =>
   import("./SoundLibraryPanel").then((m) => ({ default: m.SoundLibraryPanel })),
@@ -307,7 +308,7 @@ function PresetsTab() {
         {target ? `Melodic track · ${target.name}` : "No melodic track"}
       </div>
       {MELODIC_PRESETS.map((p) => {
-        const active = target?.presetId === p.id;
+        const active = !target?.sampleInstrument && target?.presetId === p.id;
         return (
           <button
             key={p.id}
@@ -421,6 +422,7 @@ function SamplesTab() {
 
   return (
     <div className="p-2 space-y-1">
+      <InstrumentUploadButton />
       <input
         ref={fileInputRef}
         type="file"

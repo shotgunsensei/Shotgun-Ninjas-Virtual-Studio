@@ -152,8 +152,8 @@ export interface PackSketchUndoState {
   appliedLoopEndBeat: number;
   tracks: Array<{
     trackId: string;
-    previous: Pick<Track, "kitId" | "presetId" | "sound">;
-    applied: Pick<Track, "kitId" | "presetId" | "sound">;
+    previous: Pick<Track, "kitId" | "presetId" | "sampleInstrument" | "sound">;
+    applied: Pick<Track, "kitId" | "presetId" | "sampleInstrument" | "sound">;
   }>;
 }
 
@@ -211,6 +211,7 @@ class Store {
       defaultName: string;
       recordedTrackId?: string;
       recordedClipId?: string;
+      createInstrument?: boolean;
     } | null;
     /** Chop Lab panel state. */
     chopLab: ChopLabState;
@@ -341,7 +342,7 @@ class Store {
     const preset = findPreset(presetId);
     if (!track || !preset || !preset.compatibleWith.includes(track.kind)) return false;
     const sound = { ...(track.sound ?? {}), ...presetSoundParams(preset) };
-    this.patchTrack(trackId, { presetId, sound });
+    this.patchTrack(trackId, { presetId, sound, sampleInstrument: undefined });
     audio.setMelodicPreset(trackId, presetId);
     audio.setSoundParams(trackId, sound);
     return true;
@@ -354,6 +355,24 @@ class Store {
     audio.releaseChopKitForTrack(trackId);
     this.patchTrack(trackId, { kitId });
     audio.setKit(trackId, kitId);
+    return true;
+  }
+
+  /** Reuse the original project blob; every keyboard note shares that source. */
+  applySampleInstrument(trackId: string, blobKey: string, rootNote = 60): boolean {
+    const track = this.state.project.tracks.find((item) => item.id === trackId);
+    const sample = this.state.project.samples?.find((item) => item.blobKey === blobKey);
+    if (!track || !["piano", "guitar", "bass"].includes(track.kind) || !sample?.blob ||
+        !Number.isInteger(rootNote) || rootNote < 0 || rootNote > 127) return false;
+    const sound = {
+      attack: 0.005, decay: 0.25, sustain: 1, release: 0.3,
+      cutoff: 1, resonance: 0, drive: 0, width: 0.5, glide: 0,
+      reverbSend: 0, delaySend: 0, chorusSend: 0,
+    };
+    this.patchTrack(trackId, {
+      sampleInstrument: { blobKey, rootNote }, presetId: undefined, sound,
+    });
+    audio.setSoundParams(trackId, sound);
     return true;
   }
 
@@ -373,7 +392,10 @@ class Store {
       audio.releaseChopKitForTrack(trackId);
       patch.kitId = undefined;
     }
-    else if (track.kind !== "vocals") patch.presetId = undefined;
+    else if (track.kind !== "vocals") {
+      patch.presetId = undefined;
+      patch.sampleInstrument = undefined;
+    }
     this.patchTrack(trackId, patch);
     const next = this.state.project.tracks.find((item) => item.id === trackId);
     if (!next) return false;

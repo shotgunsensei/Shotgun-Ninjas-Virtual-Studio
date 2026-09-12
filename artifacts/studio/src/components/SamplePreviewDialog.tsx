@@ -46,11 +46,13 @@ import {
   isDrumPadSamplePiece,
 } from "../lib/audio/drumPadSamples";
 import type { AudioClip, DrumPadSamplePiece, Track } from "../types";
+import { SourceNoteSelect } from "./SampleInstrumentPanel";
 
 type Assign =
   | { kind: "none" }
   | { kind: "track"; trackId: string }
   | { kind: "new-track" }
+  | { kind: "instrument" }
   | { kind: "pad"; trackId: string; pad: DrumPadSamplePiece };
 
 const LIGHTWEIGHT_WAVEFORM_BYTES = 2 * 1024 * 1024;
@@ -154,6 +156,7 @@ export interface SamplePreviewProps {
   /** Exact timeline clip created for a just-recorded take. Saved edits replace
    * this clip's media instead of silently creating an unrelated library copy. */
   recordedClipId?: string;
+  createInstrument?: boolean;
   onClose: () => void;
 }
 
@@ -163,6 +166,7 @@ export function SamplePreviewDialog({
   defaultName,
   recordedTrackId,
   recordedClipId,
+  createInstrument = false,
   onClose,
 }: SamplePreviewProps) {
   const project = useStore((s) => s.project);
@@ -187,6 +191,7 @@ export function SamplePreviewDialog({
   // beat 0. For imports, also default to library so nothing surprising
   // happens until the user opts in.
   const [assign, setAssign] = useState<Assign>({ kind: "none" });
+  const [rootNote, setRootNote] = useState(60);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -283,7 +288,8 @@ export function SamplePreviewDialog({
     }
     setWsFailed(false);
     setPreviewBlob(null);
-    setAssign({ kind: "none" });
+    setAssign({ kind: createInstrument ? "instrument" : "none" });
+    setRootNote(60);
     if (blob.size >= LIGHTWEIGHT_WAVEFORM_BYTES) {
       markSampleImport("wavesurfer-skip-large", { bytes: blob.size, type: blob.type });
       setWsFailed(true);
@@ -637,6 +643,17 @@ export function SamplePreviewDialog({
         }];
         tracks = [...tracks, t];
         receipt.createdTrackId = t.id;
+      } else if (assign.kind === "instrument") {
+        const track = makeTrack("piano", sample.name.slice(0, 64) || "Custom instrument", "electric");
+        track.sampleInstrument = { blobKey, rootNote };
+        track.presetId = undefined;
+        track.sound = {
+          attack: 0.005, decay: 0.25, sustain: 1, release: 0.3,
+          cutoff: 1, resonance: 0, drive: 0, width: 0.5, glide: 0,
+          reverbSend: 0, delaySend: 0, chorusSend: 0,
+        };
+        tracks = [...tracks, track];
+        receipt.createdTrackId = track.id;
       } else if (assign.kind === "pad") {
         if (!assignedTrack) {
           throw new Error("The selected drum pad is no longer available.");
@@ -703,11 +720,17 @@ export function SamplePreviewDialog({
                 clip.blob === receipt!.recordedClip!.appliedBlob,
             ) ?? false
         : false;
+      if (assign.kind === "instrument" && receipt.createdTrackId &&
+          currentProject.tracks.some((track) => track.id === receipt!.createdTrackId)) {
+        store.set({ selectedTrackId: receipt.createdTrackId });
+      }
       const assignmentStatus =
         assign.kind === "pad" && padStillAssigned
           ? ` and assigned it to ${assignedTrack!.name} ${assign.pad}`
           : assign.kind === "track"
             ? ` and placed it on ${assignedTrack!.name}`
+            : assign.kind === "instrument"
+              ? " as a custom instrument — play the keyboard across octaves"
             : assign.kind === "new-track"
               ? " on a new audio track"
               : " to the sample library";
@@ -745,7 +768,7 @@ export function SamplePreviewDialog({
           <DialogDescription>
             {recordedClipId
               ? "Preview and edit this take. Saving updates its timeline clip and also keeps a reusable library copy."
-              : "Preview, edit and assign the sample to a track or pad."}
+              : "Preview, edit and turn your sound into a keyboard instrument, audio clip, or drum hit."}
           </DialogDescription>
         </DialogHeader>
 
@@ -755,6 +778,7 @@ export function SamplePreviewDialog({
               Name
             </label>
             <Input
+              aria-label="Sample name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="h-8 font-mono text-xs"
@@ -918,6 +942,8 @@ export function SamplePreviewDialog({
                   ? "library"
                   : assign.kind === "new-track"
                     ? "new-track"
+                    : assign.kind === "instrument"
+                      ? "instrument"
                     : assign.kind === "track"
                       ? `track:${assign.trackId}`
                       : `pad:${assign.trackId}:${assign.pad}`
@@ -925,6 +951,7 @@ export function SamplePreviewDialog({
               onValueChange={(v) => {
                 if (v === "library") setAssign({ kind: "none" });
                 else if (v === "new-track") setAssign({ kind: "new-track" });
+                else if (v === "instrument") setAssign({ kind: "instrument" });
                 else if (v.startsWith("track:"))
                   setAssign({ kind: "track", trackId: v.slice(6) });
                 else if (v.startsWith("pad:")) {
@@ -943,6 +970,7 @@ export function SamplePreviewDialog({
               <SelectContent>
                 <SelectItem value="library">Sample library only</SelectItem>
                 <SelectItem value="new-track">New audio track</SelectItem>
+                <SelectItem value="instrument">New custom instrument (all octaves)</SelectItem>
                 {audioTracks.map((t) => (
                   <SelectItem key={t.id} value={`track:${t.id}`}>
                     Place on track: {t.name}
@@ -961,6 +989,17 @@ export function SamplePreviewDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {assign.kind === "instrument" && (
+            <div className="space-y-2 rounded border border-border p-2">
+              <SourceNoteSelect value={rootNote} onChange={setRootNote} disabled={busy} />
+              <p className="text-xs text-muted-foreground">
+                Choose the note in the recording (C4 by default). All other keys and octaves
+                are mapped automatically. A clean single note works best; trim silence before saving.
+                Higher pitches play faster, lower pitches slower. Your sample stays in this project.
+              </p>
+            </div>
+          )}
 
           {error && (
             <p className="text-xs text-destructive font-mono">{error}</p>
@@ -982,7 +1021,7 @@ export function SamplePreviewDialog({
               onClick={commit}
               disabled={busy || !blob || decodeState !== "ready"}
             >
-              {busy ? "Saving…" : recordedClipId ? "Save take & sample" : "Save sample"}
+              {busy ? "Saving…" : assign.kind === "instrument" ? "Create instrument" : recordedClipId ? "Save take & sample" : "Save sample"}
             </Button>
           </div>
         </div>

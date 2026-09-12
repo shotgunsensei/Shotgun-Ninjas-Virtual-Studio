@@ -4,6 +4,11 @@ test.describe("CC0 factory instruments", () => {
   for (const instrument of [
     { id: "bell.vcsl-tanzanian-kalimba", folder: "tanzanian-kalimba", name: "VCSL Tanzanian Kalimba", zones: 4, cue: "Build a three-note ostinato", family: "Plucked idiophone" },
     { id: "keys.grand-piano", folder: "kawai-grand", name: "Grand Piano", zones: 6, cue: "Play a quiet broken chord", family: "Acoustic grand piano" },
+    { id: "keys.vcsl-steinway-grand", folder: "steinway-grand", name: "Steinway B Grand", zones: 6, cue: "Leave a low fifth ringing", family: "Acoustic grand piano" },
+    { id: "keys.vcsl-french-harpsichord", folder: "french-harpsichord", name: "French Harpsichord", zones: 5, cue: "Alternate a two-note bass figure", family: "Plucked keyboard" },
+    { id: "keys.vcsl-pipe-organ", folder: "pipe-organ", name: "Chapel Pipe Organ", zones: 5, cue: "Move one voice at a time", family: "Pipe organ" },
+    { id: "bell.vcsl-marimba", folder: "marimba", name: "Concert Marimba", zones: 8, cue: "Repeat a low two-note figure", family: "Wooden mallet percussion" },
+    { id: "bell.vcsl-glockenspiel", folder: "glockenspiel", name: "Orchestral Glockenspiel", zones: 6, cue: "Double only the final notes", family: "Metal mallet percussion" },
   ]) {
   test(`loads ${instrument.name} from same-origin assets with bounded fetch concurrency`, async ({
     page,
@@ -52,6 +57,7 @@ test.describe("CC0 factory instruments", () => {
     await row.getByRole("button", { name: /creative guide/i }).click();
     await expect(row).toContainText(instrument.cue);
     await expect(row).toContainText(instrument.family);
+    expect(responses).toEqual([]);
 
     await row.getByRole("button", { name: `Preview ${instrument.name}` }).click();
     await expect.poll(() => responses.length, { timeout: 20_000 }).toBe(instrument.zones);

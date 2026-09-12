@@ -42,8 +42,8 @@ export function MelodicParams({ track }: { track: Track }) {
       </div>
       <Group label="Envelope">
         <Row label="Attack" value={cur.attack} onChange={(v) => set({ attack: v })} />
-        <Row label="Decay" value={cur.decay} onChange={(v) => set({ decay: v })} />
-        <Row label="Sustain" value={cur.sustain} onChange={(v) => set({ sustain: v })} />
+        {!track.sampleInstrument && <Row label="Decay" value={cur.decay} onChange={(v) => set({ decay: v })} />}
+        {!track.sampleInstrument && <Row label="Sustain" value={cur.sustain} onChange={(v) => set({ sustain: v })} />}
         <Row label="Release" value={cur.release} onChange={(v) => set({ release: v })} />
       </Group>
       <Group label="Filter">
@@ -56,11 +56,11 @@ export function MelodicParams({ track }: { track: Track }) {
         <Row label="Chorus" value={cur.chorusSend} onChange={(v) => set({ chorusSend: v })} />
         <Row label="Drive" value={cur.drive} onChange={(v) => set({ drive: v })} />
         <Row label="Width" value={cur.width} onChange={(v) => set({ width: v })} />
-        <Row
+        {!track.sampleInstrument && <Row
           label="Glide"
           value={cur.glide / 0.4}
           onChange={(v) => set({ glide: v * 0.4 })}
-        />
+        />}
       </Group>
     </div>
   );
