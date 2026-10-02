@@ -1,5 +1,45 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-02 - Trustworthy release gates
+
+The reporter logs each attempt but derives its final decision from
+Playwright's `FullResult`. Only Windows arms an unreferenced five-second exit
+fallback in `onExit`; runner failure codes and global errors stay nonzero.
+Browserless fixtures prove retry recovery with a later delayed test,
+exhaustion, global setup failure, expected-failure policy, fail-on-flaky,
+POSIX SIGINT, and Windows fallback timing/status semantics. Delayed global
+teardown and a second JSON reporter must finish in the recovered-retry case.
+
+`pnpm verify:release` combines existing typecheck, 73 unit tests, production
+workspace builds, select-value and bundle-budget guards, full development browser
+coverage, and separate built static route/save/export/restore verification.
+The workflow checks out the exact PR head and saves HTML/trace evidence.
+Independent loopback ports and fresh browser contexts keep test data isolated.
+
+Local isolated Linux `CI=true pnpm verify:release` passed: all workspace
+typechecks/builds, 73/73 unit tests, 8/8 reporter regressions, select-value and
+bundle guards. The full development browser run resolved 89 tests: 83 expected,
+one recovered sample-preview timing failure, and five explicit skips. All
+later tests and HTML reporting completed. Static verification passed 4/4
+active cases, with the optional ten-minute soak skipped: direct `/` and
+`/studio`, reloads, built network scripts, no runtime/asset errors, demo/preset
+startup, and actual save/JSON/WAV/export/restore. Blob AudioWorklet scripts
+remain enabled and are distinct from network-loaded asset requests.
+
+Windows checks passed: workspace typecheck, 73 unit tests, 7 reporter cases
+(the real POSIX SIGINT case is Linux-only), studio client/SSR/prerender build,
+select values, bundle budgets, and the portable factory-integrity assertions.
+Landing JS is 75.21 kB gzip, initial studio JS 353.48 kB, shared CSS 23.53 kB,
+and the largest lazy chunk 58.39 kB; these match the prior recorded baseline.
+
+Product runtime code, audio ownership, dependencies, and database schema are
+unchanged. Automated coverage exercised Enable Audio, Play/Stop/Panic,
+demo/import, save/load, JSON/WAV exports, mixer controls, and replacement/audio
+ownership. No new ten-minute soak, hardware microphone/MIDI, heap profile,
+hidden-panel animation profile, subjective listening, or manual desktop
+acceptance was performed for this tooling change. Publication and deployed
+route acceptance remain unverified; no new latency/memory improvement is claimed.
+
 ## 2026-09-12 — Basic/Advanced and integrated learning
 
 - Added a lazy Basic workspace with drum/note grids, editable starter ideas,

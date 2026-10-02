@@ -1,5 +1,20 @@
 # Performance Baseline
 
+## 2026-10-02 - Trustworthy release verification
+
+Base: `f11d6bec042e8c72e19277261a8f5739dfd20704`, fresh clean main checkout.
+The deterministic browserless fixture has two tests and two retries. Against
+the original reporter, the first test failed once and passed its retry, then
+the runner exited 1 at 2/2 attempts. The later test and delayed global teardown
+did not finish; the JSON report was absent. This is a verification defect,
+not a measured product/audio performance regression.
+
+The corrected reporter regression suite passed locally on Windows (7 passed;
+the real POSIX SIGINT case is exercised on Linux). Workspace typecheck and
+73 unit tests passed on Windows. Full isolated Linux release-gate evidence is
+recorded in `PERFORMANCE_FIXES.md`. No product runtime code changed; prior
+hardware/manual performance observations below remain historical evidence.
+
 ## 2026-09-12 — Basic/Advanced and tutor acceptance
 
 Scope: progressive disclosure and optional integrated teaching on the existing

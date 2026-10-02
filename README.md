@@ -89,6 +89,40 @@ pnpm --filter @workspace/studio build
 The build output lands in `artifacts/studio/dist/public` and can be
 served by any static host.
 
+## Release verification
+
+Use the same gate locally and in GitHub Actions:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @workspace/studio exec playwright install chromium
+pnpm verify:release
+```
+
+The command stops on any failed check: workspace typecheck, studio unit tests,
+browserless reporter retry/failure regressions, all workspace builds (including
+studio client/SSR/prerender),
+select-value guard, bundle budgets, the full development browser suite, and
+built static release tests. Each browser run starts its own loopback server on
+an available port with server reuse disabled. The static run serves
+`artifacts/studio/dist/public` through Vite preview and checks direct `/` and
+`/studio` loads, reloads, built asset requests, the select/startup guard, and
+the existing real save/JSON/WAV/export/restore workflow. Source-importing
+development tests remain in the development run.
+
+CI uses two retries and records the exact checked-out PR head. A recovered
+retry follows Playwright's flaky-test policy; exhausted retries, global
+failures, and interruptions fail the gate. The Windows exit workaround is an
+unreferenced five-second fallback armed in `onExit`, after teardown and report
+generation. It cannot finish a run from the number of test attempts.
+
+HTML reports and failure traces are uploaded as `studio-release-evidence`.
+For the existing optional ten-minute production playback check, set
+`STUDIO_LEARNING_SOAK=1` before running the gate. Hardware microphone/MIDI,
+listening quality, and other browsers still need device acceptance. Passing
+this command verifies the implementation; verify the deployed static routes
+separately after publication.
+
 The checked-in CC0 factory subset is reproducible from its pinned upstream
 commit. The fetcher verifies every Git blob before replacing a local file:
 
