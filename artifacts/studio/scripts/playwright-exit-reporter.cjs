@@ -1,35 +1,50 @@
 class StudioExitReporter {
-  onBegin(_config, suite) {
-    this.total = suite.allTests().length;
-    this.completed = 0;
-    this.failed = false;
-    console.log(`Running ${this.total} tests using 1 worker`);
+  constructor() {
+    this.exitCode = 1;
+    this.globalError = false;
+  }
+
+  onBegin(config, suite) {
+    this.suite = suite;
+    console.log(`Running ${suite.allTests().length} tests using ${config.workers} worker(s)`);
   }
 
   onTestEnd(test, result) {
-    this.completed += 1;
     const title = test.titlePath().slice(1).join(" > ");
     const status = result.status === "passed" ? "ok" : result.status;
-    console.log(`${status} ${title} (${result.duration}ms)`);
+    console.log(`${status} ${title} (attempt ${result.retry + 1}, ${result.duration}ms)`);
     if (result.error) {
-      this.failed = true;
       console.error(result.error.stack || result.error.message || String(result.error));
-    }
-    if (this.completed >= this.total) {
-      const exitCode = this.failed || result.status !== "passed" ? 1 : 0;
-      setTimeout(() => {
-        console.log(`Playwright completed ${this.completed}/${this.total} tests; forcing clean Windows exit.`);
-        process.exit(exitCode);
-      }, 100);
     }
   }
 
-  async onEnd(result) {
-    const status = result.status;
-    console.log(`Playwright finished with status: ${status}`);
+  onError(error) {
+    this.globalError = true;
+    console.error(error.stack || error.message || String(error));
+  }
+
+  onEnd(result) {
+    // FullResult accounts for retries, expected failures, skips, interruption,
+    // and global failures. A failed attempt alone is not a failed test run.
+    this.exitCode = result.status === "passed" && !this.globalError ? 0 : 1;
+    const outcomes = {};
+    for (const test of this.suite?.allTests() ?? []) {
+      const outcome = test.outcome();
+      outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+    }
+    console.log(`Playwright finished with status: ${result.status}; outcomes: ${JSON.stringify(outcomes)}`);
+  }
+
+  onExit() {
+    if (process.platform !== "win32") return;
+    // Arm only after runner teardown and report generation. Do not keep a
+    // healthy process alive; give lingering Windows handles five seconds to
+    // close, and preserve stricter runner policies (e.g. fail-on-flaky).
     setTimeout(() => {
-      process.exit(status === "passed" ? 0 : 1);
-    }, 25);
+      const exitCode = process.exitCode || this.exitCode;
+      console.error(`Playwright Windows exit fallback after 5000ms (code ${exitCode}).`);
+      process.exit(exitCode);
+    }, 5_000).unref();
   }
 }
 

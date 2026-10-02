@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -115,7 +115,7 @@ test("factory sample manifest is pinned, compact, and internally complete", asyn
     assert.match(sample.sha256, /^[a-f0-9]{64}$/);
 
     const path = resolve(FACTORY_ROOT, sample.file);
-    assert.ok(path.startsWith(`${FACTORY_ROOT}\\`), `${sample.file} escapes factory root`);
+    assert.ok(path.startsWith(`${FACTORY_ROOT}${sep}`), `${sample.file} escapes factory root`);
     const bytes = await readFile(path);
     assert.equal((await stat(path)).size, sample.bytes, `${sample.file} byte size changed`);
     assert.equal(sha256(bytes), sample.sha256, `${sample.file} SHA-256 changed`);

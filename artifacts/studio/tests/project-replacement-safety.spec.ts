@@ -30,7 +30,7 @@ test("opening the current project reloads its newest in-memory edits", async ({ 
   const savedName = `Same project baseline ${Date.now()}`;
   const latestName = `Same project latest ${Date.now()}`;
   await page.getByTestId("project-name-input").fill(savedName);
-  await page.getByRole("button", { name: "Save project" }).click();
+  await page.locator("header").getByRole("button", { name: "Save project", exact: true }).click();
   await page.getByTestId("project-name-input").fill(latestName);
 
   await page.getByTestId("open-load-dialog").click();
@@ -103,7 +103,7 @@ test("Restore Last Session reloads the just-preserved current revision", async (
   const savedName = `Restore baseline ${Date.now()}`;
   const latestName = `Restore latest ${Date.now()}`;
   await page.getByTestId("project-name-input").fill(savedName);
-  await page.getByRole("button", { name: "Save project" }).click();
+  await page.locator("header").getByRole("button", { name: "Save project", exact: true }).click();
   await expect(page.getByText("Project saved", { exact: true })).toBeVisible();
   await page.getByTestId("project-name-input").fill(latestName);
 

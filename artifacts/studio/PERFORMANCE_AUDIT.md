@@ -1,5 +1,28 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-02 - Release-verification audit
+
+Confirmed: `onTestEnd` counted attempts against the number of distinct tests,
+retained transient retry errors, and scheduled `process.exit` before later
+tests, teardown, and reports. CI-style two retries could therefore truncate a
+run or misstate its outcome. `onEnd` also forced termination after 25ms on
+every platform. The deterministic fail-once fixture reproduced exit 1 with
+the later test, teardown, and report missing.
+
+There was no GitHub release workflow or unified release command. Ordinary
+browser tests started Vite development; production workflow tests were opt-in
+and needed a separately managed preview server. Development tests importing
+`/src/` cannot prove the static artifact works. The new gate retains those
+checks and separately serves the emitted static build for route, startup,
+save/export/reload acceptance. The Linux unit gate also exposed a hard-coded
+Windows separator in the factory-file containment assertion; using Node's
+platform separator retains containment and all provenance/hash checks.
+The full Linux browser run also found two visible "Save project" buttons in
+Basic mode; scoping the existing recovery tests to the header Save button
+removes a selector race without changing their persistence assertions.
+The existing free-product policy, app behavior,
+security settings, dependencies, and production data are unchanged.
+
 ## 2026-09-12 — Basic/Advanced workflow and optional tutor
 
 Requested scope: simplify the complete music-making workflow for children,
