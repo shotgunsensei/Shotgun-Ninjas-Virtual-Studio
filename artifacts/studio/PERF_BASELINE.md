@@ -454,3 +454,9 @@ The bounded audio slice starts from `aea28a76f6849acc10a0508239ea8531d7287ff0` (
 Offline Chromium regression fixtures confirmed a normalized one-sample discontinuity of **0.1166365** when a nonzero recording ended, and **0.1166365** residual output after an early key-up was ignored. After the fix, the largest boundary step is **0.0005290** at 44.1 kHz and **0.0004861** at 48 kHz across A2/A3/A4; the early-release interval is silent while the later same-pitch note remains audible. These are PCM measurements, not listening or hardware latency results.
 
 See [the dated evidence report](PERFORMANCE_SAMPLE_ENVELOPES_2026-10-14.md) for method, CPU/heap boundaries, release checks, and unresolved production gates.
+
+## 2026-10-14 static-route follow-up baseline
+
+The public landing at `https://shotgunninjas.studio/` responds with HTTP 200 and client-side Launch Studio works, but a fresh direct `/studio?disableAudio=1` request returns HTTP 404. The build emits only the landing `index.html`; `.replit` declares a static deployment with no client-route rewrites. A strict local static-host regression reproduced `/studio` returning 404 before the configuration fix. Vite Preview's automatic SPA fallback had hidden the missing host rule in release checks.
+
+No audio implementation, stored projects, browser data, schema, or sound assets change in this follow-up. The earlier audio baseline and ten-minute muted playback evidence remain applicable to the preserved audio commits; this routing work makes no additional audio-performance claim.

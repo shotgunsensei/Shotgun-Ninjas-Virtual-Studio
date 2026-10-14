@@ -133,8 +133,12 @@ self.addEventListener("fetch", (event) => {
       (async () => {
         try {
           const fresh = await fetch(request);
-          const cache = await caches.open(SHELL_CACHE);
-          cache.put(BASE + "index.html", fresh.clone()).catch(() => undefined);
+          // A host routing error must not replace the working offline shell
+          // with a 404/500 body. Preserve the HTTP error for the online visit.
+          if (fresh.ok) {
+            const cache = await caches.open(SHELL_CACHE);
+            cache.put(BASE + "index.html", fresh.clone()).catch(() => undefined);
+          }
           return fresh;
         } catch {
           const cache = await caches.open(SHELL_CACHE);
