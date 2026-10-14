@@ -285,3 +285,11 @@ Source/local build, type, unit, browser, bundle, select, dependency, and
 exact-source sustained-performance gates: **pass**.
 
 Public deployment acceptance: **not proven by this work**. It still requires an actual deploy plus human listening, device/browser checks, and live service-worker/update verification on the deployed origin.
+
+## 2026-10-14 custom-sample lifecycle audit
+
+Confirmed two live custom-voice defects: the original envelope did not fade at the transposed recording endpoint, and its `releasing` flag treated a future gate as an already-completed key-up. The native custom WAV path also allowed the recording to terminate before its gain envelope. A shared native envelope now accounts for actual sample duration, restores partial attack/fade ramps when cancellation removes their endpoint, and allows an earlier release without touching a later scheduled same-pitch note. Release controls cannot extend an existing source lifetime.
+
+The production dependency audit remains blocked by existing API-server transitive advisories: critical `proxy-addr` GHSA-jqcg-44mw-7w3h, and moderate `qs` GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g. The static studio's audio changes introduce no package changes. These findings are not waived by a passing build or release workflow.
+
+See [the dated evidence report](PERFORMANCE_SAMPLE_ENVELOPES_2026-10-14.md) for current public-route evidence and acceptance limits.

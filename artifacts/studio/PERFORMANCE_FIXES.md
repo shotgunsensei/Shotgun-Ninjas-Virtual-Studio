@@ -582,3 +582,11 @@ Primary files: `src/lib/creative/dojo.ts`,
 `src/lib/audio/recorder.ts`, `src/components/CreativeCompassPanel.tsx`,
 `src/components/Header.tsx`, `src/components/MobileStudio.tsx`, and
 `scripts/dojo-and-jam-capture.test.ts`.
+
+## 2026-10-14 custom-sample sound and cleanup repair
+
+Added `sampleEnvelope.ts` and reused it in `SampleInstrumentVoice` and native custom-instrument WAV export. It adds a bounded 5 ms natural-ending fade (shorter for tiny recordings), preserves partial attacks and fades, shortens early key-up gates, and avoids redundant native stop calls. The existing 32-source limit and immediate Stop/Panic/disposal cleanup remain intact. An optional native context lets the actual voice run inside OfflineAudioContext tests with no device destination.
+
+Five focused browser regressions cover two sample rates and three pitches, early and duplicate note-off with a future same-pitch note, zero/exact-attack/natural-fade gates, 4,096 retriggers with zero remaining sources, and a musical carrier bounced through the native WAV path. No speaker listening or physical-device latency claim is made.
+
+See [the dated evidence report](PERFORMANCE_SAMPLE_ENVELOPES_2026-10-14.md) for final release-gate results and remaining risks.
