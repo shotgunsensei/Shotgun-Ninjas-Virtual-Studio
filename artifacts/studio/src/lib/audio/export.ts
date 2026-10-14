@@ -16,6 +16,7 @@ import { getGroove, GROOVE_TEMPLATES } from "./sounds/groove";
 import { findPreset } from "./sounds/presets";
 import { scheduleModeledNote } from "./soundQuality";
 import { createSendEffect } from "./spatialEffects";
+import { scheduleSampleEnvelope, releaseSampleEnvelope } from "./sampleEnvelope";
 import {
   loadSampleLayers,
   type DecodedSampleLayer,
@@ -1554,7 +1555,7 @@ function scheduleNativeSampledNote(
     ? targetFrequency / rootFrequency
     : Math.max(0.125, Math.min(8, targetFrequency / rootFrequency));
   const naturalDuration = zone.buffer.duration / playbackRate;
-  const audibleDuration = Math.max(
+  let audibleDuration = Math.max(
     0.03,
     Math.min(naturalDuration, durationSec + bank.releaseSec),
   );
@@ -1568,12 +1569,8 @@ function scheduleNativeSampledNote(
   source.playbackRate.setValueAtTime(playbackRate, time);
   const amplitude = velocity * 10 ** (-8 / 20); // Same -8 dB as the live factory sampler.
   if (bank.custom) {
-    const customAttack = Math.min(bank.attackSec, durationSec);
-    const heldAmplitude = amplitude * Math.min(1, durationSec / bank.attackSec);
-    gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(heldAmplitude, time + customAttack);
-    gain.gain.setValueAtTime(heldAmplitude, time + durationSec);
-    gain.gain.linearRampToValueAtTime(0, time + durationSec + bank.releaseSec);
+    const envelope = scheduleSampleEnvelope(gain.gain, time, naturalDuration, bank.attackSec, amplitude);
+    audibleDuration = releaseSampleEnvelope(gain.gain, envelope, time + durationSec, bank.releaseSec) - time;
   } else {
     gain.gain.setValueAtTime(0.0001, time);
     gain.gain.linearRampToValueAtTime(Math.max(0.0001, amplitude), time + attack);
