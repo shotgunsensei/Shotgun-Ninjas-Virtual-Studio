@@ -296,8 +296,20 @@ See [the dated evidence report](PERFORMANCE_SAMPLE_ENVELOPES_2026-10-14.md) for 
 
 ## 2026-10-14 static-route follow-up audit
 
-Confirmed the missing host rewrites and a related offline failure: navigation responses with HTTP 404/500 replaced the cached working index shell. Explicit rewrites now cover only the four existing client routes and their trailing-slash variants; missing assets, source files, API paths, and unknown routes remain 404. The service worker preserves failed HTTP responses for the online visit and retains the previous successful shell for offline recovery.
+Confirmed absent root deployment rewrites, a different fallback in artifact metadata, and a related offline failure: navigation responses with HTTP 404/500 replaced the cached working index shell. Root rewrites now cover only the four existing client routes and their trailing-slash variants; the strict local fixture keeps missing assets, source files, API paths, and unknown routes at 404. The service worker preserves failed HTTP responses for the online visit and retains the previous successful shell for offline recovery. The applied live provider configuration is still unknown.
 
 Release browser tests now use a loopback, test-only static host that reads the actual `.replit` public directory and exact rewrites. It deliberately has no implicit SPA fallback. Its contract follows [Replit's static deployment documentation](https://docs.replit.com/features/deployment-customization/static-deployments-advanced): existing files shadow rewrites, and configuration changes require republishing. This fixture cannot prove provider configuration: Replit documents rewrite support on the deployment's primary domain. Confirm that the live custom domain is primary when authorized release access resumes, republish, and repeat direct-route/reload/offline checks against that domain. No provider setting was read or changed for this fix.
 
 The previous production advisories and old canonical marketing URL remain historical findings; they are not silently waived by the routing correction.
+
+## 2026-10-14 API dependency advisory triage
+
+The historical advisory evidence above is retained. Compatible exact overrides now select `proxy-addr` 2.0.8 and `qs` 6.16.0; both satisfy the installed Express/body-parser semver ranges. The existing 1,440-minute minimum package age and build policy remain unchanged. No advisory suppression or unrelated major upgrade is included.
+
+| Finding | Current application boundary | Local remediation |
+| --- | --- | --- |
+| [GHSA-jqcg-44mw-7w3h](https://github.com/advisories/GHSA-jqcg-44mw-7w3h) | `trust proxy` remains Express's `false` default; no application `req.ip`/`req.ips` consumer was found. The affected subnet configuration is absent. | `proxy-addr` 2.0.8 rejects unrelated IPv4 peers for those IPv6 ranges; valid IPv4, mapped IPv4 and native IPv6 trust controls are retained. |
+| [GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) | Express query parsing is `simple`; body-parser does not enable `comma`. Its required vulnerable comma configuration is absent. | `qs` 6.16.0 rejects both bracket and plain comma forms exceeding `arrayLimit` when `throwOnLimitExceeded: true`; within-limit inputs still work. This does not claim that `arrayLimit` alone caps every allocation. |
+| [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g) | URL-encoded middleware permits constructor keys, but no application `qs.stringify` sink was found; health returns constant data. No complete request-to-throw path was demonstrated. | `qs` 6.16.0 safely serializes parsed hostile constructor keys while preserving ordinary nested fields, repeated values and Buffer serialization. |
+
+The studio artifact serves static files; the API artifact separately declares `/api`. Actual deployed API exposure was not verified. A clean local audit does not prove that the deployed server has received the patched lockfile.
