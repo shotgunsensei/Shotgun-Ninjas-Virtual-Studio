@@ -5,6 +5,40 @@ router = "application"
 deploymentTarget = "static"
 publicDir = "artifacts/studio/dist/public"
 
+# Only known client routes receive the app shell. Missing assets and API paths
+# must retain their real 404 status. Republish to activate these static rules.
+[[deployment.rewrites]]
+from = "/studio"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/studio/"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/changelog"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/changelog/"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/credits"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/credits/"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/press"
+to = "/index.html"
+
+[[deployment.rewrites]]
+from = "/press/"
+to = "/index.html"
+
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }

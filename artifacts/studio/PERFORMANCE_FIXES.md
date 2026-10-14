@@ -590,3 +590,12 @@ Added `sampleEnvelope.ts` and reused it in `SampleInstrumentVoice` and native cu
 Five focused browser regressions cover two sample rates and three pitches, early and duplicate note-off with a future same-pitch note, zero/exact-attack/natural-fade gates, 4,096 retriggers with zero remaining sources, and a musical carrier bounced through the native WAV path. No speaker listening or physical-device latency claim is made.
 
 See [the dated evidence report](PERFORMANCE_SAMPLE_ENVELOPES_2026-10-14.md) for final release-gate results and remaining risks.
+
+## 2026-10-14 direct static routes and offline-shell repair
+
+- Added exact `.replit` rewrites for `/studio`, `/changelog`, `/credits`, `/press`, and trailing-slash forms, targeting the existing landing shell without an external redirect or wildcard fallback.
+- Replaced Vite Preview in the release fixture with `scripts/static-release-server.mjs`, which reads this hosting configuration and keeps missing resources at 404. Added direct HTTP checks for configured routes, existing-file precedence, query strings, missing resources, and built-page reloads.
+- Cache only successful navigation responses in `public/sw.js`. Two source-level service-worker tests cover HTTP 404 and 500 followed by offline recovery, then a successful update and offline recovery of that new shell.
+- Preserved the verified audio commits and their previous evidence. No provider configuration, GitHub publication, speaker playback, or project migration is included.
+
+Validation: complete workspace typecheck and production builds passed; all 76 studio unit tests, select-value guard, bundle budgets, and changed-source formatting passed. The strict built-static browser suite passed five tests on their first attempts, including direct `/studio` and reload, Basic save/export/import/reload, demo/preset startup, and all configured route/404 checks. The optional ten-minute soak was intentionally skipped in this follow-up; its completed 600,792 ms evidence remains in the original audio report. Public route repair remains pending republish and primary-domain verification.

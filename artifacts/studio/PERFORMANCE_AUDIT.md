@@ -293,3 +293,11 @@ Confirmed two live custom-voice defects: the original envelope did not fade at t
 The production dependency audit remains blocked by existing API-server transitive advisories: critical `proxy-addr` GHSA-jqcg-44mw-7w3h, and moderate `qs` GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g. The static studio's audio changes introduce no package changes. These findings are not waived by a passing build or release workflow.
 
 See [the dated evidence report](PERFORMANCE_SAMPLE_ENVELOPES_2026-10-14.md) for current public-route evidence and acceptance limits.
+
+## 2026-10-14 static-route follow-up audit
+
+Confirmed the missing host rewrites and a related offline failure: navigation responses with HTTP 404/500 replaced the cached working index shell. Explicit rewrites now cover only the four existing client routes and their trailing-slash variants; missing assets, source files, API paths, and unknown routes remain 404. The service worker preserves failed HTTP responses for the online visit and retains the previous successful shell for offline recovery.
+
+Release browser tests now use a loopback, test-only static host that reads the actual `.replit` public directory and exact rewrites. It deliberately has no implicit SPA fallback. Its contract follows [Replit's static deployment documentation](https://docs.replit.com/features/deployment-customization/static-deployments-advanced): existing files shadow rewrites, and configuration changes require republishing. This fixture cannot prove provider configuration: Replit documents rewrite support on the deployment's primary domain. Confirm that the live custom domain is primary when authorized release access resumes, republish, and repeat direct-route/reload/offline checks against that domain. No provider setting was read or changed for this fix.
+
+The previous production advisories and old canonical marketing URL remain historical findings; they are not silently waived by the routing correction.
