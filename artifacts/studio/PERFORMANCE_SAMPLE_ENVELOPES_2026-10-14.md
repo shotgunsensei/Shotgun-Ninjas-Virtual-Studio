@@ -2,11 +2,18 @@
 
 ## Scope and source
 
+**Implementation verified; deployment unverified.** Final local release
+verification passed, including the opt-in ten-minute production playback gate.
+The separate dependency audit still reports existing API-server advisories.
+No push, merge or production publication was performed.
+
 This is a targeted repair to the existing DAW at `artifacts/studio`, entered
 through `src/router.tsx` at `/studio`. It does not replace the app. The baseline
 is main commit `aea28a76f6849acc10a0508239ea8531d7287ff0`; the original checkout
 was clean and remains unchanged. Work uses the isolated branch
 `codex/studio-audio-stability-20261014`.
+The implementation checkpoint is `6f4f034ebc6676fd10a58aa04719caec72793d4f`;
+recorded source and lockfile hashes remained unchanged through final testing.
 
 Repository `AGENTS.md`, `.agents/memory`, and the relevant local Codex Studio
 memory summary were inspected. No OperatorOS integration files, lockfiles,
@@ -93,7 +100,8 @@ only Corepack was exposed on PATH. No global toolchain change was made.
 | Final full development browser run | 89 passed, 5 intentional skips, no failures or retries out of 94 |
 | Earlier dense-demo timing miss, isolated rerun | Pass, unchanged 750 ms assertion |
 | Five new offline sample/WAV regressions | All passed within the full run |
-| Built static workflows and ten-minute production playback | Save/export/reload passed; final-source ten-minute run in progress |
+| Built static workflows and ten-minute production playback | All 5 passed without retries, including direct local `/` and `/studio` loads/reloads |
+| Final `pnpm verify:release` with `CI=true`, `STUDIO_LEARNING_SOAK=1` | Pass, exit 0: all release-script gates passed |
 | Production dependency audit | Fail: 3 existing API-server transitive advisories |
 
 An earlier complete run exited 1 after the dense-demo heartbeat recorded a
@@ -101,6 +109,13 @@ An earlier complete run exited 1 after the dense-demo heartbeat recorded a
 The final full development run, after the long-attack preservation check, also
 passed that case on its first attempt. No timing threshold was relaxed. The
 earlier host/run variation remains relevant when interpreting performance data.
+
+The built production playback attachment records **600,792 ms**, **20**
+responsiveness checks, and **zero page errors**. Every checkpoint advanced the
+transport, switched Basic/Advanced, and opened/closed the mixer. Stop, replay
+and Panic completed afterward. The production save/export/import/reload gate
+created a 6,174,044-byte WAV (peak PCM16 22,356) and preserved its five-track
+project through backup import and reload.
 
 The current full-run custom-voice probe recorded:
 
@@ -149,8 +164,11 @@ or OperatorOS files.
 
 ## Acceptance limits and remaining risks
 
-All audio measurements above are offline renders. No speaker playback,
-headphone/monitor listening, microphone, or MIDI hardware acceptance occurred.
+PCM quality measurements used offline renders. The sustained production test
+used the real-time browser engine in muted headless Chromium and checked UI/
+transport responsiveness at roughly 30-second intervals; it did not capture
+a continuous output waveform. No speaker playback, headphone/monitor listening,
+microphone, or MIDI hardware acceptance occurred.
 No new physical-device latency, total-process memory, or cross-browser claim
 is made. Immediate Panic and voice stealing can still cut a voice abruptly;
 they retain their bounded emergency/resource behavior.
@@ -159,14 +177,14 @@ The required manual checklist is represented by automated gates where noted:
 
 | Acceptance area | Evidence boundary |
 | --- | --- |
-| App load, Enable Audio, keyboard transport, Stop, Panic | Existing full browser suite; final result below |
-| Demo load, mixer and mode switching | Existing browser regressions; production soak outcome below |
+| App load, Enable Audio, keyboard transport, Stop, Panic | Passed in the final full browser suite |
+| Demo load, mixer and mode switching | Passed browser regressions and production soak |
 | Visualizer operation, hidden visual loops and reduced visual load | Not reprofiled in this slice; historical profiles are not new acceptance |
-| Sample import, save/load, portable JSON and WAV export | Existing browser suite plus new offline sample/WAV tests; final result below |
+| Sample import, save/load, portable JSON and WAV export | Passed browser suite, production workflow and offline sample/WAV tests |
 | Project replacement and transport ownership | Existing unit/browser regressions passed |
 | Skipping unchanged autosave writes | Not reprofiled in this audio slice |
 | Instrument cleanup | New 4,096-retrigger offline gate and existing real-time instrument tests |
-| Ten-minute continuous playback | Not repeated in this bounded slice; historical profiles are not new acceptance |
+| Ten-minute production playback responsiveness | Passed: 600,792 ms, 20 checkpoints, zero page errors, mixer/mode switching and final Stop/Panic |
 | Production versus development | Built-static workflow and development suite; no controlled comparative speed claim |
 | Safari/iOS, low-memory Android, very large imports/long exports | Not exercised |
 
