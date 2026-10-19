@@ -1,5 +1,30 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Reject malformed core project imports
+
+Both summary and parse now reject malformed core project data before embedded
+audio decoding. Legacy v1/v2 imports, absent legacy clip arrays, portable and
+project-only sample references, custom roots and missing-source recovery remain
+covered by unchanged compatibility fixtures. No invalid import is repaired by
+silently dropping its notes or clips.
+
+`node --experimental-vm-modules --test scripts/storage-import-validation.test.mjs`
+passed 48 tests under Node 24.16.0. Tests execute actual storage, migration and
+validation source; they substitute unrelated diagnostics/branding and an IDB
+boundary that rejects unexpected access. Invalid cases assert zero database
+calls and zero base64 decoding; existing JSON roundtrip and migration fixtures
+also run unchanged. Actual default/all eight demo data factories round-trip,
+and cross-track clip ID reuse and blank sample names stay compatible. The same
+final tests fail 35 cases against baseline code while 13 compatibility cases
+pass. A Node 20 fallback uses the existing TypeScript dependency
+but was not executed here. No dependency was acquired and no real DB was opened.
+
+Full build/typecheck, full test:unit, browser/production release gates, preview
+and the required manual audio/performance checklist remain unexecuted because
+matching installed dependencies are unavailable. Native tests do not prove
+React rendering, real IndexedDB, audio, memory or production acceptance.
+No measured performance improvement is claimed.
+
 ## 2026-10-19 - Preserve media across project deletion
 
 Deletion now joins the persistence FIFO, retains media referenced by the

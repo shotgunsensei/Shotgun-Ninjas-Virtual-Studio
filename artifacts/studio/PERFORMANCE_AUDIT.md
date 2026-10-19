@@ -1,5 +1,28 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Validate external project JSON before acceptance
+
+The shared import envelope parser now validates core nested structure before
+summary construction, media hydration or persistence can proceed. Invalid
+tracks, clips, notes, selected optional containers, non-finite numbers, malformed
+embedded base64 and duplicate track/sample identities or duplicate clip IDs
+within one track produce a descriptive field error. Legacy cross-track clip ID
+reuse and blank sample names remain accepted; missing legacy clip arrays still
+receive migration defaults. All 48 native tests pass, including actual default
+and all eight demo data factories plus the unchanged JSON/migration fixtures.
+
+Validation uses an iterative walk with depth 32 and 1,000,000 JSON-value budgets
+to bound inspection of untrusted structure. These are browser-stability guards,
+not paid limits or a claim that this many objects is a measured safe audio
+workload. Existing file-size guards remain unchanged. Strings/base64 still
+occupy the complete input in memory; JSON.parse is still synchronous.
+
+Scope is external JSON import only. Migration and IndexedDB/draft recovery
+behavior are unchanged. This is not a full project schema/catalog/cross-reference
+audit: optional sound/effect/performance/modulation settings are not exhaustively
+validated, and aggregate decoded PCM, scalar-driven UI allocations, note
+scheduler work and whole-document parsing remain separate gates.
+
 ## 2026-10-19 - Delete versus persistence ownership
 
 `deleteProject` bypassed the process-wide save/draft FIFO and retained cached

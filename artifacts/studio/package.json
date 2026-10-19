@@ -9,7 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "playwright test",
-    "test:unit": "tsx --test scripts/*.test.ts && node --experimental-vm-modules --test scripts/storage-delete.test.mjs",
+    "test:unit": "tsx --test scripts/*.test.ts && node --experimental-vm-modules --test scripts/storage-delete.test.mjs scripts/storage-import-validation.test.mjs",
     "test:reporter": "node --test scripts/playwright-exit-reporter.test.cjs",
     "test:release": "playwright test --config playwright.release.config.ts",
     "test:bundle": "node scripts/check-bundle-budget.mjs",

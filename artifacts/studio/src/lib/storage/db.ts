@@ -15,6 +15,7 @@ import { APP_NAME, APP_URL, APP_VERSION, CREATED_WITH } from "../version";
 import { countPerf, timePerfAsync } from "../../utils/performanceDiagnostics";
 import { blobContentFingerprint } from "./performanceGuards";
 import { markSampleImport, timeSampleImport } from "../performance/sampleImportTrace";
+import { validateProjectImport } from "./importValidation";
 
 const DB_NAME = "shotgun-ninjas-studio";
 /** v1 — initial projects/blobs/meta stores.
@@ -858,6 +859,7 @@ function parseEnvelope(text: string): ProjectJsonV1 {
   ) {
     throw new Error("Not a valid Shotgun Ninjas Studio project file");
   }
+  validateProjectImport(data.project, data.brand);
   return data;
 }
 
@@ -942,7 +944,7 @@ function projectFromEnvelope(data: ProjectJsonV1, hydrateBlobs: boolean): Projec
     ...t,
     padSamples: remapPadSampleKeys(t.padSamples, sampleKeyMap),
     sampleInstrument: remapSampleInstrument(t.sampleInstrument, sampleKeyMap),
-    audioClips: t.audioClips.map((c) => {
+    audioClips: (t.audioClips ?? []).map((c) => {
       const blob =
         hydrateBlobs && c.base64 && c.mimeType
           ? base64ToBlob(c.base64, c.mimeType)
