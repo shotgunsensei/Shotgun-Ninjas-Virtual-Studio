@@ -1,5 +1,9 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Post-merge dependency setup only
+
+Removed automatic database push from `scripts/post-merge.sh`, retained `pnpm install --frozen-lockfile` and failure propagation, added `test:post-merge` plus the dependency-free actual-hook fixture, and documented target/backup/write-pause/approval requirements in `docs/POST_MERGE_DATABASE_SAFETY.md`. Candidate native checks passed 2/2: exact single frozen-install call and install failure stopping at 23. The preserved baseline fails on its blocked push attempt (97). Only fake pnpm ran; no installation, database/provider access or audio playback occurred. The existing full release gate and manual audio checklist were not rerun for this source-only hook change, and no new audio-performance claim is made.
+
 ## 2026-10-19 - Reject malformed core project imports
 
 Both summary and parse now reject malformed core project data before embedded

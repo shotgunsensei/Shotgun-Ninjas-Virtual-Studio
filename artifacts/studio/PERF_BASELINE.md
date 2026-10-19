@@ -1,5 +1,9 @@
 # Performance Baseline
 
+## 2026-10-19 - Post-merge database safety
+
+At base `e7efef3485bec35f941fda2d7b0fe20899d0b892`, the configured post-merge script ran a frozen install followed by an ambient database schema push. The native fake-pnpm fixture executed that actual baseline: it logged both commands and rejected the push with exit 97. The install-failure control stopped at exit 23. This establishes source hook behavior, not historical hosting invocation or database impact. No audio, browser-project, schema, dependency or lockfile change is included; no audio performance measurement was taken.
+
 ## 2026-10-19 - Imported project structure
 
 Base: `e7efef3485bec35f941fda2d7b0fe20899d0b892`. A valid project envelope

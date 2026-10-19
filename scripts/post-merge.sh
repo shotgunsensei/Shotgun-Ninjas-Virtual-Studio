@@ -1,4 +1,5 @@
 #!/bin/bash
 set -e
 pnpm install --frozen-lockfile
-pnpm --filter db push
+# Database changes require a separately reviewed target, backup, and approval.
+# See docs/POST_MERGE_DATABASE_SAFETY.md; this hook performs dependency setup only.

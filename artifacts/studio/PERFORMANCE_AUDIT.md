@@ -1,5 +1,9 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Post-merge database safety audit
+
+`.replit` names `scripts/post-merge.sh`, whose previous schema push could use an inherited `DATABASE_URL` without a separately reviewed target, backup, write pause or schema-operation approval. Source metadata does not prove that a GitHub merge invokes this hook or that it has run against any live target. The narrow change removes that automatic push and documents a controlled operation outside the hook. Existing static hosting metadata, release gates and free-product policy are preserved; no application, audio lifecycle, stored-project or performance implementation is changed.
+
 ## 2026-10-19 - Validate external project JSON before acceptance
 
 The shared import envelope parser now validates core nested structure before
@@ -38,8 +42,8 @@ and existing draft-selection semantics remain unchanged. Four native tests
 execute actual storage/migration code with a staged in-memory adapter and cover
 resave, recovery, FIFO and failed commit/cache retention. The adapter does not
 prove native IndexedDB locking, transaction auto-commit, quota, multiple tabs,
-or browser/audio acceptance. Malformed nested JSON import, replacement during
-edits and route-unmount transport ownership remain separate follow-up risks.
+or browser/audio acceptance. Remaining optional import schema checks, replacement during edits and
+route-unmount transport ownership remain separate follow-up risks.
 
 ## 2026-10-02 - Release-verification audit
 
