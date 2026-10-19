@@ -1,5 +1,22 @@
 # Performance Baseline
 
+## 2026-10-19 - Project deletion persistence
+
+Base: `e7efef3485bec35f941fda2d7b0fe20899d0b892`. Source-level regression:
+saving audio, deleting the active project, and saving it again left project
+metadata but no recording, library sample, or Chop Lab blob. Deletion left
+unchanged-blob cache entries behind. A retained recovery draft also lost its
+referenced media. These failures were reproduced against actual storage and
+migration modules in Node 24 with an in-memory database adapter.
+
+This is correctness evidence, not a latency, memory, or browser measurement.
+The existing dependency installation differs from the current lockfile, and
+new dependency acquisition is prohibited for this pass. Build, full unit and
+browser suites, preview, audio, ten-minute playback, mixer/visualizer, import,
+save/load responsiveness, JSON/WAV export, autosave and lifecycle manual
+checklist items have not been rerun. Historical measurements below remain
+historical.
+
 ## 2026-10-02 - Trustworthy release verification
 
 Base: `f11d6bec042e8c72e19277261a8f5739dfd20704`, fresh clean main checkout.
