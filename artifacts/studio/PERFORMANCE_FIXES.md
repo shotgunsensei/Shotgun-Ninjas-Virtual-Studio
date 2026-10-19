@@ -1,5 +1,56 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Post-merge dependency setup only
+
+Removed automatic database push from `scripts/post-merge.sh`, retained `pnpm install --frozen-lockfile` and failure propagation, added `test:post-merge` plus the dependency-free actual-hook fixture, and documented target/backup/write-pause/approval requirements in `docs/POST_MERGE_DATABASE_SAFETY.md`. Candidate native checks passed 2/2: exact single frozen-install call and install failure stopping at 23. The preserved baseline fails on its blocked push attempt (97). Only fake pnpm ran; no installation, database/provider access or audio playback occurred. The existing full release gate and manual audio checklist were not rerun for this source-only hook change, and no new audio-performance claim is made.
+
+## 2026-10-19 - Reject malformed core project imports
+
+Both summary and parse now reject malformed core project data before embedded
+audio decoding. Legacy v1/v2 imports, absent legacy clip arrays, portable and
+project-only sample references, custom roots and missing-source recovery remain
+covered by unchanged compatibility fixtures. No invalid import is repaired by
+silently dropping its notes or clips.
+
+`node --experimental-vm-modules --test scripts/storage-import-validation.test.mjs`
+passed 48 tests under Node 24.16.0. Tests execute actual storage, migration and
+validation source; they substitute unrelated diagnostics/branding and an IDB
+boundary that rejects unexpected access. Invalid cases assert zero database
+calls and zero base64 decoding; existing JSON roundtrip and migration fixtures
+also run unchanged. Actual default/all eight demo data factories round-trip,
+and cross-track clip ID reuse and blank sample names stay compatible. The same
+final tests fail 35 cases against baseline code while 13 compatibility cases
+pass. A Node 20 fallback uses the existing TypeScript dependency
+but was not executed here. No dependency was acquired and no real DB was opened.
+
+Full build/typecheck, full test:unit, browser/production release gates, preview
+and the required manual audio/performance checklist remain unexecuted because
+matching installed dependencies are unavailable. Native tests do not prove
+React rendering, real IndexedDB, audio, memory or production acceptance.
+No measured performance improvement is claimed.
+
+## 2026-10-19 - Preserve media across project deletion
+
+Deletion now joins the persistence FIFO, retains media referenced by the
+pending recovery draft, and clears deleted-blob fingerprints only after the
+transaction commits. Saving a still-active deleted project can therefore write
+its unchanged media again. Unreferenced namespaced blobs are still removed;
+other projects' blobs are preserved. Failed deletion leaves the cache intact.
+
+`node --experimental-vm-modules --test scripts/storage-delete.test.mjs` passed
+4/4 tests under Node 24.16.0 without dependency acquisition or real database
+writes. The tests load actual TypeScript storage/migration modules, substitute
+an in-memory staged transaction adapter and content-based hashing, and are
+included after the existing `test:unit` suite. Twenty-five existing pure source
+assertions also passed separately. Full build, full unit/browser release gates,
+preview and the required manual audio/performance checklist remain unverified
+because available installed dependencies do not match the tracked lockfile.
+No audio or visual performance improvement is claimed.
+
+CI uses Node 24. For older runtimes without native TypeScript stripping, the
+regression harness uses the already-declared TypeScript devDependency; that
+fallback has not been executed in this pass. No Node/runtime setting changed.
+
 ## 2026-10-02 - Trustworthy release gates
 
 The reporter logs each attempt but derives its final decision from

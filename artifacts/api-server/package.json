@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test scripts/*.test.ts"
+    "test": "tsx --test scripts/*.test.ts && node --test ../../scripts/tests/post-merge.test.mjs"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

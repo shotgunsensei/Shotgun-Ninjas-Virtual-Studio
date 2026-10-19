@@ -1,5 +1,50 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Post-merge database safety audit
+
+`.replit` names `scripts/post-merge.sh`, whose previous schema push could use an inherited `DATABASE_URL` without a separately reviewed target, backup, write pause or schema-operation approval. Source metadata does not prove that a GitHub merge invokes this hook or that it has run against any live target. The narrow change removes that automatic push and documents a controlled operation outside the hook. Existing static hosting metadata, release gates and free-product policy are preserved; no application, audio lifecycle, stored-project or performance implementation is changed.
+
+## 2026-10-19 - Validate external project JSON before acceptance
+
+The shared import envelope parser now validates core nested structure before
+summary construction, media hydration or persistence can proceed. Invalid
+tracks, clips, notes, selected optional containers, non-finite numbers, malformed
+embedded base64 and duplicate track/sample identities or duplicate clip IDs
+within one track produce a descriptive field error. Legacy cross-track clip ID
+reuse and blank sample names remain accepted; missing legacy clip arrays still
+receive migration defaults. All 48 native tests pass, including actual default
+and all eight demo data factories plus the unchanged JSON/migration fixtures.
+
+Validation uses an iterative walk with depth 32 and 1,000,000 JSON-value budgets
+to bound inspection of untrusted structure. These are browser-stability guards,
+not paid limits or a claim that this many objects is a measured safe audio
+workload. Existing file-size guards remain unchanged. Strings/base64 still
+occupy the complete input in memory; JSON.parse is still synchronous.
+
+Scope is external JSON import only. Migration and IndexedDB/draft recovery
+behavior are unchanged. This is not a full project schema/catalog/cross-reference
+audit: optional sound/effect/performance/modulation settings are not exhaustively
+validated, and aggregate decoded PCM, scalar-driven UI allocations, note
+scheduler work and whole-document parsing remain separate gates.
+
+## 2026-10-19 - Delete versus persistence ownership
+
+`deleteProject` bypassed the process-wide save/draft FIFO and retained cached
+fingerprints after deleting their blobs. A subsequent save skipped unchanged
+media that was no longer stored. Deletion could also overtake a pending save.
+The pending recovery draft shares blob keys with the saved project, so deleting
+every namespaced blob corrupted that retained draft.
+
+The patch queues deletion with existing persistence operations, reads draft
+references inside the same transaction, preserves referenced recovery media,
+and invalidates only deleted keys after a successful commit. Project metadata
+and existing draft-selection semantics remain unchanged. Four native tests
+execute actual storage/migration code with a staged in-memory adapter and cover
+resave, recovery, FIFO and failed commit/cache retention. The adapter does not
+prove native IndexedDB locking, transaction auto-commit, quota, multiple tabs,
+or browser/audio acceptance. Remaining optional import schema checks, replacement during edits and
+route-unmount transport ownership remain separate follow-up risks.
+
 ## 2026-10-02 - Release-verification audit
 
 Confirmed: `onTestEnd` counted attempts against the number of distinct tests,

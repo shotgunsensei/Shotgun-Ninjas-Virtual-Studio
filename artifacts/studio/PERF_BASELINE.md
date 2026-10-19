@@ -1,5 +1,46 @@
 # Performance Baseline
 
+## 2026-10-19 - Post-merge database safety
+
+At base `e7efef3485bec35f941fda2d7b0fe20899d0b892`, the configured post-merge script ran a frozen install followed by an ambient database schema push. The native fake-pnpm fixture executed that actual baseline: it logged both commands and rejected the push with exit 97. The install-failure control stopped at exit 23. This establishes source hook behavior, not historical hosting invocation or database impact. No audio, browser-project, schema, dependency or lockfile change is included; no audio performance measurement was taken.
+
+## 2026-10-19 - Imported project structure
+
+Base: `e7efef3485bec35f941fda2d7b0fe20899d0b892`. A valid project envelope
+containing a note clip with `notes: null` passed summary and parsing. The import
+flow could then save/select it before Timeline called `clip.notes.map`, leaving
+a repeatedly failing project selected on reload. Numeric JSON overflow and
+malformed track/clip containers had no shared validation boundary.
+
+The same final 48 native regression/compatibility tests produce 35 failures and
+13 passes against baseline storage code, then 48 passes with this patch. The
+compatibility passes include actual default/all eight demo data factories,
+cross-track clip ID reuse, blank sample names and unchanged JSON/migration cases.
+
+The current evidence uses Node 24.16.0 with actual storage/migration/validation
+source in a VM. It is correctness evidence, not a browser, latency or memory
+profile. Existing dependency installations do not match the tracked lockfile;
+no dependency acquisition is authorized. Build, full unit/browser suites,
+preview and every manual audio/performance checklist item remain unexecuted.
+Historical measurements below remain historical.
+
+## 2026-10-19 - Project deletion persistence
+
+Base: `e7efef3485bec35f941fda2d7b0fe20899d0b892`. Source-level regression:
+saving audio, deleting the active project, and saving it again left project
+metadata but no recording, library sample, or Chop Lab blob. Deletion left
+unchanged-blob cache entries behind. A retained recovery draft also lost its
+referenced media. These failures were reproduced against actual storage and
+migration modules in Node 24 with an in-memory database adapter.
+
+This is correctness evidence, not a latency, memory, or browser measurement.
+The existing dependency installation differs from the current lockfile, and
+new dependency acquisition is prohibited for this pass. Build, full unit and
+browser suites, preview, audio, ten-minute playback, mixer/visualizer, import,
+save/load responsiveness, JSON/WAV export, autosave and lifecycle manual
+checklist items have not been rerun. Historical measurements below remain
+historical.
+
 ## 2026-10-02 - Trustworthy release verification
 
 Base: `f11d6bec042e8c72e19277261a8f5739dfd20704`, fresh clean main checkout.
