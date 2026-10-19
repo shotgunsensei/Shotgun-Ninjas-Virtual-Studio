@@ -1,5 +1,27 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Preserve media across project deletion
+
+Deletion now joins the persistence FIFO, retains media referenced by the
+pending recovery draft, and clears deleted-blob fingerprints only after the
+transaction commits. Saving a still-active deleted project can therefore write
+its unchanged media again. Unreferenced namespaced blobs are still removed;
+other projects' blobs are preserved. Failed deletion leaves the cache intact.
+
+`node --experimental-vm-modules --test scripts/storage-delete.test.mjs` passed
+4/4 tests under Node 24.16.0 without dependency acquisition or real database
+writes. The tests load actual TypeScript storage/migration modules, substitute
+an in-memory staged transaction adapter and content-based hashing, and are
+included after the existing `test:unit` suite. Twenty-five existing pure source
+assertions also passed separately. Full build, full unit/browser release gates,
+preview and the required manual audio/performance checklist remain unverified
+because available installed dependencies do not match the tracked lockfile.
+No audio or visual performance improvement is claimed.
+
+CI uses Node 24. For older runtimes without native TypeScript stripping, the
+regression harness uses the already-declared TypeScript devDependency; that
+fallback has not been executed in this pass. No Node/runtime setting changed.
+
 ## 2026-10-02 - Trustworthy release gates
 
 The reporter logs each attempt but derives its final decision from

@@ -1,5 +1,23 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-19 - Delete versus persistence ownership
+
+`deleteProject` bypassed the process-wide save/draft FIFO and retained cached
+fingerprints after deleting their blobs. A subsequent save skipped unchanged
+media that was no longer stored. Deletion could also overtake a pending save.
+The pending recovery draft shares blob keys with the saved project, so deleting
+every namespaced blob corrupted that retained draft.
+
+The patch queues deletion with existing persistence operations, reads draft
+references inside the same transaction, preserves referenced recovery media,
+and invalidates only deleted keys after a successful commit. Project metadata
+and existing draft-selection semantics remain unchanged. Four native tests
+execute actual storage/migration code with a staged in-memory adapter and cover
+resave, recovery, FIFO and failed commit/cache retention. The adapter does not
+prove native IndexedDB locking, transaction auto-commit, quota, multiple tabs,
+or browser/audio acceptance. Malformed nested JSON import, replacement during
+edits and route-unmount transport ownership remain separate follow-up risks.
+
 ## 2026-10-02 - Release-verification audit
 
 Confirmed: `onTestEnd` counted attempts against the number of distinct tests,

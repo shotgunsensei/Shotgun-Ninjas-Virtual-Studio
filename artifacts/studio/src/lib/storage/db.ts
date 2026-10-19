@@ -377,19 +377,42 @@ export async function listProjects(): Promise<
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export async function deleteProject(id: string): Promise<void> {
+async function deleteProjectUnqueued(id: string): Promise<void> {
   const db = await getDb();
-  // also drop any vocal blobs we stored under this project's namespace so
-  // IndexedDB doesn't bloat up over time
-  const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE], "readwrite");
+  const tx = db.transaction([PROJECTS_STORE, BLOBS_STORE, META_STORE], "readwrite");
+  // Recovery drafts share the durable project's blob namespace. Keep their
+  // referenced media while deleting the saved project record.
+  const draft = (await tx.objectStore(META_STORE).get(META_DRAFT)) as
+    | DraftSnapshot
+    | undefined;
+  const draftBlobKeys = new Set<string>();
+  for (const track of draft?.project.tracks ?? []) {
+    for (const clip of track.audioClips ?? []) {
+      if (clip.blobKey) draftBlobKeys.add(clip.blobKey);
+    }
+  }
+  for (const sample of draft?.project.samples ?? []) {
+    if (sample.blobKey) draftBlobKeys.add(sample.blobKey);
+  }
+  if (draft?.project.chopLab?.sampleBlobKey) {
+    draftBlobKeys.add(draft.project.chopLab.sampleBlobKey);
+  }
   const blobKeys = (await tx.objectStore(BLOBS_STORE).getAllKeys()) as string[];
+  const deletedKeys = blobKeys.filter(
+    (key) => typeof key === "string" && key.startsWith(`${id}:`) && !draftBlobKeys.has(key),
+  );
   await Promise.all(
-    blobKeys
-      .filter((k) => typeof k === "string" && k.startsWith(`${id}:`))
-      .map((k) => tx.objectStore(BLOBS_STORE).delete(k)),
+    deletedKeys.map((key) => tx.objectStore(BLOBS_STORE).delete(key)),
   );
   await tx.objectStore(PROJECTS_STORE).delete(id);
   await tx.done;
+  // An active project can be saved again after deletion. Its unchanged blobs
+  // must be written again; invalidate only after the deletion commits.
+  for (const key of deletedKeys) blobFpCache.delete(key);
+}
+
+export function deleteProject(id: string): Promise<void> {
+  return enqueuePersistenceWrite(() => deleteProjectUnqueued(id));
 }
 
 export async function getLastProjectId(): Promise<string | null> {
