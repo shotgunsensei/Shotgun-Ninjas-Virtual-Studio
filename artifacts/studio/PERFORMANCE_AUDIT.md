@@ -1,5 +1,11 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-27 - Reporter fixture lifecycle review
+
+Reviewed the actual child spawn, readiness-file writer, fixture timeout configuration, signal handling, teardown/report assertions and reporter exit fallback after hosted run `40546485852`. The readiness loop could wait on a child that had already exited or failed to spawn, with its diagnostics hidden. Its 10-second parent deadline could also expire before the fixture's 15-second runner budget. These are test-supervision defects; the old log does not prove an application regression or a specific child-startup cause.
+
+The replacement observes error/exit/close, requires the exact readiness event, captures at most 4,000 characters per output stream and fails clearly for early exit, spawn error or an exhausted readiness budget. Other reporter, storage, browser and audio logic is unchanged. Real POSIX signal behavior still requires exact-head Linux hosted verification; the existing Windows-only SIGINT exclusion is retained.
+
 ## 2026-10-27 — Public landing, browser boundary, and storage-source review
 
 Reviewed landing/router/main lifecycle, current import-validation boundary, local project deletion fixtures, static hosting/CI metadata, and browser test launch configuration at base `0c773b1d3fac72023d759508272b9d97fe6b6541`. The landing's simulated CSS workstation did not demonstrate the actual current product. The preview also lacked keyboard activation, the quick-start disclosure lacked expanded-state semantics, the feedback destination was a placeholder form, and the local browser test configuration disabled Chromium sandbox and web security.

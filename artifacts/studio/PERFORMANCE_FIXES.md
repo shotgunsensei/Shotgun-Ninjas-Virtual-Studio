@@ -1,5 +1,11 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-27 - Lifecycle-aware SIGINT fixture readiness
+
+Reporter regression supervision now waits for the actual `interrupt-ready` event or rejects on child error/exit, with bounded stdout/stderr diagnostics. A 20-second outer readiness budget covers the unchanged 15-second runner budget plus launch allowance; a dead child fails immediately. The test still requires successful SIGINT delivery, exit code 130 with no terminating signal, completed teardown and a JSON report. It does not skip failures or accept a successful exit for an interrupted run.
+
+Six synthetic lifecycle checks cover delayed readiness, early child exit, exit before inherited pipes close, spawn failure, a stale ready marker on a dead child and timeout with bounded diagnostics. A dedicated exit-without-close regression failed before the helper was corrected to settle immediately on exit. Capture streams are destroyed during disposal. The supported local reporter suite reports 13 passed and the one unchanged Windows SIGINT exclusion; Linux signal and full release acceptance remain pending hosted CI. No application code, dependency, credentials, provider, deployment or production data changes are included.
+
 ## 2026-10-27 — Credible public entry and safe isolated QA
 
 The public entry now presents the real Basic workspace, clearer free/no-account messaging, six existing capabilities with Lucide icons, accessible keyboard launch and tutorial disclosure, an owned feedback destination, local licensed typography and visible 44px landing controls. Audio/DSP, free-product rules, project formats, modes, lessons and DAW control layout are unchanged. The real preview asset is `public/images/studio-workspace.png`; bundled font licensing is in `public/fonts/Inter-LICENSE.txt`.

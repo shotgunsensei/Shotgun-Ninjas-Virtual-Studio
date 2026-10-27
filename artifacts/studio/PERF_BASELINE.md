@@ -1,5 +1,11 @@
 # Performance Baseline
 
+## 2026-10-27 - Reporter readiness follow-on
+
+Hosted PR5 head `0fa253012bc404d5abedf1a64747776aedbf4de3` passed locked installation, builds and earlier unit gates, then failed the reporter suite (7 passed, 1 failed) at `fixture must begin before SIGINT`. The test used a separate 10-second readiness poll while its Playwright fixture allowed a 15-second global runner budget. Child output was discarded and early exit was not observed during the poll, so the original failure does not establish whether startup was slow or failed.
+
+This follow-on is isolated from reviewed local commit `c04476f39edb64aff3b371d85a9498183b323704`. It changes only reporter regression supervision and these required notes. It does not establish audio, browser-workflow or production acceptance. Exact local receipts and hosted outcome belong in workspace `evidence/quality-oct27/public-companions-release/`.
+
 ## 2026-10-27 — Public entry quality pass
 
 Source base: `0c773b1d3fac72023d759508272b9d97fe6b6541` in isolated local worktree `quality-studio-oct27`. Fresh before desktop (1440×1000) and mobile (390×844) screenshots showed a simulated workstation preview, emoji feature icons, a long first-screen gap, and Google-hosted font requests. The real Basic workspace was captured with the default local Cyber Dojo demo and audio disabled; that 1440×1000 image is the new preview.
