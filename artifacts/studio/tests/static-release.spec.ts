@@ -35,6 +35,14 @@ for (const route of ["/", "/studio"]) {
     });
     const response = await page.goto(route, { waitUntil: "networkidle" });
     expect(response?.status()).toBe(200);
+    const viewport = page.locator('head meta[name="viewport"]');
+    await expect(viewport).toHaveCount(1);
+    const viewportContent = (await viewport.getAttribute("content")) ?? "";
+    expect(viewportContent).toContain("width=device-width");
+    expect(viewportContent).toMatch(/initial-scale=1(?:\.0)?(?:,|$)/);
+    expect(viewportContent).not.toMatch(
+      /maximum-scale|user-scalable\s*=\s*(?:no|0)/i,
+    );
     if (route === "/studio") {
       await expect(
         page.getByTestId("onboarding-version-beginner"),
@@ -50,6 +58,7 @@ for (const route of ["/", "/studio"]) {
     }
     const reloaded = await page.reload({ waitUntil: "networkidle" });
     expect(reloaded?.status()).toBe(200);
+    await expect(viewport).toHaveAttribute("content", viewportContent);
     if (route === "/studio")
       await expect(page.getByTestId("basic-studio")).toBeVisible();
     else
@@ -64,6 +73,31 @@ for (const route of ["/", "/studio"]) {
     expect(errors).toEqual([]);
   });
 }
+
+test("built mobile routes retain browser zoom and a device-width layout", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const route of ["/", "/studio"]) {
+    const response = await page.goto(`${route}?disableAudio=1`, {
+      waitUntil: "networkidle",
+    });
+    expect(response?.status()).toBe(200);
+    const viewport = page.locator('head meta[name="viewport"]');
+    await expect(viewport).toHaveCount(1);
+    const content = (await viewport.getAttribute("content")) ?? "";
+    expect(content).toContain("width=device-width");
+    expect(content).not.toMatch(/maximum-scale|user-scalable\s*=\s*(?:no|0)/i);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(391);
+    await page.screenshot({
+      path: testInfo.outputPath(
+        route === "/" ? "mobile-landing.png" : "mobile-studio.png",
+      ),
+    });
+  }
+});
 
 test("configured information routes load directly and unknown resources keep their 404", async ({
   request,

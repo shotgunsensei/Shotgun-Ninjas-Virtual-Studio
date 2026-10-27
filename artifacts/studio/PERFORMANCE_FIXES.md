@@ -1,5 +1,17 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-27 - Lifecycle-aware SIGINT fixture readiness
+
+Reporter regression supervision now waits for the actual `interrupt-ready` event or rejects on child error/exit, with bounded stdout/stderr diagnostics. A 20-second outer readiness budget covers the unchanged 15-second runner budget plus launch allowance; a dead child fails immediately. The test still requires successful SIGINT delivery, exit code 130 with no terminating signal, completed teardown and a JSON report. It does not skip failures or accept a successful exit for an interrupted run.
+
+Six synthetic lifecycle checks cover delayed readiness, early child exit, exit before inherited pipes close, spawn failure, a stale ready marker on a dead child and timeout with bounded diagnostics. A dedicated exit-without-close regression failed before the helper was corrected to settle immediately on exit. Capture streams are destroyed during disposal. The supported local reporter suite reports 13 passed and the one unchanged Windows SIGINT exclusion; Linux signal and full release acceptance remain pending hosted CI. No application code, dependency, credentials, provider, deployment or production data changes are included.
+
+## 2026-10-27 — Credible public entry and safe isolated QA
+
+The public entry now presents the real Basic workspace, clearer free/no-account messaging, six existing capabilities with Lucide icons, accessible keyboard launch and tutorial disclosure, an owned feedback destination, local licensed typography and visible 44px landing controls. Audio/DSP, free-product rules, project formats, modes, lessons and DAW control layout are unchanged. The real preview asset is `public/images/studio-workspace.png`; bundled font licensing is in `public/fonts/Inter-LICENSE.txt`.
+
+Validation: four new public-entry browser tests passed on 2026-10-27; frontend TypeScript passed; 52 existing storage import/delete VM cases passed. Client/SSR/prerender build results and hashes are recorded in the final local source manifest under workspace `evidence/quality-oct27/public-companions/`. Before/after desktop/mobile screenshots were inspected. The first browser font assertion failed because it checked before the lazy route's font was loaded; the final test waits for a loaded Inter FontFace and rejects Google-font resource requests. No audio throughput, latency or memory-improvement claim is made. No install, provider/account action, database change, commit or deployment occurred.
+
 ## 2026-10-19 - Post-merge dependency setup only
 
 Removed automatic database push from `scripts/post-merge.sh`, retained `pnpm install --frozen-lockfile` and failure propagation, added `test:post-merge` plus the dependency-free actual-hook fixture, and documented target/backup/write-pause/approval requirements in `docs/POST_MERGE_DATABASE_SAFETY.md`. Candidate native checks passed 2/2: exact single frozen-install call and install failure stopping at 23. The preserved baseline fails on its blocked push attempt (97). Only fake pnpm ran; no installation, database/provider access or audio playback occurred. The existing full release gate and manual audio checklist were not rerun for this source-only hook change, and no new audio-performance claim is made.
@@ -658,3 +670,19 @@ Changed only the existing `qs` override to 6.16.0 and added `proxy-addr` 2.0.8, 
 The three dependency tests failed on their original triggers before the patch while the application control passed. After the patch all four passed and `pnpm audit --prod` reported no known vulnerabilities. Original finding documentation and the prior audio commits remain intact. GitHub writes and deployment remain held by the parent; no live remediation is claimed.
 
 Final verification: frozen installation, complete workspace typecheck/build (including API), all four API tests, all 76 studio unit tests, changed-source formatting, release-script syntax and whitespace checks passed. The rebuilt strict static production suite again passed five tests without retries; the optional ten-minute soak remained intentionally skipped. A fresh independent reviewer found no evidence-backed bypass/regression, confirmed both Express and body-parser use patched versions, and exercised alternate comma, constructor and proxy-trust forms. Its restricted sandbox denied the API loopback connection; the same actual-app integration test passed in the permitted parent execution environment and passed again after review. No relevant local verification remains blocked. The repository has no lint script; formatting, static guards and TypeScript are the available checks.
+
+## 2026-10-27 sandbox-preserving hosted browser route
+
+GitHub Actions (`CI=true` and `GITHUB_ACTIONS=true`) now selects the runner's preinstalled stable Chrome through Playwright's `chrome` channel. Both development and strict built-static suites inherit this choice. Other CI environments and local explicit/detected executables preserve their existing selection. All paths keep `chromiumSandbox: true` and the existing shared-memory argument. The workflow replaces browser/dependency installation with a read-only standard-path and version check. A missing browser fails the gate rather than installing it or disabling isolation.
+
+Focused configuration regressions cover hosted selection, local overrides, other providers, both required markers and shared release configuration. No application, audio, dependency or lockfile change is included. The new route still requires exact-head hosted verification after independent source review; no workflow rerun or deployment was performed to prepare it.
+
+## 2026-10-27 bounded reporter startup margin
+
+Give the nested reporter fixture a 30-second global lifecycle budget, a 45-second process guard and a 35-second readiness deadline. Keep per-test limits, reporter implementation, retry/failure expectations, SIGINT status 130, reporting and cleanup unchanged. Add a deterministic 16-second setup case to reproduce the previous early timeout, and a real stalled-setup case that still exits nonzero and emits timeout diagnostics. The underlying hosted plugin scheduling delay remains unproven; this repairs an independently reproduced too-small fixture margin rather than claiming a Chrome or application fix. No manual CI rerun, installation, security change or deployment is part of this repair.
+
+## 2026-10-27 source follow-through after concrete metadata diagnosis
+
+Set `captureGitInfo: { commit: false, diff: false }` only in the synthetic reporter fixture and add an actual nested-runner regression proving it invokes no Git process in CI mode. Preserve the normal browser configuration, source-recording workflow, failure policy, retry behavior, SIGINT and all existing budgets. Local reporter results: 16 passed, zero failed, one unchanged Windows-only SIGINT exclusion; Linux acceptance remains the hosted gate.
+
+Remove only `maximum-scale=1` from the Studio viewport. Preserve width/initial scale, verify the source contract, and extend built desktop/mobile route checks to ensure the shipped document retains it after reload. No application or audio feature is added. New source still requires independent review and exact-head hosted acceptance before merge; no production acceptance follows from local green checks.

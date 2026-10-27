@@ -1,5 +1,19 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-27 - Reporter fixture lifecycle review
+
+Reviewed the actual child spawn, readiness-file writer, fixture timeout configuration, signal handling, teardown/report assertions and reporter exit fallback after hosted run `40546485852`. The readiness loop could wait on a child that had already exited or failed to spawn, with its diagnostics hidden. Its 10-second parent deadline could also expire before the fixture's 15-second runner budget. These are test-supervision defects; the old log does not prove an application regression or a specific child-startup cause.
+
+The replacement observes error/exit/close, requires the exact readiness event, captures at most 4,000 characters per output stream and fails clearly for early exit, spawn error or an exhausted readiness budget. Other reporter, storage, browser and audio logic is unchanged. Real POSIX signal behavior still requires exact-head Linux hosted verification; the existing Windows-only SIGINT exclusion is retained.
+
+## 2026-10-27 — Public landing, browser boundary, and storage-source review
+
+Reviewed landing/router/main lifecycle, current import-validation boundary, local project deletion fixtures, static hosting/CI metadata, and browser test launch configuration at base `0c773b1d3fac72023d759508272b9d97fe6b6541`. The landing's simulated CSS workstation did not demonstrate the actual current product. The preview also lacked keyboard activation, the quick-start disclosure lacked expanded-state semantics, the feedback destination was a placeholder form, and the local browser test configuration disabled Chromium sandbox and web security.
+
+The source changes use a real silent Basic-workspace capture, proper preview button, disclosure semantics, existing owned contact page, bundled licensed Inter font, and scoped landing touch targets/focus indication. Test launch configuration now enables Chromium sandbox and removes `--no-sandbox`, `--disable-setuid-sandbox`, `--disable-web-security`, and `--enable-unsafe-swiftshader`. No host/browser account setting was changed. Four focused public-entry Playwright checks pass using installed Chrome with external requests blocked. Fifty-two existing actual-storage VM cases pass (48 import/compatibility cases and four deletion/re-save cases); these use rejecting/mocked persistence boundaries, not production/browser-project acceptance.
+
+This is a manual scoped source review, not a formal Codex Security scan or fresh dependency-advisory scan. The supported scan MCP is absent in the parent execution context. Actual published revision/runtime, device/browser audio, durable browser save/load, full release suite and ten-minute playback remain release acceptance work. `.replit` names Node20 for the static project while hosted CI names Node24; this metadata is not proof of the deployed runtime or vendor maintenance completion.
+
 ## 2026-10-19 - Post-merge database safety audit
 
 `.replit` names `scripts/post-merge.sh`, whose previous schema push could use an inherited `DATABASE_URL` without a separately reviewed target, backup, write pause or schema-operation approval. Source metadata does not prove that a GitHub merge invokes this hook or that it has run against any live target. The narrow change removes that automatic push and documents a controlled operation outside the hook. Existing static hosting metadata, release gates and free-product policy are preserved; no application, audio lifecycle, stored-project or performance implementation is changed.
@@ -358,3 +372,17 @@ The historical advisory evidence above is retained. Compatible exact overrides n
 | [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g) | URL-encoded middleware permits constructor keys, but no application `qs.stringify` sink was found; health returns constant data. No complete request-to-throw path was demonstrated. | `qs` 6.16.0 safely serializes parsed hostile constructor keys while preserving ordinary nested fields, repeated values and Buffer serialization. |
 
 The studio artifact serves static files; the API artifact separately declares `/api`. Actual deployed API exposure was not verified. A clean local audit does not prove that the deployed server has received the patched lockfile.
+
+## 2026-10-27 hosted browser selection
+
+The configuration discovered the runner's `/usr/bin/chromium` snapshot before Playwright could select its installed browser. Chromium's upstream AppArmor guidance distinguishes downloaded builds from stable Chrome at `/opt/google/chrome/chrome`, which Ubuntu's existing profile covers. The runner image's versioned installation script installs Google's stable package at that standard location. Selecting Playwright's supported `chrome` channel in GitHub CI is a bounded alternative that retains `chromiumSandbox: true`; it does not establish that a future runner launch will succeed. No AppArmor, sysctl, setuid, browser policy or sandbox flag is changed. Runtime and actual audio acceptance remain separate.
+
+## 2026-10-27 nested runner budget audit
+
+Reporter fixtures shared a 15-second global runner deadline across plugin/global setup, test collection, retries and teardown, while their enclosing process had a 25-second deadline. A known 16-second setup could not complete even though the actual reporter scenario remained correct. Only fixture lifecycle budgets change: 30 seconds global, 45 seconds parent process and 35 seconds interrupt readiness. The actual test timeout stays 10 seconds; application and full-browser timeouts are unchanged. A separate intentionally stalled setup retains a short 500 ms global deadline and must fail with a diagnostic report, so a larger ordinary startup margin cannot silently turn hangs or failures green.
+
+## 2026-10-27 optional metadata isolation and viewport audit
+
+[Playwright's captureGitInfo contract](https://playwright.dev/docs/api/class-testconfig#test-config-capture-git-info) controls optional report metadata and can default on in CI. Synthetic reporter fixtures now explicitly disable commit/diff capture so they cannot implicitly fetch repository history. A test-only child-process guard records and rejects Git invocations; with CI/GitHub markers still enabled, the old configuration failed this test and the new configuration passes. Normal full-browser metadata capture and the workflow's separately recorded exact source identity are unchanged.
+
+The Studio viewport now retains device width and initial scale while removing its maximum-scale cap. The source regression and final client/SSR-prerendered HTML verification passed. Desktop/mobile built-route browser assertions were added, but the local three-view run did not return from setup and was interrupted through its owned session; it remains unverified pending exact-head hosted acceptance. No browser setting, canvas input, audio handling, stored project or application timeout changes. Physical phone pinch-zoom and assistive-device acceptance remain unverified.

@@ -1,5 +1,17 @@
 # Performance Baseline
 
+## 2026-10-27 - Reporter readiness follow-on
+
+Hosted PR5 head `0fa253012bc404d5abedf1a64747776aedbf4de3` passed locked installation, builds and earlier unit gates, then failed the reporter suite (7 passed, 1 failed) at `fixture must begin before SIGINT`. The test used a separate 10-second readiness poll while its Playwright fixture allowed a 15-second global runner budget. Child output was discarded and early exit was not observed during the poll, so the original failure does not establish whether startup was slow or failed.
+
+This follow-on is isolated from reviewed local commit `c04476f39edb64aff3b371d85a9498183b323704`. It changes only reporter regression supervision and these required notes. It does not establish audio, browser-workflow or production acceptance. Exact local receipts and hosted outcome belong in workspace `evidence/quality-oct27/public-companions-release/`.
+
+## 2026-10-27 — Public entry quality pass
+
+Source base: `0c773b1d3fac72023d759508272b9d97fe6b6541` in isolated local worktree `quality-studio-oct27`. Fresh before desktop (1440×1000) and mobile (390×844) screenshots showed a simulated workstation preview, emoji feature icons, a long first-screen gap, and Google-hosted font requests. The real Basic workspace was captured with the default local Cyber Dojo demo and audio disabled; that 1440×1000 image is the new preview.
+
+This pass does not establish an audio-performance baseline. No playback, recording, physical MIDI, microphone, 10-minute playback run, or audible-export acceptance was performed. Existing core audio and storage implementations were preserved. Full report and exact logs: workspace `evidence/quality-oct27/public-companions/`; screenshots: `output/playwright/quality-oct27/public-companions/`.
+
 ## 2026-10-19 - Post-merge database safety
 
 At base `e7efef3485bec35f941fda2d7b0fe20899d0b892`, the configured post-merge script ran a frozen install followed by an ambient database schema push. The native fake-pnpm fixture executed that actual baseline: it logged both commands and rejected the push with exit 97. The install-failure control stopped at exit 23. This establishes source hook behavior, not historical hosting invocation or database impact. No audio, browser-project, schema, dependency or lockfile change is included; no audio performance measurement was taken.
@@ -505,3 +517,15 @@ No audio implementation, stored projects, browser data, schema, or sound assets 
 ## 2026-10-14 API dependency follow-up baseline
 
 The original production audit found three advisories in API transitive dependencies: `proxy-addr` 2.0.7 and `qs` 6.15.2. Bounded pre-patch regressions reproduced all three reported behaviors: spoofed forwarded IP selection under affected IPv6 trust ranges, bracket comma input bypassing a configured throwing array limit, and parsed attacker-controlled `constructor.isBuffer` data throwing during stringify. The actual API loopback health and ordinary parser controls passed before the dependency update. These tests establish vulnerable dependency behavior, not a complete exploit path in this application's current configuration.
+
+## 2026-10-27 hosted browser baseline
+
+Release run `40549515157` tested source `545edc3fae3d90c9e6c1d47451f946af49fa5247` on Ubuntu 24.04 image `20261012.334.1`. The reporter tests passed 14/14, but the development browser suite could not launch `/usr/bin/chromium` with the sandbox enabled. Its 94 unexpected results are browser-start failures, not demonstrated application defects; the five skipped cases and later built-release gate remain unverified. The exact runner image documents a preinstalled stable Google Chrome package. No host setting or browser installation was changed during this follow-up.
+
+## 2026-10-27 reporter startup budget baseline
+
+The next exact-head run `40555528238` at `0ae510a30c10576d20165352d2785dff68e1b16d` passed the Chrome presence/version check, all builds, 82 unit tests, 52 storage tests and six API tests. It stopped before full browser execution at 13/14 reporter tests: the first nested runner exhausted its shared 15-second global budget during plugin setup, before test collection. This does not prove the cause of the hosted scheduling delay. A deterministic 16-second setup fixture locally reproduced the insufficient global budget: zero tests collected, nonzero exit, timeout diagnostics. It makes no performance claim about the application.
+
+## 2026-10-27 fixture metadata and zoom baseline
+
+Run `40557973854` at `0ba51774c2e90cbaeda4715ba24a31c26ea32cc2` passed build/unit/API gates and 14/16 reporter tests, including Linux SIGINT. Its failure log identifies optional GitCommitInfo capture attempting a network fetch of the PR base before test collection. A new guarded nested-CLI regression reproduced an unwanted Git spawn in CI mode before the fixture correction. Separately, the shipping Studio viewport capped browser zoom with `maximum-scale=1`; a source regression failed against that cap. Neither issue is an audio-engine defect or proof of physical-device acceptance.
