@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin-wght-normal.woff2") format("woff2");
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -87,11 +95,25 @@
   --input: 0 0% 16%;
   --ring: 0 78% 48%;
 
-  --app-font-sans: 'Inter', system-ui, sans-serif;
-  --app-font-mono: 'JetBrains Mono', Menlo, monospace;
-  --app-font-display: 'Inter', system-ui, sans-serif;
+  --app-font-sans: "Inter", system-ui, sans-serif;
+  --app-font-mono: "JetBrains Mono", Menlo, monospace;
+  --app-font-display: "Inter", system-ui, sans-serif;
   --radius: 0.375rem;
   --spacing: 0.25rem;
+}
+
+.studio-landing .text-primary {
+  color: hsl(var(--primary-readable));
+}
+
+.studio-landing button,
+.studio-landing nav a {
+  min-height: 44px;
+}
+
+.studio-landing :is(button, a):focus-visible {
+  outline: 2px solid hsl(var(--primary-readable));
+  outline-offset: 4px;
 }
 
 @layer base {
@@ -373,7 +395,8 @@
 }
 
 @keyframes lesson-highlight-pulse {
-  0%, 100% {
+  0%,
+  100% {
     outline-color: hsl(var(--neon));
     outline-offset: 3px;
   }
@@ -529,7 +552,8 @@ html.studio-reduce-motion .studio-clip-led {
 
 /* Circuit node pulse */
 @keyframes studio-circuit-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.2;
     r: 2;
   }
@@ -541,10 +565,12 @@ html.studio-reduce-motion .studio-clip-led {
 
 /* Pixel blink for arcade */
 @keyframes studio-pixel-blink {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0;
   }
-  10%, 30% {
+  10%,
+  30% {
     opacity: 0.7;
   }
   20% {
@@ -554,10 +580,13 @@ html.studio-reduce-motion .studio-clip-led {
 
 /* CRT flicker */
 @keyframes studio-crt-flicker {
-  0%, 97%, 100% {
+  0%,
+  97%,
+  100% {
     opacity: 0;
   }
-  98%, 99% {
+  98%,
+  99% {
     opacity: 0.04;
   }
 }
@@ -707,7 +736,8 @@ body[data-perf="true"] input[type="range"],
 body[data-perf="true"] [role="slider"],
 body[data-perf="true"] [class*="meter"],
 body[data-perf="true"] [class*="fader"] {
-  transition-property: background-color, border-color, color, opacity, transform !important;
+  transition-property:
+    background-color, border-color, color, opacity, transform !important;
   transition-duration: 80ms !important;
 }
 

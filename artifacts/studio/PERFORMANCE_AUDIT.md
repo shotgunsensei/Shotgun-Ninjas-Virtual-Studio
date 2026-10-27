@@ -1,5 +1,13 @@
 # Performance Audit — Shotgun Ninjas Virtual Studio
 
+## 2026-10-27 — Public landing, browser boundary, and storage-source review
+
+Reviewed landing/router/main lifecycle, current import-validation boundary, local project deletion fixtures, static hosting/CI metadata, and browser test launch configuration at base `0c773b1d3fac72023d759508272b9d97fe6b6541`. The landing's simulated CSS workstation did not demonstrate the actual current product. The preview also lacked keyboard activation, the quick-start disclosure lacked expanded-state semantics, the feedback destination was a placeholder form, and the local browser test configuration disabled Chromium sandbox and web security.
+
+The source changes use a real silent Basic-workspace capture, proper preview button, disclosure semantics, existing owned contact page, bundled licensed Inter font, and scoped landing touch targets/focus indication. Test launch configuration now enables Chromium sandbox and removes `--no-sandbox`, `--disable-setuid-sandbox`, `--disable-web-security`, and `--enable-unsafe-swiftshader`. No host/browser account setting was changed. Four focused public-entry Playwright checks pass using installed Chrome with external requests blocked. Fifty-two existing actual-storage VM cases pass (48 import/compatibility cases and four deletion/re-save cases); these use rejecting/mocked persistence boundaries, not production/browser-project acceptance.
+
+This is a manual scoped source review, not a formal Codex Security scan or fresh dependency-advisory scan. The supported scan MCP is absent in the parent execution context. Actual published revision/runtime, device/browser audio, durable browser save/load, full release suite and ten-minute playback remain release acceptance work. `.replit` names Node20 for the static project while hosted CI names Node24; this metadata is not proof of the deployed runtime or vendor maintenance completion.
+
 ## 2026-10-19 - Post-merge database safety audit
 
 `.replit` names `scripts/post-merge.sh`, whose previous schema push could use an inherited `DATABASE_URL` without a separately reviewed target, backup, write pause or schema-operation approval. Source metadata does not prove that a GitHub merge invokes this hook or that it has run against any live target. The narrow change removes that automatic push and documents a controlled operation outside the hook. Existing static hosting metadata, release gates and free-product policy are preserved; no application, audio lifecycle, stored-project or performance implementation is changed.

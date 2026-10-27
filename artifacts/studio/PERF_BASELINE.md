@@ -1,5 +1,11 @@
 # Performance Baseline
 
+## 2026-10-27 — Public entry quality pass
+
+Source base: `0c773b1d3fac72023d759508272b9d97fe6b6541` in isolated local worktree `quality-studio-oct27`. Fresh before desktop (1440×1000) and mobile (390×844) screenshots showed a simulated workstation preview, emoji feature icons, a long first-screen gap, and Google-hosted font requests. The real Basic workspace was captured with the default local Cyber Dojo demo and audio disabled; that 1440×1000 image is the new preview.
+
+This pass does not establish an audio-performance baseline. No playback, recording, physical MIDI, microphone, 10-minute playback run, or audible-export acceptance was performed. Existing core audio and storage implementations were preserved. Full report and exact logs: workspace `evidence/quality-oct27/public-companions/`; screenshots: `output/playwright/quality-oct27/public-companions/`.
+
 ## 2026-10-19 - Post-merge database safety
 
 At base `e7efef3485bec35f941fda2d7b0fe20899d0b892`, the configured post-merge script ran a frozen install followed by an ambient database schema push. The native fake-pnpm fixture executed that actual baseline: it logged both commands and rejected the push with exit 97. The install-failure control stopped at exit 23. This establishes source hook behavior, not historical hosting invocation or database impact. No audio, browser-project, schema, dependency or lockfile change is included; no audio performance measurement was taken.

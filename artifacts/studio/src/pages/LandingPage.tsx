@@ -1,38 +1,48 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
+import {
+  ArrowRight,
+  ChevronDown,
+  GraduationCap,
+  Keyboard,
+  Library,
+  Music,
+  SlidersHorizontal,
+  Unlock,
+} from "lucide-react";
 import { Logo } from "../components/Logo";
 import { APP_VERSION } from "../lib/version";
 
 const FEATURES = [
   {
-    icon: "🥁",
+    icon: Music,
     title: "Beat-making in the browser",
     desc: "Start in Basic with an editable beat, add bass and a tune, then save your song. Switch to Advanced for the full studio.",
   },
   {
-    icon: "🎛️",
-    title: "Pro-grade mixer",
-    desc: "Per-track EQ, FX rack, four global send buses, mix presets, and a master limiter — all running in Web Audio.",
+    icon: SlidersHorizontal,
+    title: "A complete mixing workspace",
+    desc: "Per-track EQ, an FX rack, global send buses, mix presets, and a master limiter, running in Web Audio.",
   },
   {
-    icon: "🎹",
+    icon: Keyboard,
     title: "Piano roll + sequencer",
-    desc: "Draw notes or record live from a MIDI controller. Supports velocity, groove swing, and clip-based arrangement.",
+    desc: "Draw notes or record from a MIDI controller. Shape velocity, groove swing, and a clip-based arrangement.",
   },
   {
-    icon: "🎷",
-    title: "39 instruments, 19 packs",
-    desc: "Twelve HQ CC0 sampled instruments, including Kawai and Steinway grands. Upload your own sound to create a keyboard instrument.",
+    icon: Library,
+    title: "Instruments and sound packs",
+    desc: "Explore the included instruments and samples, or upload your own sound to make a keyboard instrument.",
   },
   {
-    icon: "🧠",
+    icon: GraduationCap,
     title: "Learn by creating",
-    desc: "An optional tutor explains one small task at a time. Turn it on or off in Basic or Advanced, with more practice in Lessons and The Dojo.",
+    desc: "An optional tutor explains one small task at a time. Keep learning in Basic, Advanced, Lessons, and The Dojo.",
   },
   {
-    icon: "⚡",
-    title: "Free forever",
-    desc: "No accounts, no paywalls, no ads. Your projects live in your browser. Export WAV or MP3 anytime.",
+    icon: Unlock,
+    title: "Free to make it yours",
+    desc: "No accounts, paywalls, or ads. Your projects stay in this browser. Export your music and keep a project backup.",
   },
 ];
 
@@ -77,7 +87,9 @@ const TUTORIALS = [
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
-  const [pwaPrompt, setPwaPrompt] = useState<{ prompt: () => void } | null>(null);
+  const [pwaPrompt, setPwaPrompt] = useState<{ prompt: () => void } | null>(
+    null,
+  );
   const [tutorialOpen, setTutorialOpen] = useState(false);
 
   useEffect(() => {
@@ -94,18 +106,28 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
+    <div className="studio-landing min-h-screen bg-background text-foreground flex flex-col font-sans">
       {/* Nav */}
-      <nav className="h-14 border-b border-border bg-graphite/80 backdrop-blur sticky top-0 z-50 flex items-center px-6 gap-4">
+      <nav
+        aria-label="Studio navigation"
+        className="min-h-20 border-b border-border bg-graphite/90 backdrop-blur sticky top-0 z-50 flex items-center px-5 sm:px-8 gap-4"
+      >
         <div className="flex items-center gap-3 flex-1">
           <Logo className="w-8 h-8" />
           <div className="leading-tight hidden sm:block">
-            <div className="font-display text-sm tracking-[0.2em] text-foreground/90">SHOTGUN NINJAS</div>
-            <div className="font-mono text-[9px] tracking-[0.3em] text-primary uppercase">Virtual Studio</div>
+            <div className="font-display text-sm tracking-[0.2em] text-foreground/90">
+              SHOTGUN NINJAS
+            </div>
+            <div className="font-mono text-[9px] tracking-[0.3em] text-primary uppercase">
+              Virtual Studio
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <a href="/changelog" className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors hidden sm:block">
+          <a
+            href="/changelog"
+            className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors hidden sm:block"
+          >
             Changelog
           </a>
           <button
@@ -118,17 +140,16 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section className="relative overflow-hidden flex flex-col items-center justify-center px-6 py-24 text-center">
+      <section className="relative overflow-hidden flex flex-col items-center justify-center px-6 py-16 sm:py-20 text-center">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_hsl(var(--primary)/0.12)_0%,_transparent_70%)] pointer-events-none" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,_hsl(var(--neon)/0.06)_0%,_transparent_60%)] pointer-events-none" />
         <div className="relative max-w-3xl space-y-6">
           <div className="inline-flex items-center gap-2 border border-primary/30 bg-primary/10 rounded-full px-4 py-1.5 font-mono text-[11px] uppercase tracking-widest text-primary mb-2">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            v{APP_VERSION} · Free & Open in Your Browser
+            Free music studio · No account required
           </div>
-          <h1 className="font-display text-5xl sm:text-6xl md:text-7xl tracking-tight leading-none">
-            Make Beats{" "}
-            <span className="text-primary">in Your Browser</span>
+          <h1 className="font-display text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
+            Make Beats <span className="text-primary">in Your Browser</span>
           </h1>
           <p className="text-lg sm:text-xl text-foreground/70 max-w-xl mx-auto leading-relaxed">
             Make your first song in Basic, or explore every control in Advanced.
@@ -149,7 +170,7 @@ export default function LandingPage() {
               Load Demo
             </button>
           </div>
-            {pwaPrompt?.prompt && (
+          {pwaPrompt?.prompt && (
             <button
               onClick={() => pwaPrompt.prompt()}
               className="text-xs font-mono text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"
@@ -160,61 +181,77 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Actual local application interface, not a simulated workstation. */}
+      <section
+        className="px-6 py-8 max-w-5xl mx-auto w-full"
+        aria-label="Studio workspace preview"
+      >
+        <button
+          type="button"
+          onClick={() => goToStudio()}
+          aria-label="Open the studio from the workspace preview"
+          className="group w-full overflow-hidden rounded-2xl border border-border bg-graphite text-left shadow-2xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+        >
+          <img
+            src={`${import.meta.env.BASE_URL}images/studio-workspace.png`}
+            width="1440"
+            height="1000"
+            loading="lazy"
+            decoding="async"
+            alt="The Basic studio workspace, with the drum sequencer and music tracks"
+            className="h-auto w-full"
+          />
+          <span className="flex min-h-14 items-center justify-between gap-3 border-t border-border px-5 py-3 text-sm text-foreground/80">
+            <span>Explore the Basic workspace</span>
+            <ArrowRight
+              className="h-4 w-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+          </span>
+        </button>
+      </section>
+
       {/* What is this? */}
       <section className="px-6 py-16 max-w-3xl mx-auto w-full">
         <div className="border border-border rounded-xl bg-graphite/40 p-8">
-          <h2 className="font-display text-2xl tracking-wide mb-4">What is this?</h2>
+          <h2 className="font-display text-2xl tracking-wide mb-4">
+            What is this?
+          </h2>
           <p className="text-foreground/75 leading-relaxed mb-4">
-            Shotgun Ninjas Virtual Studio is a browser-native digital audio workstation built by Shotgun Ninjas Productions. It runs entirely in your browser using the Web Audio API — no plugins, no Flash, no cloud processing required.
+            Shotgun Ninjas Virtual Studio is a browser-native digital audio
+            workstation built by Shotgun Ninjas Productions. It runs entirely in
+            your browser using the Web Audio API — no plugins, no Flash, no
+            cloud processing required.
           </p>
           <p className="text-foreground/75 leading-relaxed">
-            Layer drums, melodies, bass, guitar, and vocals. Mix with a full FX rack and EQ. Record from a MIDI controller. Export your finished track as a WAV or MP3 — all without ever leaving the tab.
+            Layer drums, melodies, bass, guitar, and vocals. Mix with a full FX
+            rack and EQ. Record from a MIDI controller. Export your finished
+            track as a WAV or MP3 — all without ever leaving the tab.
           </p>
-        </div>
-      </section>
-
-      {/* Screenshot / mockup area */}
-      <section className="px-6 py-8 max-w-5xl mx-auto w-full">
-        <div
-          className="rounded-xl border border-border overflow-hidden bg-graphite/60 aspect-video flex items-center justify-center relative cursor-pointer group"
-          onClick={() => goToStudio()}
-          title="Open the studio"
-        >
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(var(--primary)/0.08)_0%,_transparent_70%)]" />
-          <div className="text-center space-y-3 relative z-10">
-            <Logo className="w-20 h-20 mx-auto opacity-60 group-hover:opacity-90 transition-opacity" />
-            <div className="font-display text-2xl tracking-widest text-foreground/50 group-hover:text-foreground/80 transition-colors">
-              Click to open the studio
-            </div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.4em] text-primary/60 group-hover:text-primary transition-colors">
-              Full DAW in your browser
-            </div>
-          </div>
-          {/* Fake UI hints */}
-          <div className="absolute top-3 left-3 right-3 h-8 rounded bg-graphite/80 border border-border/40 flex items-center gap-2 px-3 opacity-30">
-            <div className="w-4 h-4 rounded bg-primary/60" />
-            <div className="w-24 h-2 rounded bg-foreground/30" />
-            <div className="flex-1" />
-            <div className="w-12 h-2 rounded bg-foreground/20" />
-            <div className="w-12 h-2 rounded bg-foreground/20" />
-            <div className="w-12 h-2 rounded bg-primary/40" />
-          </div>
-          <div className="absolute bottom-3 left-3 right-3 h-6 rounded bg-graphite/70 border border-border/30 opacity-20" />
         </div>
       </section>
 
       {/* Features */}
       <section className="px-6 py-16 max-w-5xl mx-auto w-full">
-        <h2 className="font-display text-3xl tracking-wide text-center mb-10">Everything you need to make music</h2>
+        <h2 className="font-display text-3xl tracking-wide text-center mb-10">
+          Everything you need to make music
+        </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {FEATURES.map((f) => (
             <div
               key={f.title}
               className="border border-border rounded-xl bg-graphite/40 p-6 hover:border-primary/40 transition-colors"
             >
-              <div className="text-3xl mb-4">{f.icon}</div>
-              <h3 className="font-display text-base tracking-wide mb-2">{f.title}</h3>
-              <p className="text-sm text-foreground/65 leading-relaxed">{f.desc}</p>
+              <f.icon
+                className="mb-5 h-7 w-7 text-primary"
+                aria-hidden="true"
+              />
+              <h3 className="font-display text-base tracking-wide mb-2">
+                {f.title}
+              </h3>
+              <p className="text-sm text-foreground/65 leading-relaxed">
+                {f.desc}
+              </p>
             </div>
           ))}
         </div>
@@ -223,10 +260,19 @@ export default function LandingPage() {
       {/* Export CTA */}
       <section className="px-6 py-10 max-w-3xl mx-auto w-full">
         <div className="border border-primary/30 rounded-xl bg-primary/5 p-8 text-center">
-          <div className="font-mono text-[11px] uppercase tracking-[0.4em] text-primary mb-3">Quick start</div>
-          <h2 className="font-display text-2xl tracking-wide mb-4">Export Your First Beat</h2>
+          <div className="font-mono text-[11px] uppercase tracking-[0.4em] text-primary mb-3">
+            Quick start
+          </div>
+          <h2 className="font-display text-2xl tracking-wide mb-4">
+            Export Your First Beat
+          </h2>
           <p className="text-foreground/65 mb-6 leading-relaxed">
-            Open the studio, load the Lo-Fi Smoke demo, then hit <kbd className="font-mono text-xs border border-border rounded px-1.5 py-0.5 bg-graphite">B</kbd> to bounce. Your first track in under a minute.
+            Open the studio, load the Lo-Fi Smoke demo, then hit{" "}
+            <kbd className="font-mono text-xs border border-border rounded px-1.5 py-0.5 bg-graphite">
+              B
+            </kbd>{" "}
+            to bounce. Save an editable project backup before you export your
+            finished audio.
           </p>
           <button
             onClick={() => goToStudio("?demo=lofi")}
@@ -241,27 +287,43 @@ export default function LandingPage() {
       <section className="px-6 py-16 max-w-5xl mx-auto w-full">
         <button
           onClick={() => setTutorialOpen((v) => !v)}
+          aria-expanded={tutorialOpen}
+          aria-controls="studio-tutorials"
           className="w-full flex items-center justify-between border border-border rounded-xl bg-graphite/40 px-6 py-4 hover:border-primary/40 transition-colors mb-1"
         >
           <div className="flex items-center gap-3">
-            <span className="font-display text-xl tracking-wide">Get Started</span>
+            <span className="font-display text-xl tracking-wide">
+              Get Started
+            </span>
             <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-0.5">
               6 steps
             </span>
           </div>
-          <span className="font-mono text-muted-foreground text-sm">{tutorialOpen ? "▲" : "▼"}</span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${tutorialOpen ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          />
         </button>
         {tutorialOpen && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+          <div
+            id="studio-tutorials"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4"
+          >
             {TUTORIALS.map((t) => (
               <button
                 key={t.step}
                 onClick={() => goToStudio(t.param)}
                 className="text-left border border-border rounded-xl bg-graphite/40 p-5 hover:border-primary/40 transition-colors group"
               >
-                <div className="font-mono text-[10px] uppercase tracking-widest text-primary mb-2">{t.step}</div>
-                <div className="font-display text-base tracking-wide mb-2 group-hover:text-primary transition-colors">{t.title}</div>
-                <p className="text-xs text-foreground/60 leading-relaxed">{t.desc}</p>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-primary mb-2">
+                  {t.step}
+                </div>
+                <div className="font-display text-base tracking-wide mb-2 group-hover:text-primary transition-colors">
+                  {t.title}
+                </div>
+                <p className="text-xs text-foreground/60 leading-relaxed">
+                  {t.desc}
+                </p>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-3 group-hover:text-primary transition-colors">
                   Open studio →
                 </div>
@@ -277,16 +339,35 @@ export default function LandingPage() {
           <div className="flex items-center gap-3">
             <Logo className="w-7 h-7" />
             <div>
-              <div className="font-display text-sm tracking-[0.2em]">SHOTGUN NINJAS</div>
-              <div className="font-mono text-[9px] tracking-[0.3em] text-muted-foreground uppercase">Free forever · No accounts</div>
+              <div className="font-display text-sm tracking-[0.2em]">
+                SHOTGUN NINJAS
+              </div>
+              <div className="font-mono text-[9px] tracking-[0.3em] text-muted-foreground uppercase">
+                Free forever · No accounts
+              </div>
             </div>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2">
-            <a href="/changelog" className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors">Changelog</a>
-            <a href="/credits" className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors">Credits</a>
-            <a href="/press" className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors">Press</a>
             <a
-              href="https://docs.google.com/forms/d/e/1FAIpQLSfeedback/viewform"
+              href="/changelog"
+              className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Changelog
+            </a>
+            <a
+              href="/credits"
+              className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Credits
+            </a>
+            <a
+              href="/press"
+              className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Press
+            </a>
+            <a
+              href="https://shotgunninjas.com/contact"
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"

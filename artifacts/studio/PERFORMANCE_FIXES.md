@@ -1,5 +1,11 @@
 # Performance Fixes — Shotgun Ninjas Virtual Studio
 
+## 2026-10-27 — Credible public entry and safe isolated QA
+
+The public entry now presents the real Basic workspace, clearer free/no-account messaging, six existing capabilities with Lucide icons, accessible keyboard launch and tutorial disclosure, an owned feedback destination, local licensed typography and visible 44px landing controls. Audio/DSP, free-product rules, project formats, modes, lessons and DAW control layout are unchanged. The real preview asset is `public/images/studio-workspace.png`; bundled font licensing is in `public/fonts/Inter-LICENSE.txt`.
+
+Validation: four new public-entry browser tests passed on 2026-10-27; frontend TypeScript passed; 52 existing storage import/delete VM cases passed. Client/SSR/prerender build results and hashes are recorded in the final local source manifest under workspace `evidence/quality-oct27/public-companions/`. Before/after desktop/mobile screenshots were inspected. The first browser font assertion failed because it checked before the lazy route's font was loaded; the final test waits for a loaded Inter FontFace and rejects Google-font resource requests. No audio throughput, latency or memory-improvement claim is made. No install, provider/account action, database change, commit or deployment occurred.
+
 ## 2026-10-19 - Post-merge dependency setup only
 
 Removed automatic database push from `scripts/post-merge.sh`, retained `pnpm install --frozen-lockfile` and failure propagation, added `test:post-merge` plus the dependency-free actual-hook fixture, and documented target/backup/write-pause/approval requirements in `docs/POST_MERGE_DATABASE_SAFETY.md`. Candidate native checks passed 2/2: exact single frozen-install call and install failure stopping at 23. The preserved baseline fails on its blocked push attempt (97). Only fake pnpm ran; no installation, database/provider access or audio playback occurred. The existing full release gate and manual audio checklist were not rerun for this source-only hook change, and no new audio-performance claim is made.
