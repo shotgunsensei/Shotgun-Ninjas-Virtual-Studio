@@ -517,3 +517,7 @@ No audio implementation, stored projects, browser data, schema, or sound assets 
 ## 2026-10-14 API dependency follow-up baseline
 
 The original production audit found three advisories in API transitive dependencies: `proxy-addr` 2.0.7 and `qs` 6.15.2. Bounded pre-patch regressions reproduced all three reported behaviors: spoofed forwarded IP selection under affected IPv6 trust ranges, bracket comma input bypassing a configured throwing array limit, and parsed attacker-controlled `constructor.isBuffer` data throwing during stringify. The actual API loopback health and ordinary parser controls passed before the dependency update. These tests establish vulnerable dependency behavior, not a complete exploit path in this application's current configuration.
+
+## 2026-10-27 hosted browser baseline
+
+Release run `40549515157` tested source `545edc3fae3d90c9e6c1d47451f946af49fa5247` on Ubuntu 24.04 image `20261012.334.1`. The reporter tests passed 14/14, but the development browser suite could not launch `/usr/bin/chromium` with the sandbox enabled. Its 94 unexpected results are browser-start failures, not demonstrated application defects; the five skipped cases and later built-release gate remain unverified. The exact runner image documents a preinstalled stable Google Chrome package. No host setting or browser installation was changed during this follow-up.

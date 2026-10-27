@@ -372,3 +372,7 @@ The historical advisory evidence above is retained. Compatible exact overrides n
 | [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g) | URL-encoded middleware permits constructor keys, but no application `qs.stringify` sink was found; health returns constant data. No complete request-to-throw path was demonstrated. | `qs` 6.16.0 safely serializes parsed hostile constructor keys while preserving ordinary nested fields, repeated values and Buffer serialization. |
 
 The studio artifact serves static files; the API artifact separately declares `/api`. Actual deployed API exposure was not verified. A clean local audit does not prove that the deployed server has received the patched lockfile.
+
+## 2026-10-27 hosted browser selection
+
+The configuration discovered the runner's `/usr/bin/chromium` snapshot before Playwright could select its installed browser. Chromium's upstream AppArmor guidance distinguishes downloaded builds from stable Chrome at `/opt/google/chrome/chrome`, which Ubuntu's existing profile covers. The runner image's versioned installation script installs Google's stable package at that standard location. Selecting Playwright's supported `chrome` channel in GitHub CI is a bounded alternative that retains `chromiumSandbox: true`; it does not establish that a future runner launch will succeed. No AppArmor, sysctl, setuid, browser policy or sandbox flag is changed. Runtime and actual audio acceptance remain separate.

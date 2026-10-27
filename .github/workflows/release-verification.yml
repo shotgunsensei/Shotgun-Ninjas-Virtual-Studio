@@ -29,7 +29,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @workspace/studio exec playwright install --with-deps chromium
+      - name: Verify runner-provided Chrome
+        run: |
+          test -x /opt/google/chrome/chrome
+          google-chrome --version
       - name: Record verified source
         run: git rev-parse HEAD
       - run: pnpm verify:release

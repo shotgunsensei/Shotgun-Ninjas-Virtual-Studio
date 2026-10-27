@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { platform } from "os";
+import { studioBrowserOptions } from "./scripts/playwright-browser-options";
 
 const chromiumExecutablePath = (() => {
   const envPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
@@ -60,13 +61,7 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        launchOptions: {
-          chromiumSandbox: true,
-          ...(chromiumExecutablePath
-            ? { executablePath: chromiumExecutablePath }
-            : {}),
-          args: ["--disable-dev-shm-usage"],
-        },
+        ...studioBrowserOptions(process.env, chromiumExecutablePath),
       },
     },
   ],
