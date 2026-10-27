@@ -521,3 +521,7 @@ The original production audit found three advisories in API transitive dependenc
 ## 2026-10-27 hosted browser baseline
 
 Release run `40549515157` tested source `545edc3fae3d90c9e6c1d47451f946af49fa5247` on Ubuntu 24.04 image `20261012.334.1`. The reporter tests passed 14/14, but the development browser suite could not launch `/usr/bin/chromium` with the sandbox enabled. Its 94 unexpected results are browser-start failures, not demonstrated application defects; the five skipped cases and later built-release gate remain unverified. The exact runner image documents a preinstalled stable Google Chrome package. No host setting or browser installation was changed during this follow-up.
+
+## 2026-10-27 reporter startup budget baseline
+
+The next exact-head run `40555528238` at `0ae510a30c10576d20165352d2785dff68e1b16d` passed the Chrome presence/version check, all builds, 82 unit tests, 52 storage tests and six API tests. It stopped before full browser execution at 13/14 reporter tests: the first nested runner exhausted its shared 15-second global budget during plugin setup, before test collection. This does not prove the cause of the hosted scheduling delay. A deterministic 16-second setup fixture locally reproduced the insufficient global budget: zero tests collected, nonzero exit, timeout diagnostics. It makes no performance claim about the application.

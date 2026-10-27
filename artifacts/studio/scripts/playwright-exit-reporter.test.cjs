@@ -33,8 +33,8 @@ function observeFixture(child, directory) {
   const diagnostics = () => `stdout:\n${stdout}\nstderr:\n${stderr}`;
   return {
     exited,
-    async ready(timeout = 20_000) {
-      // The fixture has a 15s global runner budget. Allow its launch to finish,
+    async ready(timeout = 35_000) {
+      // The fixture has a 30s global runner budget. Allow its launch to finish,
       // but reject a dead/failed child immediately rather than waiting blindly.
       const deadline = Date.now() + timeout;
       const eventsPath = path.join(directory, "events");
@@ -65,7 +65,7 @@ function fixture(scenario, extraArgs = []) {
   try {
     const result = spawnSync(process.execPath, [cli, "test", "-c", config, ...extraArgs], {
       env: { ...process.env, REPORTER_FIXTURE_DIR: directory, REPORTER_FIXTURE_SCENARIO: scenario },
-      encoding: "utf8", timeout: 25_000,
+      encoding: "utf8", timeout: 45_000,
     });
     assert.ifError(result.error);
     assert.equal(result.signal, null);
@@ -98,6 +98,21 @@ test("global setup failure stays nonzero and produces its report", () => {
   const result = fixture("global-error");
   assert.equal(result.status, 1);
   assert.match(JSON.stringify(result.report.errors), /deterministic global setup failure/);
+});
+
+test("bounded startup tolerates a cold setup without truncating retries or teardown", () => {
+  const result = fixture("delayed-setup");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(result.events, ["setup-finished", "attempt:0", "attempt:1", "later-finished", "teardown-finished"]);
+  assert.equal(result.report.stats.flaky, 1);
+  assert.equal(result.report.stats.expected, 1);
+});
+
+test("global timeouts remain nonzero and produce diagnostic reports", () => {
+  const result = fixture("global-timeout");
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /status: timedout/);
+  assert.match(JSON.stringify(result.report.errors), /Timed out/i);
 });
 
 test("expected failures follow Playwright's result policy", () => {

@@ -6,9 +6,9 @@ module.exports = {
   workers: 1,
   retries: 2,
   timeout: 10_000,
-  globalTimeout: 15_000,
+  globalTimeout: process.env.REPORTER_FIXTURE_SCENARIO === "global-timeout" ? 500 : 30_000,
   outputDir: path.join(process.env.REPORTER_FIXTURE_DIR, "results"),
-  globalSetup: process.env.REPORTER_FIXTURE_SCENARIO === "global-error"
+  globalSetup: ["global-error", "delayed-setup", "global-timeout"].includes(process.env.REPORTER_FIXTURE_SCENARIO)
     ? require.resolve("./global-setup.cjs") : undefined,
   globalTeardown: require.resolve("./global-teardown.cjs"),
   reporter: [
