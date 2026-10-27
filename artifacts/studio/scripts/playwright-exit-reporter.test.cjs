@@ -60,11 +60,12 @@ function observeFixture(child, directory) {
   };
 }
 
-function fixture(scenario, extraArgs = []) {
+function fixture(scenario, extraArgs = [], { forbidGit = false } = {}) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "studio-reporter-"));
   try {
-    const result = spawnSync(process.execPath, [cli, "test", "-c", config, ...extraArgs], {
-      env: { ...process.env, REPORTER_FIXTURE_DIR: directory, REPORTER_FIXTURE_SCENARIO: scenario },
+    const preload = forbidGit ? ["--require", path.join(__dirname, "reporter-fixtures/forbid-git.cjs")] : [];
+    const result = spawnSync(process.execPath, [...preload, cli, "test", "-c", config, ...extraArgs], {
+      env: { ...process.env, ...(forbidGit ? { CI: "true", GITHUB_ACTIONS: "true" } : {}), REPORTER_FIXTURE_DIR: directory, REPORTER_FIXTURE_SCENARIO: scenario },
       encoding: "utf8", timeout: 45_000,
     });
     assert.ifError(result.error);
@@ -72,7 +73,9 @@ function fixture(scenario, extraArgs = []) {
     const events = existsSync(path.join(directory, "events"))
       ? readFileSync(path.join(directory, "events"), "utf8").trim().split("\n") : [];
     const report = JSON.parse(readFileSync(path.join(directory, "report.json"), "utf8"));
-    return { ...result, events, report };
+    const gitCalls = existsSync(path.join(directory, "git-calls"))
+      ? readFileSync(path.join(directory, "git-calls"), "utf8").trim().split("\n") : [];
+    return { ...result, events, report, gitCalls };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -85,6 +88,14 @@ test("fail once, pass on retry: later tests, teardown, and reports finish", () =
   assert.equal(result.report.stats.flaky, 1);
   assert.equal(result.report.stats.expected, 1);
   assert.equal(result.report.stats.unexpected, 0);
+});
+
+test("synthetic reporter runners do not inspect or fetch Git metadata in CI", () => {
+  const result = fixture("retry", [], { forbidGit: true });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(result.gitCalls, []);
+  assert.deepEqual(result.events, ["attempt:0", "attempt:1", "later-finished", "teardown-finished"]);
+  assert.equal(result.report.stats.flaky, 1);
 });
 
 test("exhausted retries stay nonzero and still finish later tests and teardown", () => {

@@ -525,3 +525,7 @@ Release run `40549515157` tested source `545edc3fae3d90c9e6c1d47451f946af49fa524
 ## 2026-10-27 reporter startup budget baseline
 
 The next exact-head run `40555528238` at `0ae510a30c10576d20165352d2785dff68e1b16d` passed the Chrome presence/version check, all builds, 82 unit tests, 52 storage tests and six API tests. It stopped before full browser execution at 13/14 reporter tests: the first nested runner exhausted its shared 15-second global budget during plugin setup, before test collection. This does not prove the cause of the hosted scheduling delay. A deterministic 16-second setup fixture locally reproduced the insufficient global budget: zero tests collected, nonzero exit, timeout diagnostics. It makes no performance claim about the application.
+
+## 2026-10-27 fixture metadata and zoom baseline
+
+Run `40557973854` at `0ba51774c2e90cbaeda4715ba24a31c26ea32cc2` passed build/unit/API gates and 14/16 reporter tests, including Linux SIGINT. Its failure log identifies optional GitCommitInfo capture attempting a network fetch of the PR base before test collection. A new guarded nested-CLI regression reproduced an unwanted Git spawn in CI mode before the fixture correction. Separately, the shipping Studio viewport capped browser zoom with `maximum-scale=1`; a source regression failed against that cap. Neither issue is an audio-engine defect or proof of physical-device acceptance.

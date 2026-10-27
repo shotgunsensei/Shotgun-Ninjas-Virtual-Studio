@@ -1,6 +1,8 @@
 const path = require("node:path");
 
 module.exports = {
+  // Synthetic outcome tests need no commit/diff metadata or implicit git fetch.
+  captureGitInfo: { commit: false, diff: false },
   testDir: __dirname,
   testMatch: "retry.spec.cjs",
   workers: 1,

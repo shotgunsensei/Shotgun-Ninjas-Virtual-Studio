@@ -680,3 +680,9 @@ Focused configuration regressions cover hosted selection, local overrides, other
 ## 2026-10-27 bounded reporter startup margin
 
 Give the nested reporter fixture a 30-second global lifecycle budget, a 45-second process guard and a 35-second readiness deadline. Keep per-test limits, reporter implementation, retry/failure expectations, SIGINT status 130, reporting and cleanup unchanged. Add a deterministic 16-second setup case to reproduce the previous early timeout, and a real stalled-setup case that still exits nonzero and emits timeout diagnostics. The underlying hosted plugin scheduling delay remains unproven; this repairs an independently reproduced too-small fixture margin rather than claiming a Chrome or application fix. No manual CI rerun, installation, security change or deployment is part of this repair.
+
+## 2026-10-27 source follow-through after concrete metadata diagnosis
+
+Set `captureGitInfo: { commit: false, diff: false }` only in the synthetic reporter fixture and add an actual nested-runner regression proving it invokes no Git process in CI mode. Preserve the normal browser configuration, source-recording workflow, failure policy, retry behavior, SIGINT and all existing budgets. Local reporter results: 16 passed, zero failed, one unchanged Windows-only SIGINT exclusion; Linux acceptance remains the hosted gate.
+
+Remove only `maximum-scale=1` from the Studio viewport. Preserve width/initial scale, verify the source contract, and extend built desktop/mobile route checks to ensure the shipped document retains it after reload. No application or audio feature is added. New source still requires independent review and exact-head hosted acceptance before merge; no production acceptance follows from local green checks.
