@@ -4,6 +4,7 @@ modules = ["nodejs-20", "web", "bash"]
 router = "application"
 deploymentTarget = "static"
 publicDir = "artifacts/studio/dist/public"
+build = "NODE_ENV=production BASE_PATH=/ pnpm --filter @workspace/studio run build"
 
 # Only known client routes receive the app shell. Missing assets and API paths
 # must retain their real 404 status. Republish to activate these static rules.
