@@ -2,6 +2,9 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "test:post-merge": "node --test scripts/tests/post-merge.test.mjs",
     "verify:release": "node scripts/verify-release.mjs",

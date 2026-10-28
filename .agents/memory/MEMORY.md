@@ -1,2 +1,3 @@
 - [Imported artifact registration](imported-artifact-registration.md) — a checked-in artifact manifest may not create a live registry entry after GitHub import.
 - [Video artifact frame wrappers](video-artifact-frame-wrappers.md) — absolutely positioned scenes need a full-frame transition wrapper or clipping can hide the entire film.
+- [Codegen verification](codegen-verification.md) — Orval may log generation failures without failing the command; verify output files as well as exit status.
